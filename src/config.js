@@ -137,56 +137,64 @@ export const LEVELS = [
     gapScale: 1.00, clearChance: 0.13,
     turretHp: 3, turretCooldown: 1.75, turretRange: 300,
     interceptorSpeed: 172, interceptorSpawn: 1.50, interceptorHp: 2,
-    foes: [], tune: 0 },
+    foes: [],
+    towers: ['gun'], tune: 0 },
 
   { name: 'OSMIUM', subtitle: 'DENSEST ALLOY AFLOAT — LINE HULL',
     theme: 'conduit', seed: 0x051f1ed, length: 14500,
     gapScale: 0.86, clearChance: 0.09,
     turretHp: 4, turretCooldown: 1.45, turretRange: 330,
     interceptorSpeed: 196, interceptorSpawn: 1.20, interceptorHp: 3,
-    foes: ['mine'], tune: 1 },
+    foes: ['mine'],
+    towers: ['gun'], tune: 1 },
 
   { name: 'TANTALUM', subtitle: 'CORROSION PROOF — FLAGSHIP HULL',
     theme: 'glacier', seed: 0x7a07a1, length: 17000,
     gapScale: 0.78, clearChance: 0.07,
     turretHp: 5, turretCooldown: 1.20, turretRange: 360,
     interceptorSpeed: 220, interceptorSpawn: 0.98, interceptorHp: 3,
-    foes: ['mine', 'lancer', 'weaver'], tune: 2 },
+    foes: ['mine', 'lancer', 'weaver'],
+    towers: ['gun', 'flak'], tune: 2 },
 
   { name: 'CUPRUM', subtitle: 'OXIDISED — SALVAGE HULK',
     theme: 'desert', seed: 0xc0ffee, length: 18500,
     gapScale: 0.72, clearChance: 0.06,
     turretHp: 6, turretCooldown: 1.10, turretRange: 380,
     interceptorSpeed: 236, interceptorSpawn: 0.90, interceptorHp: 4,
-    foes: ['mine', 'lancer', 'orbiter', 'weaver'], tune: 1 },
+    foes: ['mine', 'lancer', 'orbiter', 'weaver'],
+    towers: ['gun', 'flak', 'lance'], tune: 1 },
 
   { name: 'PYRITE', subtitle: 'RUNNING HOT — FOUNDRY HULL',
     theme: 'foundry', seed: 0xf00dface, length: 20000,
     gapScale: 0.67, clearChance: 0.05,
     turretHp: 7, turretCooldown: 1.00, turretRange: 400,
     interceptorSpeed: 252, interceptorSpawn: 0.82, interceptorHp: 4,
-    foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter'], tune: 2 },
+    foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter'],
+    towers: ['gun', 'flak', 'lance', 'mortar'], tune: 2 },
 
   { name: 'WOLFRAM', subtitle: 'LIGHT SWALLOWING — SIEGE HULL',
     theme: 'void', seed: 0x0b51d1a, length: 21500,
     gapScale: 0.63, clearChance: 0.04,
     turretHp: 8, turretCooldown: 0.92, turretRange: 420,
     interceptorSpeed: 266, interceptorSpawn: 0.75, interceptorHp: 5,
-    foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech'], tune: 2 },
+    foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech'],
+    towers: ['gun', 'lance', 'mortar', 'warden'], tune: 2 },
 
   { name: 'FERRUM', subtitle: 'EATEN THROUGH — DERELICT HULL',
     theme: 'derelict', seed: 0xfe2211, length: 23000,
     gapScale: 0.59, clearChance: 0.035,
     turretHp: 9, turretCooldown: 0.86, turretRange: 440,
     interceptorSpeed: 280, interceptorSpawn: 0.70, interceptorHp: 5,
-    foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech'], tune: 0 },
+    foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech'],
+    towers: ['gun', 'flak', 'mortar', 'warden'], tune: 0 },
 
   { name: 'AURUM', subtitle: 'THE PRIZE — ADMIRALTY HULL',
     theme: 'admiralty', seed: 0xa17aa17a, length: 25000,
     gapScale: 0.55, clearChance: 0.03,
     turretHp: 10, turretCooldown: 0.80, turretRange: 460,
     interceptorSpeed: 294, interceptorSpawn: 0.64, interceptorHp: 6,
-    foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech'], tune: 2 },
+    foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech'],
+    towers: ['gun', 'flak', 'lance', 'mortar', 'warden'], tune: 2 },
 ];
 
 // Clearing a hull upgrades the ship permanently for the rest of the run.
@@ -227,6 +235,45 @@ export const SHIP = {
   scrapeCd: 0.28,
   grindDamage: 2.5,      // flat cost of touching the hull at all
   impactDamage: 0.045,   // extra per px/s of closing speed -> ~16 at full tilt
+};
+
+// Gun towers. The basic emplacement is on every hull; the rest are
+// introduced later, and a hull's `towers` list says which it may mount.
+// Each is a different problem rather than a tougher version of the same one.
+export const TOWERS = {
+  gun: {
+    name: 'GUN', hpMul: 1.0, score: 150,
+    burst: 3, burstGap: 0.13, cooldownMul: 1.0, bulletSpeed: 195, spread: 0,
+    colour: '#e8434f',
+  },
+  flak: {
+    // Fires a wide fan rather than an aimed burst: cannot be beaten by
+    // sitting still off its line, has to be approached or destroyed.
+    name: 'FLAK', hpMul: 1.3, score: 260,
+    burst: 1, burstGap: 0.1, cooldownMul: 1.25, bulletSpeed: 165, spread: 0.26, fan: 5,
+    colour: '#ff9a3a',
+  },
+  lance: {
+    // Charges visibly, then fires one very fast shot. Punishes standing in
+    // the open; trivial if you respect the tell.
+    name: 'LANCE', hpMul: 1.1, score: 300,
+    burst: 1, burstGap: 0.1, cooldownMul: 1.9, bulletSpeed: 560, spread: 0,
+    charge: 0.85, colour: '#4fd0e8',
+  },
+  mortar: {
+    // Lobs slow heavy shells on an arc that ignores your altitude, so
+    // hugging the opposite rim does not help.
+    name: 'MORTAR', hpMul: 1.6, score: 340,
+    burst: 2, burstGap: 0.3, cooldownMul: 1.6, bulletSpeed: 120, spread: 0.1,
+    arc: true, colour: '#9ad94e',
+  },
+  warden: {
+    // Shields its neighbours. While it lives, nearby towers take no damage,
+    // so it changes the order you have to kill things in.
+    name: 'WARDEN', hpMul: 2.0, score: 420,
+    burst: 2, burstGap: 0.18, cooldownMul: 1.4, bulletSpeed: 180, spread: 0.12,
+    aura: 150, colour: '#b45ce0',
+  },
 };
 
 export const TURRET = {

@@ -6,6 +6,7 @@ import { playerShots, enemyShots } from './projectiles.js';
 import { particles, lights } from './particles.js';
 import { hash2 } from './rng.js';
 import { hullChunk, warmChunks, CHUNK_W } from './level.js';
+import { get as setting } from './settings.js';
 import { renderScale, scaleGeneration, hullScale } from './display.js';
 import { pickups, tint } from './pickups.js';
 import { livingParts, shellUp } from './boss.js';
@@ -94,7 +95,7 @@ function crtOverlay() {
 export function drawWorld(ctx, game) {
   if (!scanlines) buildOverlays();
 
-  const sh = game.cam.shake;
+  const sh = setting('shake') ? game.cam.shake : 0;
   const ox = sh > 0 ? (Math.random() - 0.5) * sh : 0;
   const oy = sh > 0 ? (Math.random() - 0.5) * sh : 0;
   const camX = clamp(Math.round(game.cam.x + ox), 0, game.level.length - VIEW_W);
@@ -130,18 +131,20 @@ export function drawWorld(ctx, game) {
   ctx.restore();
 
   // superstructure passing in front, scrolling faster than the hull
-  drawForeground(ctx, camX, camY);
+  if (setting('foreground')) drawForeground(ctx, camX, camY);
 
   // bloom: re-draw only the bright things small, blur, add back
-  drawBloom(ctx, game, camX, camY);
+  if (setting('bloom')) drawBloom(ctx, game, camX, camY);
 
   // CRT dressing: vignette and scanlines are pre-combined into one bitmap at
   // device resolution, so this is a single 1:1 blit rather than two
   // full-screen passes resampled every frame.
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.drawImage(crtOverlay(), 0, 0);
-  ctx.restore();
+  if (setting('scanlines')) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(crtOverlay(), 0, 0);
+    ctx.restore();
+  }
 
   if (game.flash > 0) {
     ctx.globalAlpha = Math.min(0.6, game.flash);
@@ -437,13 +440,37 @@ function drawTurrets(ctx, game, camX) {
     ctx.fillStyle = '#4b5462';
     ctx.fillRect(-7, d === 1 ? 0 : -1, 14, 1);
 
-    // housing + damage-state eye
+    // housing, tinted by kind so the gun you are approaching is identifiable
+    const tw = t.tower || {};
     ctx.fillStyle = '#596372';
     ctx.beginPath();
-    ctx.arc(0, d * 1, 5.5, 0, Math.PI * 2);
+    ctx.arc(0, d * 1, tw.aura ? 7 : 5.5, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = t.hp === 3 ? COL.danger : t.hp === 2 ? COL.warm : COL.warmHi;
+    ctx.fillStyle = tw.colour || COL.danger;
     ctx.fillRect(-1, d * 1 - 1, 2, 2);
+
+    // a lance winding up: an unmissable tell, because the shot itself is
+    // too fast to react to
+    if (t.charge > 0) {
+      ctx.globalAlpha = 0.5 + 0.5 * Math.sin(t.charge * 40);
+      ctx.fillStyle = tw.colour;
+      ctx.beginPath(); ctx.arc(0, d * 1, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    // a warden's protective aura, and the shimmer on what it covers
+    if (tw.aura) {
+      ctx.globalAlpha = 0.10 + 0.05 * Math.sin(performance.now() / 300);
+      ctx.fillStyle = tw.colour;
+      ctx.beginPath(); ctx.arc(0, 0, tw.aura, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    if (t.shielded) {
+      ctx.globalAlpha = 0.6;
+      ctx.strokeStyle = '#b45ce0';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(0, d * 1, 10, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
 
     ctx.fillStyle = COL.rivet;
     ctx.fillRect(-7, d * 4, 2, 2);

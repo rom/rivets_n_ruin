@@ -57,6 +57,11 @@ backend down**; you lose the leaderboard, not the game.
 | `P` / `Esc` | Pause |
 | `M` | Mute / unmute |
 | `T` | Next tune |
+| `O` | Settings |
+| `B` | Switch leaderboard: top pilots / high scores |
+| `X` | Fire selected ordnance |
+| `C` / `1`–`3` | Cycle / select ordnance |
+| `E` | Armourer (between hulls) |
 | `N` | Rename your pilot (title screen) |
 | `Q` | Quit the run (asks first; `Y` confirms, `N` cancels) |
 | `R` | Restart mid-run |
@@ -104,6 +109,23 @@ than the last, and each is named for a metal — Uridium's stage-naming ritual.
 
 On each hull: fly to the far end, **kill what is guarding it**, then run back to
 the dock. Dying out of ships ends the run wherever you are.
+
+## Gun towers
+
+Five kinds, introduced hull by hull. Each is a different problem rather than
+a tougher version of the same one.
+
+| Tower | From | Behaviour |
+| --- | --- | --- |
+| **GUN** | ARGENTUM | Aimed three-round burst with lead prediction |
+| **FLAK** | TANTALUM | A wide fan — cannot be beaten by sitting off its line |
+| **LANCE** | CUPRUM | Charges visibly, then one very fast shot. Respect the tell |
+| **MORTAR** | PYRITE | Lobs heavy shells on an arc that ignores your altitude |
+| **WARDEN** | WOLFRAM | Shields its neighbours. Changes the order you must kill in |
+
+A hull's roster is `LEVELS[].towers`. While a warden lives, nearby towers
+take no damage and visibly shimmer — so the question stops being "what is
+shooting me" and becomes "what do I have to kill first".
 
 ## Attackers
 
@@ -232,6 +254,29 @@ You are not immune to your own ordnance, though you take far less of it.
 
 Crates drop from kills; each refills a couple of rounds, up to a cap.
 
+## The armourer
+
+![The shop](docs/shop.png)
+
+Between hulls, coins buy upgrades and mods. Upgrades are quantities bought
+repeatedly until a cap — another gun level, more shield, more ammo — and get
+dearer each time, so the shop cannot be drained into one stat. **Mods** are
+permanent changes to how the ship behaves, bought once, and they are where
+the interesting decisions live:
+
+| Mod | Effect |
+| --- | --- |
+| **LODESTONE** | Pickups and coins pull from twice as far |
+| **ABLATIVE PLATING** | Hull scrapes cost 40% less shield |
+| **AUTOLOADER** | Ordnance reloads 35% faster |
+| **SCAVENGER RIG** | Coins are worth double |
+| **AFTERBURNER** | +40 top speed, quicker acceleration |
+| **RECLAIMER** | Keep one gun level when a ship is lost |
+
+There are never enough coins for everything, which is the point — the
+interesting choice is what to go without. A run with Scavenger plays
+differently from one with Afterburner.
+
 ## Coins and coffins
 
 Destroyed things scatter **coins** - small, numerous, worth 25 each, flying
@@ -272,6 +317,25 @@ busy hull at speed. They bob, drift, pull toward you slightly within 38px so a
 near miss at full throttle still counts, and flash for their last three seconds
 before expiring. A drop that would land inside solid hull is relocated to open
 space, so a pickup is never unreachable.
+
+## Settings
+
+![Settings](docs/settings.png)
+
+`O` opens them. Music and sound effects separately, master volume, tune
+override, and switches for bloom, scanlines, screen shake, the foreground
+layer and pickup toasts — the visual ones double as a performance escape
+hatch on a slow machine. Everything persists, and the definitions are data,
+so adding a setting is a list entry rather than a UI change.
+
+## Leaderboards, two ways
+
+`B` switches between them:
+
+- **TOP PILOTS** folds to one row per player — their best run. Answers *who
+  is best*.
+- **HIGH SCORES** lists the best individual runs with no folding, so one
+  exceptional pilot can hold several places. Answers *what are the best runs*.
 
 ## Picking up where you left off
 
@@ -394,6 +458,23 @@ step falling inside the next 120ms against `ctx.currentTime`. Driving it from
 display and the audio clock is not.
 
 ### Tunes
+
+Written to sound like a SID rather than a general-purpose synth. The things
+that actually make a 6581 recognisable, in rough order of importance:
+
+- **Pulse waves with a moving duty cycle.** Not saw, not square. `OscillatorNode`
+  has no pulse type and no PWM, so the duty is baked into a `PeriodicWave` as
+  a Fourier series and the wave is swapped between notes to make the width
+  move.
+- **Chords as very fast arpeggios.** The chip had three voices, so a chord
+  was faked by cycling its notes every frame at 50Hz. It sounds like a chord
+  and a trill at once, and nothing else sounds like it. This is the single
+  most identifying thing in the rewrite.
+- **Hard, short envelopes** with an audible click on the attack, because a
+  6581 had no smooth one and the click is part of the sound.
+- **A resonant low-pass swept per note**, not set and left.
+- **Drums from the same voices**: bit-crushed noise plus a pitch-swept tone,
+  because the chip had no sampler.
 
 Four of them. `T` cycles; each hull also selects its own, so the score tracks
 where you are in the campaign unless you override it.
@@ -594,6 +675,9 @@ These are deliberate omissions from the vertical slice, not bugs:
 - **Coverage is partial and the report says so.** Rendering, audio and HUD
   modules are exercised only by the browser smoke test, so they contribute
   no line coverage.
+- **The music rewrite is unheard by me.** The techniques are the real ones a
+  SID used, and the spectra look right, but whether it actually sounds good
+  is not something measuring RMS can tell you.
 - **The graphics work is unjudged.** Bloom strength, foreground density and
   the surface shading are tuned by eye against screenshots, not by playing.
   Bloom in particular is easy to overdo.

@@ -193,6 +193,43 @@ func (m *Memory) Top(q TopQuery) ([]model.Rank, error) {
 	return out, nil
 }
 
+// TopRuns ranks individual runs rather than players. The leaderboard that
+// folds to one row per player answers "who is best"; this answers "what are
+// the best runs", and a pilot having three of them is the point.
+func (m *Memory) TopRuns(q TopQuery) ([]model.Rank, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if q.Limit <= 0 || q.Limit > 100 {
+		q.Limit = 10
+	}
+	since := q.Window.Since(m.now())
+	runs := make([]*model.Score, 0, len(m.scores))
+	for _, s := range m.scores {
+		if matches(s, q.ModID, since) {
+			runs = append(runs, s)
+		}
+	}
+	sort.Slice(runs, func(i, j int) bool {
+		if runs[i].Points != runs[j].Points {
+			return runs[i].Points > runs[j].Points
+		}
+		if runs[i].TimeSec != runs[j].TimeSec {
+			return runs[i].TimeSec < runs[j].TimeSec
+		}
+		return runs[i].Created.Before(runs[j].Created)
+	})
+
+	out := make([]model.Rank, 0, q.Limit)
+	for i, s := range runs {
+		if i >= q.Limit {
+			break
+		}
+		out = append(out, model.Rank{Position: i + 1, Score: cloneScore(s)})
+	}
+	return out, nil
+}
+
 func (m *Memory) PlayerRank(playerID, modID string, w model.Window) (*model.Rank, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

@@ -5,6 +5,8 @@ import { netState } from './net.js';
 import { PICKUP, ARMORY } from './config.js';
 import { tint } from './pickups.js';
 import { tuneName, TUNES } from './music.js';
+import { get as setting, DEFS, display } from './settings.js';
+import { rows as shopRows, MODS } from './shop.js';
 import { livingParts, shellUp } from './boss.js';
 import { activeMod } from './mods.js';
 
@@ -124,7 +126,7 @@ export function drawHud(ctx, game, audio = {}) {
   text(ctx, sym, VIEW_W - 64, V + 12, audio.muted ? COL.danger : COL.hudLine, FONT, 'right');
 
   if (game.boss) drawBossBar(ctx, game.boss);
-  if (game.toast) drawToast(ctx, game.toast);
+  if (game.toast && setting('damageNumbers')) drawToast(ctx, game.toast);
   if (game.banner) drawBanner(ctx, game.banner);
   if (game.state !== 'play' && game.state !== 'dying') drawScreen(ctx, game);
 }
@@ -171,20 +173,23 @@ function drawBanner(ctx, b) {
 // nobody sees is not a score board.
 function drawBoard(ctx, x, y, title, rows = 8) {
   const net = netState();
-  text(ctx, title, x, y, COL.hudText, FONT);
+  const runs = net.board === 'runs';
+  // Two different questions: who is best, and what are the best runs. The
+  // second lets one pilot hold several places, which the first hides.
+  text(ctx, (runs ? 'HIGH SCORES' : 'TOP PILOTS') + '   [B]', x, y, COL.hudText, FONT);
 
   if (!net.online) {
     text(ctx, 'BACKEND UNREACHABLE — PLAYING OFFLINE', x, y + 16, COL.hudLine, FONT);
     text(ctx, net.lastError || '', x, y + 29, COL.hudLine, FONT);
     return;
   }
-  if (!net.top.length) {
+  const me = net.player ? net.player.id : null;
+  const list = runs ? net.runs : net.top;
+  if (!list.length) {
     text(ctx, 'NO RUNS YET — BE FIRST', x, y + 16, COL.hudLine, FONT);
     return;
   }
-
-  const me = net.player ? net.player.id : null;
-  net.top.slice(0, rows).forEach((row, i) => {
+  list.slice(0, rows).forEach((row, i) => {
     const s = row.score;
     const mine = s.playerId === me;
     const col = mine ? COL.warmHi : i === 0 ? COL.coolHi : COL.hudText;
@@ -243,8 +248,9 @@ function drawScreen(ctx, game) {
     ctx.globalAlpha = pulse;
     text(ctx, 'PRESS ENTER TO LAUNCH', cx, 204, COL.warmHi, FONT, 'center');
     ctx.globalAlpha = 1;
+    text(ctx, 'O  SETTINGS', cx, 218, COL.hudText, FONT, 'center');
 
-    drawBoard(ctx, BOARD_X, 222, 'TOP PILOTS', 4);
+    drawBoard(ctx, BOARD_X, 234, 'TOP PILOTS', 3);
     return;
   }
 
@@ -317,8 +323,9 @@ function drawScreen(ctx, game) {
     text(ctx, refit.join('   ·   '), cx, 206, '#5fe08a', FONT, 'center');
 
     ctx.globalAlpha = pulse;
-    text(ctx, 'ENTER TO LAUNCH', cx, 232, COL.warmHi, FONT, 'center');
+    text(ctx, 'ENTER TO LAUNCH', cx, 226, COL.warmHi, FONT, 'center');
     ctx.globalAlpha = 1;
+    text(ctx, 'E  ARMOURER     ' + (game.coins || 0) + ' COINS', cx, 240, '#ffd24a', FONT, 'center');
     return;
   }
 
@@ -367,6 +374,94 @@ function drawRankLine(ctx, cx, y) {
 
 // Quit confirmation. Deliberately unmissable, and deliberately not defaulted
 // to yes: Q sits next to W and A and will get hit by accident.
+// The settings screen. Driven entirely from DEFS, so adding a setting adds
+// a row here without touching this function.
+// The shop, between hulls. Coins are the only currency and there are never
+// enough, which is the point: the interesting choice is what to go without.
+export function drawShop(ctx, game, sel, note) {
+  ctx.fillStyle = '#04060a';
+  ctx.fillRect(0, 0, VIEW_W, FIELD_H);
+  const cx = VIEW_W / 2;
+
+  text(ctx, 'ARMOURER', cx, 12, COL.hudBright, FONT_BIG, 'center');
+  text(ctx, 'COINS ' + (game.coins || 0), cx, 40, '#ffd24a', FONT, 'center');
+
+  const list = shopRows(game);
+  const top = 60;
+  const perCol = Math.ceil(list.length / 2);
+  list.forEach((r, i) => {
+    const col = i < perCol ? 0 : 1;
+    const y = top + (i % perCol) * 17;
+    const x = 24 + col * 300;
+    const on = i === sel;
+    if (on) {
+      ctx.fillStyle = '#131c26';
+      ctx.fillRect(x - 6, y - 3, 286, 15);
+      ctx.fillStyle = r.affordable ? COL.cool : COL.danger;
+      ctx.fillRect(x - 6, y - 3, 2, 15);
+    }
+    const colour = !r.available ? '#2b3440'
+      : r.affordable ? (on ? COL.hudBright : COL.hudText)
+        : '#5a3a40';
+    text(ctx, r.name, x, y, colour, FONT);
+    if (r.kind === 'mod') text(ctx, 'MOD', x + 150, y, r.affordable ? '#b45ce0' : '#432f4a', FONT);
+    else text(ctx, r.detail, x + 150, y, colour, FONT);
+    text(ctx, !r.available ? 'MAX' : String(r.cost), x + 276, y,
+      !r.available ? '#2b3440' : r.affordable ? '#ffd24a' : '#5a3a40', FONT, 'right');
+  });
+
+  const cur = list[sel];
+  if (cur) {
+    text(ctx, cur.blurb, cx, top + perCol * 17 + 10, COL.hudLine, FONT, 'center');
+  }
+  if (note) text(ctx, note, cx, top + perCol * 17 + 26, '#5fe08a', FONT, 'center');
+
+  text(ctx, 'ARROWS CHOOSE    ENTER BUY    E / ESC LEAVE', cx, 298, COL.hudText, FONT, 'center');
+}
+
+export function drawSettings(ctx, game, sel) {
+  ctx.fillStyle = '#04060a';
+  ctx.fillRect(0, 0, VIEW_W, FIELD_H);
+  const cx = VIEW_W / 2;
+
+  text(ctx, 'SETTINGS', cx, 16, COL.hudBright, FONT_BIG, 'center');
+
+  const top = 56;
+  DEFS.forEach((d, i) => {
+    const y = top + i * 18;
+    const on = i === sel;
+    if (on) {
+      ctx.fillStyle = '#131c26';
+      ctx.fillRect(96, y - 3, VIEW_W - 192, 16);
+      ctx.fillStyle = COL.cool;
+      ctx.fillRect(96, y - 3, 2, 16);
+    }
+    text(ctx, d.label, 110, y, on ? COL.hudBright : COL.hudText, FONT);
+
+    const value = display(d, d.kind === 'tune' ? TUNES[setting('tune')].name : null);
+    const vx = VIEW_W - 110;
+    if (d.kind === 'range') {
+      // a bar as well as a number, because a number alone is hard to aim at
+      const w = 70;
+      ctx.fillStyle = '#1a212b';
+      ctx.fillRect(vx - w, y + 1, w, 8);
+      ctx.fillStyle = on ? COL.cool : '#3a4654';
+      ctx.fillRect(vx - w, y + 1, Math.round(w * (setting(d.id) - d.min) / (d.max - d.min)), 8);
+      text(ctx, value, vx + 6, y, on ? COL.hudBright : COL.hudText, FONT);
+    } else {
+      const lit = value !== 'OFF';
+      text(ctx, (on ? '< ' : '  ') + value + (on ? ' >' : ''), vx, y,
+        lit ? (on ? COL.coolHi : COL.cool) : COL.hudLine, FONT, 'right');
+    }
+  });
+
+  const d = DEFS[sel];
+  if (d) text(ctx, d.help, cx, top + DEFS.length * 18 + 12, COL.hudLine, FONT, 'center');
+
+  text(ctx, 'UP / DOWN  CHOOSE      LEFT / RIGHT  CHANGE', cx, 286, COL.hudText, FONT, 'center');
+  text(ctx, 'R  RESET TO DEFAULTS       O / ESC  BACK', cx, 300, COL.hudText, FONT, 'center');
+}
+
 export function drawQuitPrompt(ctx, game) {
   ctx.fillStyle = 'rgba(4,6,10,0.82)';
   ctx.fillRect(0, 0, VIEW_W, FIELD_H);

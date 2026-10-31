@@ -1,5 +1,5 @@
 import {
-  FIELD_TOP, FIELD_BOT, FIELD_H, RIM, APRON, THEMES, clamp,
+  FIELD_TOP, FIELD_BOT, FIELD_H, RIM, APRON, THEMES, TOWERS, clamp,
 } from './config.js';
 import { mulberry32, rr, ri, hash2 } from './rng.js';
 
@@ -115,13 +115,20 @@ export function buildLevel(spec) {
     obstacles.some((o) => px > o.x - 3 && px < o.x + o.w + 3 && py > o.y && py < o.y + o.h);
   const turrets = turretSpots
     .filter((t) => !buried(t.x, t.y + t.dir * 6))
-    .map((t) => ({
-      x: t.x, y: t.y, dir: t.dir,
+    .map((t, i) => {
+      const roster = spec.towers && spec.towers.length ? spec.towers : ['gun'];
+      // Deterministic from position, so a hull always mounts the same guns.
+      const kind = roster[Math.floor(hash2(Math.round(t.x), 97) * roster.length)];
+      const tw = TOWERS[kind] || TOWERS.gun;
+      return {
+      x: t.x, y: t.y, dir: t.dir, kind, tower: tw,
       angle: t.dir * Math.PI / 2,
-      hp: spec.turretHp, dead: false,
+      hp: Math.round(spec.turretHp * tw.hpMul), dead: false,
+      charge: 0, shielded: false,
       cd: Math.random() * 0.8,
       burstLeft: 0, burstTimer: 0,
-    }));
+      };
+    });
 
   obstacles.sort((a, b) => a.x - b.x);
 

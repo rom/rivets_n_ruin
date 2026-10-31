@@ -14,7 +14,9 @@ const S = {
   online: false,
   checked: false,
   player: null,        // { id, name, token }
-  top: [],
+  top: [],        // one row per player
+  runs: [],       // best individual runs
+  board: 'pilots',// which of the two the UI is showing
   best: 0,
   flying: [],
   stats: null,
@@ -110,7 +112,7 @@ export async function initNet() {
       S.best = me.player.best || 0;
     }
   }
-  await Promise.all([refreshTop(), refreshPresence(), refreshStats()]);
+  await Promise.all([refreshTop(), refreshRuns(), refreshPresence(), refreshStats()]);
   return true;
 }
 
@@ -130,6 +132,22 @@ export async function rename(name) {
   await refreshTop();
   return S.player;
 }
+
+// The best individual runs, without folding to one row per player, so one
+// exceptional pilot can hold several places.
+export async function refreshRuns(modId = '', window = 'all', limit = 10) {
+  const q = new URLSearchParams({ window, limit: String(limit) });
+  if (modId) q.set('mod', modId);
+  const data = await call(`/api/scores/runs?${q}`);
+  if (data) S.runs = data.top || [];
+  return S.runs;
+}
+
+export function setBoard(which) {
+  S.board = which === 'runs' ? 'runs' : 'pilots';
+  return S.board;
+}
+export const toggleBoard = () => setBoard(S.board === 'pilots' ? 'runs' : 'pilots');
 
 export async function refreshTop(modId = '', window = 'all', limit = 8) {
   const q = new URLSearchParams({ window, limit: String(limit) });
@@ -161,6 +179,7 @@ export async function submitRun({ modId = '', points, timeSec, turrets, deaths, 
     S.rank = data.rank || null;
     if (data.score && data.score.points > S.best) S.best = data.score.points;
     refreshTop(modId);   // deliberately not awaited
+    refreshRuns(modId);
     refreshStats();      // so "N of M" reports the real player count
   }
   return data;

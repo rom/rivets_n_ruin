@@ -1,5 +1,5 @@
 import {
-  TURRET, INTERCEPTOR, VIEW_W, FIELD_TOP, FIELD_BOT, APRON, clamp,
+  TURRET, TOWERS, INTERCEPTOR, VIEW_W, FIELD_TOP, FIELD_BOT, APRON, clamp,
 } from './config.js';
 import { makePool } from './pool.js';
 import { enemyShots, fire } from './projectiles.js';
@@ -23,11 +23,34 @@ const angleTo = (a, target, rate) => {
 // burst. Threat you choose to engage or evade; the reason to slow down.
 export function updateTurrets(game, dt) {
   const p = game.player;
+
+  // Wardens protect their neighbours, so the kill order matters. Recomputed
+  // each frame because a warden dying must free its neighbours at once.
+  const guards = [];
+  for (const t of game.level.turrets) {
+    if (!t.dead && t.tower && t.tower.aura) guards.push(t);
+  }
+  for (const t of game.level.turrets) {
+    t.shielded = false;
+    if (t.dead || !guards.length) continue;
+    for (const gd of guards) {
+      if (gd !== t && Math.hypot(gd.x - t.x, gd.y - t.y) < gd.tower.aura) { t.shielded = true; break; }
+    }
+  }
   for (const t of game.level.turrets) {
     if (t.dead) continue;
     const dx = p.x - t.x;
     if (Math.abs(dx) > TURRET.wake) continue;
     const spec = game.level.spec;
+    const tw = t.tower || TOWERS.gun;
+
+    // A lance telegraphs before it fires. Without the tell it would be an
+    // unavoidable hitscan; with it, it is a thing you learn to respect.
+    if (t.charge > 0) {
+      t.charge -= dt;
+      if (t.charge <= 0) { shootTurret(t, p); t.cd = spec.turretCooldown * tw.cooldownMul; }
+      continue;
+    }
 
     const dy = p.y - t.y;
     const dist = Math.hypot(dx, dy);
@@ -41,10 +64,10 @@ export function updateTurrets(game, dt) {
     if (t.burstLeft > 0) {
       t.burstTimer -= dt;
       if (t.burstTimer <= 0) {
-        t.burstTimer = TURRET.burstGap;
+        t.burstTimer = tw.burstGap;
         t.burstLeft--;
         shootTurret(t, p);
-        if (t.burstLeft === 0) t.cd = spec.turretCooldown;
+        if (t.burstLeft === 0) t.cd = spec.turretCooldown * tw.cooldownMul;
       }
       continue;
     }
@@ -52,22 +75,35 @@ export function updateTurrets(game, dt) {
     t.cd -= dt;
     const aligned = Math.abs(((Math.atan2(dy, dx) - t.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < TURRET.aimTol;
     if (t.cd <= 0 && inArc && dist < spec.turretRange && aligned && game.state === 'play' && p.alive) {
-      t.burstLeft = TURRET.burst;
+      if (tw.charge) { t.charge = tw.charge; continue; }
+      t.burstLeft = tw.burst;
       t.burstTimer = 0;
     }
   }
 }
 
 function shootTurret(t, p) {
-  // modest lead prediction — enough to punish flying in a straight line
+  const tw = t.tower || TOWERS.gun;
   const dx = p.x - t.x;
   const dy = p.y - t.y;
-  const tof = Math.hypot(dx, dy) / TURRET.bulletSpeed;
-  const a = Math.atan2(dy + p.vy * tof * 0.55, dx + p.vx * tof * 0.55);
-  const mx = t.x + Math.cos(a) * 9;
-  const my = t.y + Math.sin(a) * 9;
-  fire(enemyShots, mx, my, Math.cos(a) * TURRET.bulletSpeed, Math.sin(a) * TURRET.bulletSpeed, 3.4, 9, 2);
-  sparks(mx, my, Math.cos(a), Math.sin(a), 3, '#ff7a2f');
+  const speed = tw.bulletSpeed;
+  // modest lead prediction — enough to punish flying in a straight line
+  const tof = Math.hypot(dx, dy) / speed;
+  const base = tw.arc
+    // a mortar lobs: it aims at where you are horizontally and lets the
+    // shell come down, so hugging the far rim does not take you off its line
+    ? Math.atan2(t.dir * 90, dx)
+    : Math.atan2(dy + p.vy * tof * 0.55, dx + p.vx * tof * 0.55);
+
+  const shots = tw.fan || 1;
+  for (let i = 0; i < shots; i++) {
+    const a = base + (shots === 1 ? 0 : (i - (shots - 1) / 2) * tw.spread)
+      + (shots === 1 ? (Math.random() - 0.5) * tw.spread : 0);
+    const mx = t.x + Math.cos(a) * 9;
+    const my = t.y + Math.sin(a) * 9;
+    fire(enemyShots, mx, my, Math.cos(a) * speed, Math.sin(a) * speed, 3.4, tw.arc ? 13 : 9, tw.arc ? 3 : 2);
+    sparks(mx, my, Math.cos(a), Math.sin(a), 3, tw.colour);
+  }
   sfxTurretShot();
 }
 
@@ -147,6 +183,11 @@ export function hitInterceptor(game, i, dmg) {
 }
 
 export function hitTurret(game, t, dmg) {
+  // A warden's aura absorbs it. Visible, so it does not read as a bug.
+  if (t.shielded) {
+    sparks(t.x, t.y - t.dir * 6, 0, -t.dir, 3, '#b45ce0');
+    return false;
+  }
   t.hp -= dmg;
   if (t.hp > 0) {
     sparks(t.x, t.y - t.dir * 6, 0, -t.dir, 4, '#ffd24a');
@@ -157,7 +198,7 @@ export function hitTurret(game, t, dmg) {
   explode(t.x, t.y - t.dir * 5, 1.5);
   sfxExplode(1.5);
   spoils(game, t.x, t.y - t.dir * 14, 'turret');
-  game.score += TURRET.score;
+  game.score += (t.tower && t.tower.score) || TURRET.score;
   game.turretsKilled++;
   return true;
 }

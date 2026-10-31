@@ -37,6 +37,9 @@ type Store interface {
 
 	AddScore(s *model.Score) error
 	Top(q TopQuery) ([]model.Rank, error)
+	// TopRuns is Top without the per-player fold: the best individual runs,
+	// so one exceptional pilot can hold several places.
+	TopRuns(q TopQuery) ([]model.Rank, error)
 	PlayerRank(playerID, modID string, w model.Window) (*model.Rank, error)
 	PlayerScores(playerID string, limit int) ([]model.Score, error)
 

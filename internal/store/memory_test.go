@@ -278,3 +278,66 @@ func TestConcurrentPlayersAndScores(t *testing.T) {
 		t.Fatalf("top score %d, want %d", top[0].Score.Points, want)
 	}
 }
+
+func TestTopRunsDoesNotFoldByPlayer(t *testing.T) {
+	m := NewMemory()
+	ace := mustPlayer(t, m, "ace")
+	bolt := mustPlayer(t, m, "bolt")
+
+	for _, pts := range []int{9000, 8000, 7000} {
+		if err := m.AddScore(&model.Score{PlayerID: ace.ID, Points: pts}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.AddScore(&model.Score{PlayerID: bolt.ID, Points: 8500}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Top folds to one row per player; TopRuns does not.
+	top, _ := m.Top(TopQuery{Window: model.WindowAll, Limit: 10})
+	if len(top) != 2 {
+		t.Fatalf("Top should fold to 2 players, got %d", len(top))
+	}
+	runs, err := m.TopRuns(TopQuery{Window: model.WindowAll, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 4 {
+		t.Fatalf("TopRuns should list all 4 runs, got %d", len(runs))
+	}
+	want := []int{9000, 8500, 8000, 7000}
+	for i, w := range want {
+		if runs[i].Score.Points != w {
+			t.Fatalf("run %d is %d, want %d", i, runs[i].Score.Points, w)
+		}
+		if runs[i].Position != i+1 {
+			t.Fatalf("run %d has position %d", i, runs[i].Position)
+		}
+	}
+	// one pilot holding several places is the whole point
+	if runs[0].Score.Name != "ace" || runs[2].Score.Name != "ace" {
+		t.Fatal("ace should hold more than one place")
+	}
+}
+
+func TestTopRunsRespectsWindowAndLimit(t *testing.T) {
+	m := NewMemory()
+	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	m.SetClock(func() time.Time { return now })
+	p := mustPlayer(t, m, "rom")
+	for i := 0; i < 20; i++ {
+		if err := m.AddScore(&model.Score{PlayerID: p.ID, Points: i * 100, Created: now.Add(-time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.AddScore(&model.Score{PlayerID: p.ID, Points: 99999, Created: now.Add(-72 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	runs, _ := m.TopRuns(TopQuery{Window: model.WindowDay, Limit: 5})
+	if len(runs) != 5 {
+		t.Fatalf("limit ignored: %d rows", len(runs))
+	}
+	if runs[0].Score.Points == 99999 {
+		t.Fatal("a run outside the window was included")
+	}
+}

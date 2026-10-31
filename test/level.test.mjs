@@ -2,7 +2,7 @@ import './_setup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildLevel, obstaclesNear, pointBlocked, CHUNK_W } from '../src/level.js';
-import { LEVELS, FIELD_TOP, FIELD_BOT, APRON } from '../src/config.js';
+import { LEVELS, TOWERS, FIELD_TOP, FIELD_BOT, APRON } from '../src/config.js';
 
 // Hull generation became testable in node when the texture moved to lazy
 // per-chunk rendering: buildLevel no longer touches a canvas.
@@ -62,7 +62,11 @@ for (const spec of LEVELS) {
     const lvl = buildLevel(spec);
     for (const t of lvl.turrets) {
       assert.ok(t.dir === 1 || t.dir === -1, 'turret has no facing');
-      assert.ok(t.hp === spec.turretHp, 'turret did not take the hull toughness');
+      // Hit points are the hull's toughness scaled by the tower type, so a
+      // flak emplacement on a late hull is tougher than a gun on an early one.
+      const mul = TOWERS[t.kind].hpMul;
+      assert.equal(t.hp, Math.round(spec.turretHp * mul),
+        `${t.kind} on ${spec.name} has ${t.hp} hp, expected ${Math.round(spec.turretHp * mul)}`);
       assert.ok(!pointBlocked(lvl, t.x, t.y + t.dir * 8),
         `turret muzzle buried in hull at x=${t.x}`);
     }
