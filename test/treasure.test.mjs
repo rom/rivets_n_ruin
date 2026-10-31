@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   pickups, resetPickups, spawnPickup, spoils, tint, isTreasure,
-  TREASURES, LOOT, KINDS, rollTreasure, freshHaul,
+  TREASURES, LOOT, KINDS, rollTreasure, freshHaul, dropWeight, rollKind,
 } from '../src/pickups.js';
 import { PICKUP, LEVELS, HULL_BONUS, DIFFICULTY } from '../src/config.js';
 import { set as setSetting, reset as resetSettings } from '../src/settings.js';
@@ -160,4 +160,130 @@ test('the bonus is itemised, not just totalled', () => {
     assert.ok(b.lines.find((l) => l.id === 'haul').detail.includes('2 TREASURES'),
       'the haul line does not name the treasure: ' + b.lines.find((l) => l.id === 'haul').detail);
   });
+});
+
+
+// --- how fast the guns get pimped
+//
+// The two gun upgrades were a flat 42 of 100 in the crate table whatever
+// the pilot was already carrying. Against a cap of three and roughly
+// twelve crates on the first hull and twenty-two on the second, that meant
+// both were at their ceiling by the third hull of twenty-five, with
+// nothing left to chase for the other twenty-two. The odds now fall away
+// with every level already held.
+
+const pilot = (speed = 0, blaze = 0, cap = PICKUP.gunLevels) =>
+  ({ gunSpeed: speed, gunBlaze: blaze, gunCap: cap });
+
+test('a gun upgrade gets rarer with every level already held', () => {
+  for (const kind of ['gunspeed', 'gunblaze']) {
+    const field = kind === 'gunspeed' ? 'gunSpeed' : 'gunBlaze';
+    let last = Infinity;
+    for (let held = 0; held < 5; held++) {
+      const w = dropWeight(kind, { ...pilot(0, 0, 5), [field]: held });
+      assert.ok(w < last, `${kind} at ${held} levels weighs ${w}, no less than at ${held - 1}`);
+      assert.ok(w > 0, `${kind} at ${held} levels is impossible, not merely rare`);
+      last = w;
+    }
+  }
+});
+
+test('an upgrade already at its cap is never rolled', () => {
+  assert.equal(dropWeight('gunspeed', pilot(3, 0, 3)), 0);
+  assert.equal(dropWeight('gunblaze', pilot(0, 3, 3)), 0);
+  // ...and the roll agrees: a thousand crates, not one wasted.
+  const pl = pilot(3, 3, 3);
+  for (let i = 0; i < 1000; i++) {
+    const k = rollKind(pl);
+    assert.ok(k !== 'gunspeed' && k !== 'gunblaze',
+      'a crate offered an upgrade the pilot cannot take');
+  }
+});
+
+test('the other drops are unaffected by what guns the pilot holds', () => {
+  for (const kind of ['shield', 'healthbar', 'life']) {
+    assert.equal(dropWeight(kind, pilot(0, 0, 3)), dropWeight(kind, pilot(3, 3, 3)),
+      `${kind} should not care how pimped the guns are`);
+  }
+});
+
+test('a crate always holds something, even with every gun capped', () => {
+  const pl = pilot(5, 5, 5);
+  for (let i = 0; i < 200; i++) {
+    assert.ok(KINDS.includes(rollKind(pl)), 'a crate rolled something that is not a pickup');
+  }
+});
+
+test('rollKind survives a missing player', () => {
+  // Boss wrecks and scripted drops call through without one.
+  for (let i = 0; i < 50; i++) assert.ok(KINDS.includes(rollKind(undefined)));
+});
+
+// The actual complaint: guns pimped out too early. Measured in crates,
+// because that is the unit the player actually meets — hull one yields
+// about a dozen and hull two about twenty-two, counting both turret and
+// interceptor drops.
+
+test('the first hull does not hand over a fully pimped gun', () => {
+  const CRATES = 12;
+  const RUNS = 400;
+  let speed = 0;
+  let blaze = 0;
+  for (let r = 0; r < RUNS; r++) {
+    const pl = pilot(0, 0, PICKUP.gunLevels);
+    for (let c = 0; c < CRATES; c++) {
+      const k = rollKind(pl);
+      if (k === 'gunspeed' && pl.gunSpeed < pl.gunCap) pl.gunSpeed++;
+      if (k === 'gunblaze' && pl.gunBlaze < pl.gunCap) pl.gunBlaze++;
+    }
+    speed += pl.gunSpeed;
+    blaze += pl.gunBlaze;
+  }
+  const avg = (speed + blaze) / (2 * RUNS);
+  assert.ok(avg < PICKUP.gunLevels * 0.7,
+    `after one hull's crates the average gun is ${avg.toFixed(2)} of ${PICKUP.gunLevels} — `
+    + 'that is most of the progression spent on the first hull');
+  // ...but not so rare that the opening feels empty. One level in twelve
+  // crates is the floor; below that the first hull gives you nothing.
+  assert.ok(avg > 0.5,
+    `after one hull's crates the average gun is only ${avg.toFixed(2)}; the opening gives nothing`);
+});
+
+test('reaching the gun ceiling takes more than a couple of hulls of crates', () => {
+  const RUNS = 400;
+  let total = 0;
+  for (let r = 0; r < RUNS; r++) {
+    const pl = pilot(0, 0, PICKUP.gunLevels);
+    let crates = 0;
+    while ((pl.gunSpeed < pl.gunCap || pl.gunBlaze < pl.gunCap) && crates < 10000) {
+      crates++;
+      const k = rollKind(pl);
+      if (k === 'gunspeed' && pl.gunSpeed < pl.gunCap) pl.gunSpeed++;
+      if (k === 'gunblaze' && pl.gunBlaze < pl.gunCap) pl.gunBlaze++;
+    }
+    total += crates;
+  }
+  const mean = total / RUNS;
+  // The first two hulls together yield about 34 crates. Maxing both guns
+  // from drops alone has to outlast that with room to spare, not land just
+  // past it — it used to take 19, and merely halving the weights without
+  // the per-level decay only got it to 36, which is still inside hull
+  // three of twenty-five.
+  assert.ok(mean > 45,
+    `both guns max out in ${mean.toFixed(1)} crates; the first two hulls hold about 34`);
+});
+
+// Defensive, and unreachable while shields are in the table — but the
+// table is config, and config changes. Exercised by emptying it.
+test('an empty drop table still yields a real pickup', () => {
+  const real = { ...PICKUP.dropWeights };
+  for (const k of Object.keys(PICKUP.dropWeights)) PICKUP.dropWeights[k] = 0;
+  try {
+    for (let i = 0; i < 50; i++) {
+      const k = rollKind(pilot(0, 0, 3));
+      assert.ok(KINDS.includes(k), `an empty table rolled "${k}", which is not a pickup`);
+    }
+  } finally {
+    Object.assign(PICKUP.dropWeights, real);
+  }
 });

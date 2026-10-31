@@ -21,6 +21,17 @@ import { drawOrdnance } from './armory.js';
 import { drawPad } from './sequences.js';
 import { PICKUP } from './config.js';
 
+// How much of the full-screen flash survives REDUCE FLASHING. Not zero:
+// the flash is feedback, and removing it entirely takes information away
+// from the player it is meant to help.
+export const FLASH_DAMP = 0.22;
+
+// The outline HIGH CONTRAST puts around incoming fire. Deliberately a
+// neutral grey rather than white: under the 'lighter' composite a pure
+// white ring blooms into the shot it is supposed to frame.
+export const CONTRAST_RING = '#8ea4b8';
+
+
 let scanlines = null;
 let vignette = null;
 let crt = null;            // vignette + scanlines, combined, device-res
@@ -136,6 +147,7 @@ export function drawWorld(ctx, game) {
   drawShots(ctx);
   drawPad(ctx, camX, camY);
   if (game.player.alive) {
+    if (setting('aimLine')) drawFiringLine(ctx, game, camX);
     drawDrones(ctx, game.player);
     drawShip(ctx, game.player, game.seqTilt, game);
   }
@@ -166,8 +178,13 @@ export function drawWorld(ctx, game) {
   }
 
   if (game.flash > 0) {
-    ctx.globalAlpha = Math.min(0.6, game.flash);
-    ctx.fillStyle = game.flash > 0.5 ? COL.coolHi : COL.danger;
+    // The full-screen flash is the one thing in the game that can fill the
+    // display with a bright colour several times a second. Reduced, it
+    // stays legible as feedback — you still know you were hit — without
+    // being a strobe.
+    const damp = setting('reduceFlash') ? FLASH_DAMP : 1;
+    ctx.globalAlpha = Math.min(0.6, game.flash) * damp;
+    ctx.fillStyle = game.flash > 0.5 && !setting('reduceFlash') ? COL.coolHi : COL.danger;
     ctx.fillRect(0, 0, VIEW_W, FIELD_H);
     ctx.globalAlpha = 1;
   }
@@ -807,6 +824,21 @@ function drawFoes(ctx) {
   }
 }
 
+// FIRING LINE. The ship shoots along its own centreline and nothing in
+// the picture says where that is, so lining a turret up means learning the
+// sprite. A faint rule costs nothing to ignore and removes the guesswork
+// for anyone who cannot read a 24px ship at speed.
+function drawFiringLine(ctx, game, camX) {
+  const p = game.player;
+  ctx.save();
+  ctx.globalAlpha = 0.22;
+  ctx.fillStyle = CONTRAST_RING;
+  const from = p.x + p.facing * 16;
+  const to = p.facing > 0 ? camX + VIEW_W : camX;
+  ctx.fillRect(Math.min(from, to), Math.round(p.y), Math.abs(to - from), 1);
+  ctx.restore();
+}
+
 function drawShots(ctx) {
   ctx.globalCompositeOperation = 'lighter';
   for (let i = 0; i < playerShots.count; i++) {
@@ -817,9 +849,18 @@ function drawShots(ctx) {
     ctx.fillStyle = COL.coolHi;
     ctx.fillRect(Math.round(s.x) - dir * 2, Math.round(s.y) - 1, 5, 2);
   }
+  // HIGH CONTRAST rings incoming fire in white. Enemy shots are small,
+  // warm-coloured and fly over a hull full of warm-coloured detail; the
+  // ring does not make them easier to dodge, it makes them possible to
+  // find. Drawn under the shot so it reads as an outline.
+  const ring = setting('contrast');
   for (let i = 0; i < enemyShots.count; i++) {
     const s = enemyShots.items[i];
     if (s.seek > 0) { drawMissile(ctx, s); continue; }
+    if (ring) {
+      ctx.fillStyle = CONTRAST_RING;
+      ctx.fillRect(Math.round(s.x) - 5, Math.round(s.y) - 5, 10, 10);
+    }
     ctx.fillStyle = COL.warm;
     ctx.fillRect(Math.round(s.x) - 3, Math.round(s.y) - 3, 6, 6);
     ctx.fillStyle = COL.warmHi;

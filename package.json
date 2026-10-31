@@ -1,0 +1,15 @@
+{
+  "name": "rivets-n-ruin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Test tooling only. The game itself has no dependencies and no build step: index.html loads src/main.js as a module and that is the whole pipeline. Playwright is here because the smoke test drives a real browser, which is the only thing that catches a renderer that has stopped drawing.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "smoke": "make smoke",
+    "coverage": "make coverage-gate"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

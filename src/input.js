@@ -19,6 +19,7 @@ const MAP = {
   KeyO: 'options',
   KeyH: 'help', Slash: 'help',
   KeyB: 'board',
+  KeyK: 'wipe',        // clear the hangar, from the settings screen only
   KeyE: 'shop',
   KeyX: 'secondary', ShiftLeft: 'secondary',
   KeyC: 'cycle',

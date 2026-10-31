@@ -20,6 +20,7 @@ import { fireSecondary } from './armory.js';
 import { diff } from './score.js';
 import { kick } from './camera.js';
 import { sfxShoot, sfxScrape, sfxFlip } from './sfx.js';
+import { get as setting } from './settings.js';
 
 export function makePlayer() {
   return {
@@ -117,7 +118,10 @@ export function updatePlayer(p, game, dt) {
   }
 
   // muzzle flash lights the hull in front of the ship
-  if (held('fire') && p.fireCd <= 0 && p.flip <= 0) {
+  // Auto fire is an accessibility setting, not an advantage: the fire rate
+  // is the gun's, not the key's, so holding the key already did exactly
+  // this. What it removes is having to hold a key for a whole run.
+  if ((held('fire') || setting('autofire')) && p.fireCd <= 0 && p.flip <= 0) {
     // gunspeed shortens the interval; gunblaze adds mirrored angled barrels
     p.fireCd = SHIP.fireRate * PICKUP.speedScale[p.gunSpeed];
 

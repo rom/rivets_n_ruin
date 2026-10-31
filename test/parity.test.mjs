@@ -2,7 +2,8 @@ import './_setup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { LEVELS, BOSSES, SHIP, LEVEL_UP } from '../src/config.js';
+import { LEVELS, BOSSES, SHIP, LEVEL_UP, PICKUP, HULL_BONUS, DIFFICULTY } from '../src/config.js';
+import { MODS } from '../src/shop.js';
 
 // The Go score validator mirrors a handful of client constants in order to
 // decide what is physically possible. When they drift, the server starts
@@ -57,6 +58,89 @@ test('the validator allows for the densest interceptor spawn', () => {
   // the Go value is spawnEvery * 0.75, the low end of the random multiplier
   assert.ok(goInterval <= fastest * 0.75 + 1e-9,
     `validator assumes interceptors no denser than ${goInterval}s, but a hull spawns at ${(fastest * 0.75).toFixed(3)}s`);
+});
+
+// --- the economy.
+//
+// The ceiling on a submission is built from these, and when the client's
+// economy grew past the server's copy of it the server started throwing
+// away real runs: a 4.65-million hull was refused against a ceiling of
+// 1.74 million, and the end screen showed SENDING RUN... while it happened.
+// Each of these is one half of a pair that must not drift again.
+
+test('coin, bar, coffin and treasure values match', () => {
+  const top = Math.max(...Object.values(PICKUP.treasure).map((t) => t.value));
+  const pairs = [
+    ['CoinValue', PICKUP.coinValue],
+    ['BarValue', PICKUP.barValue],
+    ['CoffinValue', PICKUP.coffinValue],
+    ['BestTreasure', top],
+    ['MaxCoinsPerKill', PICKUP.coinsPerKill[1]],
+    ['MaxLives', PICKUP.maxLives],
+    ['TreasureRolls', PICKUP.treasureFromBoss],
+    ['BossBarsMax', PICKUP.bossBars[1]],
+    ['BossCoffinsMax', PICKUP.bossCoffins[1]],
+  ];
+  for (const [name, want] of pairs) {
+    assert.equal(goConst(name), want, `validate.${name} has drifted from src/config.js`);
+  }
+});
+
+test('drop rates match, at their most generous', () => {
+  assert.equal(goConst('CrateChance'), PICKUP.dropFromTurret,
+    'validate.CrateChance has drifted from PICKUP.dropFromTurret');
+  assert.equal(goConst('BarChance'), PICKUP.barChance,
+    'validate.BarChance has drifted from PICKUP.barChance');
+  assert.equal(goConst('CoffinChance'), PICKUP.coffinChance,
+    'validate.CoffinChance has drifted from PICKUP.coffinChance');
+});
+
+// Treasure odds climb per hull and are never capped, so the server's
+// figure has to be the last hull's. It was the eight-hull value for the
+// whole of the twenty-five-hull campaign, which is why it is now derived
+// from the hull count on both sides rather than written down on either.
+test('the treasure rate is the last hull\'s, not an older campaign\'s', () => {
+  assert.equal(goConst('TreasureBase'), PICKUP.treasureChance,
+    'validate.TreasureBase has drifted from PICKUP.treasureChance');
+  assert.equal(goConst('TreasurePerHull'), PICKUP.treasureHullBonus,
+    'validate.TreasurePerHull has drifted from PICKUP.treasureHullBonus');
+  const lastHull = PICKUP.treasureChance + PICKUP.treasureHullBonus * (LEVELS.length - 1);
+  assert.ok(/TreasurePerHull\*float64\(len\(HullLengths\)-1\)/.test(go.replace(/\s+/g, '')),
+    'the Go treasure rate is no longer derived from the hull count');
+  assert.ok(lastHull > PICKUP.treasureChance,
+    'treasure odds no longer climb with the hull; the derivation is pointless');
+});
+
+test('end-of-hull bonuses match', () => {
+  const pairs = [
+    ['BonusTowers', HULL_BONUS.towers],
+    ['BonusSweep', HULL_BONUS.fullSweep],
+    ['BonusPerLife', HULL_BONUS.perLife],
+    ['BonusNoLoss', HULL_BONUS.noLoss],
+    ['HaulShare', HULL_BONUS.haulPct],
+  ];
+  for (const [name, want] of pairs) {
+    assert.equal(goConst(name), want, `validate.${name} has drifted from HULL_BONUS`);
+  }
+});
+
+// The two multipliers a pilot can legitimately stack on top of everything
+// else. Either one being low is a ceiling that refuses honest runs.
+test('the loot and score multipliers match the best a pilot can buy', () => {
+  const scavenger = Math.max(...MODS.scavenger.tiers.map((t) => t.mul || 1));
+  assert.equal(goConst('MaxCoinMul'), scavenger,
+    'validate.MaxCoinMul is not the top SCAVENGER RIG tier');
+  const hardest = Math.max(...DIFFICULTY.map((d) => d.scoreMul));
+  assert.equal(goConst('MaxScoreMul'), hardest,
+    'validate.MaxScoreMul is not the hardest difficulty\'s scoreMul');
+});
+
+test('the afterburner speed bonus matches', () => {
+  const src = readFileSync(new URL('../src/shop.js', import.meta.url), 'utf8');
+  const m = src.match(/maxVXBonus \+= (\d+)/);
+  assert.ok(m, 'could not find the afterburner speed bonus in src/shop.js');
+  assert.equal(goConst('AfterburnerBonus'), Number(m[1]),
+    'validate.AfterburnerBonus has drifted from the AFTERBURNER mod');
 });
 
 test('the validator allows for the most heavily defended hull', () => {

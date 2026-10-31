@@ -1,0 +1,143 @@
+# CI for Rivets 'n Ruin.
+#
+# Four jobs rather than one, because they fail for different reasons and a
+# single red tick tells you nothing about which. They run in parallel.
+#
+# The smoke job is the one worth defending in review: state-based tests
+# cannot catch a renderer that has stopped drawing. The game can report a
+# healthy score, a moving camera and 60fps while painting a black screen,
+# and it has. Only looking at pixels catches that, so CI looks at pixels.
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push supersedes the one before it on the same branch; there is no
+  # value in finishing a run for a commit nobody will look at again.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: '1.24'
+  NODE_VERSION: '22'
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l $(find . -name '*.go' -not -path './build/*'))
+          if [ -n "$unformatted" ]; then
+            echo "::error::not gofmt-clean:"
+            echo "$unformatted"
+            gofmt -d $unformatted
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
+      # Under the race detector, because the run store, the rate limiter and
+      # the in-memory store are all touched from several goroutines and a
+      # data race there is a corrupted leaderboard, not a crash.
+      - name: test (race)
+        run: go test -race -count=1 ./...
+
+  js:
+    name: JavaScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # `node --check` on a .js file containing ES module syntax reports
+      # success even when it is genuinely unparseable — it only diagnoses
+      # correctly for .mjs. Every client module here is ESM in a .js file,
+      # so the Makefile copies them before checking. A gate that cannot
+      # fail is worse than no gate.
+      - name: syntax check every module
+        run: make js-check
+
+      - name: test
+        run: node --test test/*.test.mjs
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # The thresholds are in tools/coverage.sh so `make coverage-gate`
+      # gives the same answer locally as CI does. A gate you cannot
+      # reproduce on your own machine is a gate people learn to ignore.
+      - name: gate
+        run: make coverage-gate
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: |
+            build/go.cover
+            build/coverage.txt
+          retention-days: 7
+          if-no-files-found: ignore
+
+  smoke:
+    name: Smoke (renders)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # Pinned in package.json. Unpinned, a browser release can turn CI red
+      # on a morning when nothing in the repository changed.
+      - name: install playwright chromium
+        run: |
+          npm ci || npm install
+          npx playwright install --with-deps chromium
+
+      - name: smoke
+        run: make smoke
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: smoke-failure
+          path: build/*.png
+          retention-days: 7
+          if-no-files-found: ignore

@@ -25,7 +25,8 @@ import { updateOrdnance, resetOrdnance, ordnance } from './armory.js';
 import {
   minis, resetMinis, planMinis, updateMinis, hitMini, hitMinis, miniTargets,
 } from './miniboss.js';
-import { resetShop, applyMods } from './shop.js';
+import { resetShop, applyMods, MODS } from './shop.js';
+import { loadHangar, saveHangar } from './hangar.js';
 import { SPLASH_TIME, LAUNCH_TIME, EXIT_TIME, ENDING_TIME, launchPose, exitPose } from './sequences.js';
 import { tapped, anyTapped, endFrame } from './input.js';
 import {
@@ -58,15 +59,16 @@ export function makeGame(modSpec = null) {
     score: 0,
     turretsKilled: 0,
     deaths: 0,
-    coins: 0,
+    coins: 0,            // replaced from the hangar below
     coffins: 0,
     bars: 0,
     treasures: 0,
+    startAt: 0,            // the hull this run began on; see reportRun
     haul: freshHaul(),       // the whole run
     hullHaul: freshHaul(),   // this hull only, for the end-of-hull bonus
     bonus: null,             // last hull's bonus breakdown, for the overview
     deathsThisHull: 0,
-    mods: {},
+    mods: {},            // replaced from the hangar below
     bought: {},
     submitted: false,
     spawnCd: 1.2,
@@ -119,6 +121,13 @@ export function makeGame(modSpec = null) {
     game.startHull = v;
     setSetting('startHull', v);
   };
+  // What the pilot already owns. Coins and mods outlive the tab; see
+  // hangar.js for why those two and nothing else.
+  const owned = loadHangar(Object.keys(MODS));
+  game.coins = owned.coins;
+  game.mods = owned.mods;
+  applyMods(game);
+
   game.cam.x = clamp(game.player.x - VIEW_W / 2 + SHIP.w, 0, level.length - VIEW_W);
   return game;
 }
@@ -136,6 +145,11 @@ function recordUnlock(game) {
 // it would be a joke.
 function reset(game) {
   const at = clamp(game.startHull, 0, game.specs.length - 1);
+  // Which hull this run began on. A run that starts at AURUM reaches hull
+  // eight having flown one, and the two numbers mean different things to
+  // the leaderboard and to the validator: the first is how far you got,
+  // the second is how long it could possibly have taken.
+  game.startAt = at;
   if (game.levelIndex !== at) {
     game.levelIndex = at;
     game.level = buildLevel(game.specs[at]);
@@ -162,7 +176,9 @@ function reset(game) {
   game.score = 0;
   game.turretsKilled = 0;
   game.deaths = 0;
-  game.coins = 0;
+  // Coins and mods deliberately survive: they are the hangar, not the run.
+  // Everything else a shop sells is the run's loadout and does reset; see
+  // resetShop and hangar.js.
   game.coffins = 0;
   game.bars = 0;
   game.treasures = 0;
@@ -230,6 +246,9 @@ function loadNextHull(game) {
   const p = game.player;
   game.levelIndex++;
   recordUnlock(game);
+  // The hull's haul and its end-of-hull bonus are both in by now, and a
+  // pilot who closes the tab between hulls should keep them.
+  saveHangar(game);
   game.level = buildLevel(game.specs[game.levelIndex]);
   setTune(game.specs[game.levelIndex].tune);
 
@@ -268,9 +287,24 @@ function banner(game, text, sub = '', life = 2.4) {
   game.banner = { text, sub, t: life, max: life };
 }
 
+// How many hulls this run actually covered, as opposed to how far it got.
+// Two different numbers, and conflating them is what made the server throw
+// away a real 4.65-million run: it read "reached hull eight" as "flew eight
+// hulls" and decided 256 seconds was impossibly fast for them.
+//
+// Exported because it is the arithmetic, not the submission, that was
+// wrong, and arithmetic is what a test can hold still.
+export function hullsFlown(game) {
+  return Math.max(1, (game.levelIndex || 0) - (game.startAt || 0) + 1);
+}
+
 // Report a finished run to the backend. Fire-and-forget: submitRun never
 // throws and never blocks, so a dead backend cannot stall the end screen.
 function reportRun(game) {
+  // Bank what the run earned before anything else. A run that ends is the
+  // last certain moment to do it, and the coins are the pilot's whatever
+  // the leaderboard makes of the score.
+  saveHangar(game);
   if (game.submitted) return;
   game.submitted = true;
   submitRun({
@@ -278,6 +312,7 @@ function reportRun(game) {
     points: game.score,
     timeSec: Number(game.runTime.toFixed(2)),
     levels: game.levelIndex + 1,
+    hullsFlown: hullsFlown(game),
     turrets: game.turretsKilled,
     deaths: game.deaths,
     completed: game.state === 'victory',   // only a full campaign counts as completed

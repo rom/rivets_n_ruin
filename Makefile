@@ -15,7 +15,7 @@ NODE        ?= node
 LDFLAGS     := -s -w
 
 .DEFAULT_GOAL := help
-.PHONY: help run build test test-race test-js coverage bench fmt vet check js-check smoke tidy clean dist icons gallery stats
+.PHONY: help run build test test-race test-js coverage coverage-gate bench fmt vet check js-check smoke tidy clean dist icons gallery stats
 
 help: ## Show this help
 	@echo "Rivets 'n Ruin"
@@ -57,6 +57,9 @@ coverage: ## Coverage for both sides; prints a combined summary
 		| grep -E '^# (src/|all files)' || true
 	@echo
 	@echo "html go report: $(GO) tool cover -html=$(BUILD_DIR)/go.cover"
+
+coverage-gate: ## Coverage for both sides, failing below the floor (GO_MIN / JS_MIN)
+	@BUILD_DIR=$(BUILD_DIR) GO=$(GO) NODE=$(NODE) tools/coverage.sh
 
 bench: ## Run benchmarks, if any
 	$(GO) test -run '^$$' -bench . -benchmem ./...

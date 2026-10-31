@@ -157,7 +157,7 @@ func TestImpossibleScoreRejected(t *testing.T) {
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("expected 422, got %d (%s)", w.Code, w.Body)
 	}
-	if !strings.Contains(out["error"].(string), "cannot be flown") {
+	if !strings.Contains(out["error"].(string), "full throttle") {
 		t.Fatalf("unhelpful error: %v", out)
 	}
 

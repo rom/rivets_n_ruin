@@ -7,6 +7,7 @@
 // differently from one with Afterburner, and coins only stretch to so many.
 
 import { PICKUP, ARMORY } from './config.js';
+import { saveHangar } from './hangar.js';
 
 // A mod is one or more tiers. Most are a single fitting; the two that
 // change how the whole hull is flown — how far loot reaches and what it is
@@ -198,6 +199,7 @@ export function buy(game, row) {
     game.mods[row.id] = lvl + 1;
     game.coins -= row.cost;
     applyMods(game);
+    saveHangar(game);
     return 'FITTED ' + row.name;
   }
 
@@ -207,6 +209,7 @@ export function buy(game, row) {
   it.buy(game.player);
   game.bought = game.bought || {};
   game.bought[it.id] = (game.bought[it.id] || 0) + 1;
+  saveHangar(game);     // the coins are spent whatever happens to the run
   return 'BOUGHT ' + it.name;
 }
 
@@ -251,8 +254,10 @@ export function applyMods(game) {
   }
 }
 
+// Clears the run's loadout. Mods are not part of it: they are a permanent
+// purchase held in the hangar, and wiping them here is what used to make
+// them vanish the moment you launched again, never mind closed the tab.
 export const resetShop = (game) => {
-  game.mods = {};
   game.bought = {};
   applyMods(game);
 };

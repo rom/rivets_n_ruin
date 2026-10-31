@@ -5,13 +5,15 @@ import {
 } from './input.js';
 import { demoActions, IDLE_BEFORE_DEMO } from './demo.js';
 import { startLoop } from './loop.js';
+import { installErrorReporting, report } from './errors.js';
 import { makeGame, update, syncBest } from './game.js';
 import { drawWorld } from './render.js';
 import {
   drawHud, drawPaused, drawQuitPrompt, drawSettings, drawShop, drawHelp, HELP_PAGES,
   drawDemoBadge,
 } from './hud.js';
-import { rows as shopRows, buy as shopBuy } from './shop.js';
+import { rows as shopRows, buy as shopBuy, applyMods } from './shop.js';
+import { saveHangar, clearHangar } from './hangar.js';
 import { unlock, toggleMute, isMuted, ready } from './audio.js';
 import { startMusic, stopMusic, musicRunning } from './music.js';
 import { sfxUi } from './sfx.js';
@@ -20,7 +22,7 @@ import { nextTune, tuneName, setTune, TUNES } from './music.js';
 import * as settings from './settings.js';
 import { applySettings } from './audio.js';
 import { loadModFromURL } from './mods.js';
-import { LEVELS } from './config.js';
+import { LEVELS, BUILD } from './config.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false });
@@ -84,6 +86,8 @@ let demoOn = false;
 let helpOpen = false;
 let helpPage = 0;
 let settingsSel = 0;
+let wipeArmed = false;      // the hangar wipe has been asked for once
+let wipeNote = '';
 let shopOpen = false;
 let shopSel = 0;
 let shopNote = '';
@@ -120,7 +124,36 @@ setInterval(() => {
 }, 10000);
 
 // Exposed for poking at the feel from the devtools console.
+// A browser tab can close at any moment, including mid-hull. The hangar
+// is saved at every point the game knows about — a purchase, a hull
+// cleared, a run ended — but none of those is "the player just closed
+// the tab", so catch that too. pagehide fires where beforeunload does
+// not, notably on iOS.
+for (const ev of ['pagehide', 'beforeunload']) {
+  window.addEventListener(ev, () => saveHangar(game));
+}
+// Backgrounding a tab is the same risk: a phone may never come back to it.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') saveHangar(game);
+});
+
+// Error reporting, installed before anything else can throw. The context
+// is a callback rather than a value so a report carries where the game
+// was at the moment of the fault, not at the moment this was set up.
+installErrorReporting({
+  context: () => ({
+    state: game.state,
+    hull: game.levelIndex + 1,
+    build: BUILD,
+  }),
+});
+
 window.game = game;
+// Exposed for the tooling only: the gallery and the end-screen probe need
+// to put the net client into a given state (refused, placed, offline) to
+// photograph what the player would actually see. Nothing in the game reads
+// this back.
+window.net = netState();
 
 // Renaming mints a fresh identity server-side; the old name keeps its scores.
 function promptRename() {
@@ -173,7 +206,28 @@ startLoop(
       if (tapped('left')) { settings.nudge(settings.DEFS[settingsSel].id, -1, bounds); sfxUi(); }
       if (tapped('right')) { settings.nudge(settings.DEFS[settingsSel].id, 1, bounds); sfxUi(); }
       if (tapped('restart')) { settings.reset(); sfxUi(); }
-      if (tapped('options') || tapped('pause') || tapped('start')) { settingsOpen = false; sfxUi(); }
+      // Clearing the hangar is the one irreversible thing on this screen,
+      // so it asks twice. The prompt lives in the footer rather than a
+      // modal: a modal over a settings page is a lot of machinery for a
+      // question with two answers.
+      if (tapped('wipe')) {
+        if (wipeArmed) {
+          clearHangar(game);
+          applyMods(game);
+          wipeArmed = false;
+          wipeNote = 'HANGAR CLEARED';
+        } else {
+          wipeArmed = true;
+          wipeNote = '';
+        }
+        sfxUi();
+      } else if (wipeArmed && (tapped('up') || tapped('down') || tapped('left')
+        || tapped('right') || tapped('options') || tapped('pause') || tapped('start'))) {
+        wipeArmed = false;      // any other key is an answer of "no"
+      }
+      if (tapped('options') || tapped('pause') || tapped('start')) {
+        settingsOpen = false; wipeArmed = false; wipeNote = ''; sfxUi();
+      }
       if (settings.get('tune') !== undefined) setTune(settings.get('tune'));
       endFrame();
       return;
@@ -247,7 +301,7 @@ startLoop(
     if (demoOn) drawDemoBadge(ctx, game);
     if (shopOpen) drawShop(ctx, game, shopSel, shopNote);
     else if (helpOpen) drawHelp(ctx, helpPage);
-    else if (settingsOpen) drawSettings(ctx, game, settingsSel);
+    else if (settingsOpen) drawSettings(ctx, game, settingsSel, { wipeArmed, wipeNote });
     else if (game.quitting) drawQuitPrompt(ctx, game);
     else if (paused) drawPaused(ctx);
     // Frame-to-frame interval, not draw time: canvas2d records lazily, so
@@ -257,4 +311,11 @@ startLoop(
     reportFrame(now - lastFrameAt, canvas, ctx);
     lastFrameAt = now;
   },
+  // GAME SPEED. Menus and the attract demo run at full rate whatever it is
+  // set to: slowing the game is about reaction time in flight, and a menu
+  // that scrolls in slow motion is just a worse menu.
+  () => (game.state === 'play' || game.state === 'dying'
+    ? (Number(settings.get('gameSpeed')) || 100) / 100
+    : 1),
+  (err) => report('frame', err),
 );

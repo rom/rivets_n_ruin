@@ -678,6 +678,39 @@ to `SHIELD 125` in green once your ceiling has moved.
 Guns cap at level 3 each, rising by one per hull cleared to a hard ceiling of
 5; collecting at max converts to points instead.
 
+### How often a crate holds a gun
+
+Weights, not probabilities — the roll is over their sum, so one can be moved
+without rebalancing the rest:
+
+| Crate holds | Weight | Notes |
+| --- | --- | --- |
+| shields-refill | 34 | the backbone |
+| healthbars | 16 | |
+| **gunspeed** | 14 | **× 0.45 per level already held** |
+| **gunblaze** | 12 | **× 0.45 per level already held** |
+| lifesavers | 8 | the rare one |
+
+The two gun upgrades used to be a flat 42 of 100 between them whatever you
+were already carrying. Hull one yields about a dozen crates and hull two about
+twenty-two, so both guns hit their ceiling by the third hull of twenty-five —
+and from there a capped upgrade went on eating 42% of the table to hand back a
+consolation 300 points.
+
+Now the odds fall away with every level held and a capped level is not rolled
+at all. The first upgrade still arrives in the opening minute, because the
+opening should feel generous; maxing both from drops alone takes about 55
+crates instead of 19. Pimping the guns out faster than that is what the
+armourer is for — a deliberate purchase rather than a thing that simply
+happens to you.
+
+| | end of hull 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- | --- |
+| before | 2.3 / 2.1 | 4.0 / 4.0 | 5.0 / 5.0 | 5.0 / 5.0 | 5.0 / 5.0 |
+| after | 1.4 / 1.2 | 3.0 / 2.9 | 4.3 / 4.2 | 4.9 / 4.9 | 5.0 / 5.0 |
+
+(gunspeed / gunblaze, averaged over 800 simulated runs, cap rising 3 → 5.)
+
 **Losing a ship costs every weapon addon picked up since the last refit** —
 both gun levels and the entire armory. What the refit built into the ship
 survives, because that is the ship rather than something you are carrying. So
@@ -797,11 +830,76 @@ game that is not this one is worse than none.
 ![Settings](docs/settings.png)
 
 `O` opens them. Music and sound effects separately, master volume, tune
-override, **difficulty**, and switches for bloom, scanlines, screen shake,
-the foreground layer and pickup toasts — the visual ones double as a
-performance escape hatch on a slow machine. Everything persists, and the
-definitions are data, so adding a setting is a list entry rather than a UI
-change.
+override, **difficulty**, accessibility, and switches for bloom, scanlines,
+screen shake, the foreground layer and pickup toasts — the visual ones
+double as a performance escape hatch on a slow machine. Everything
+persists, and the definitions are data, so adding a setting is a list entry
+rather than a UI change.
+
+The list scrolls and the heading names the group you are in. It used to
+place its explanation line below however many rows there happened to be, so
+every setting added pushed that line one notch nearer the footer and the
+twelfth put it through. Widening the gap only moved the cliff; a fixed
+window has no cliff, and the screen now lays out identically whether there
+are five settings or fifty.
+
+### Accessibility
+
+Each of these removes a specific barrier rather than making the game easier
+in general — easier in general is what `DIFFICULTY` is for, and it has its
+own score multiplier so it cannot be used as a silent advantage. All are
+off by default, because a default that changes how the game plays for
+everyone is a redesign and not an accommodation.
+
+| Setting | What it removes |
+| --- | --- |
+| **AUTO FIRE** | Holding a key down for an entire run. The rate is the gun's, not the key's, so this is exactly what holding fire already did. |
+| **GAME SPEED** | Reaction-time pressure. 50–100%, and it scales the time fed to the fixed-step loop rather than the step, so the physics cannot change — only how much of it happens per second. Menus and the attract demo always run at full rate. |
+| **REDUCE FLASHING** | The full-screen flash on hits and big explosions, damped to 22%. Not to zero: the flash is feedback, and removing it takes information away from the player it is meant to help. |
+| **HIGH CONTRAST** | Hunting for enemy fire. Incoming shots get a neutral-grey outline — grey rather than white because under the `lighter` composite a white ring blooms into the shot it is framing. |
+| **FIRING LINE** | Guessing where the ship is actually aiming, which otherwise means learning a 24px sprite. |
+
+A setting that exists but does nothing is worse than none: it says the
+barrier is gone when it is not. `test/access.test.mjs` asserts each one
+reaches the thing it claims to change — auto fire actually fires and does
+*not* raise the rate, game speed actually halves how far the simulation
+advances, a corrupt speed cannot stall the game or run it fast.
+
+### What survives a closed tab
+
+Three different lifetimes, and they used to be tangled:
+
+| | Lifetime | Holds |
+| --- | --- | --- |
+| **Loadout** | the hull | gun levels, armory — forfeit with the ship |
+| **Run** | the campaign | score, clock, hull reached |
+| **Hangar** | the pilot | **coins banked and mods owned** |
+
+The hangar was being thrown away with the other two: close the tab and
+every mod you had paid for was gone — and `resetShop` wiped them the moment
+you launched again, never mind closed anything. Mods are the one purchase
+the game calls permanent, so they are the one purchase that has to outlive
+a session; coins go with them, because a currency you cannot bank is not a
+currency. It saves on a purchase, on a hull cleared, on a run ending, and
+on `pagehide` / `visibilitychange`, because none of those is "the player
+just closed the tab".
+
+What deliberately does *not* persist is anything from the `ITEMS` list.
+Those are the run's loadout, already forfeit on death, and persisting them
+would hand a fresh run a maxed ship.
+
+Storage is the one input a player can edit by hand, so nothing read back is
+trusted: unknown mod ids are dropped, levels and coins are bounded, a save
+from a newer version is ignored rather than half-read, and storage being
+unavailable at all is an empty hangar rather than a crash.
+
+`K` twice on the settings screen clears it. Progress that persists needs a
+way back to nothing, and it asks twice because it is the one irreversible
+thing on that screen. Clearing storage alone was not enough, incidentally:
+the game saves again on `pagehide`, so a wipe that left the live coins in
+place was written straight back when the tab closed — found by doing
+exactly that in a browser, and now `clearHangar` takes the game so the two
+cannot get out of step.
 
 ### Starting hull
 
@@ -1163,17 +1261,41 @@ per-window (day, week, all time).
 
 ### Score validation — read this before trusting a number
 
-`internal/validate` derives bounds from the game's own physics. The hull is
-12,000px, top speed is 310px/s, so a full out-and-back cannot be flown in under
-**73.9 seconds** — any faster "completed" run is rejected outright. Point totals
+`internal/validate` derives bounds from the game's own physics. The first hull
+is 12,000px and top speed is 310px/s, so hull one cannot be flown in under
+**32.9 seconds** — any faster "completed" run is rejected outright. Point totals
 are checked against a ceiling computed from the run's duration and the scoring
 rules.
 
 The campaign is modelled hull by hull, including the fact that the ship gets
-faster with each refit — a later hull can legitimately be flown quicker than the
-first, and a bound that ignored that would reject honest runs. Three hulls out
-and back cannot be done in under **249 seconds**, and the full eight-hull
-campaign not in under **738 seconds**.
+faster with each refit and that the afterburner mod exists — a later hull is
+longer but can legitimately be flown quicker than an earlier one, and a bound
+that ignored that would reject honest runs. The full twenty-five-hull campaign
+cannot be flown in under **1,104 seconds**.
+
+Crucially, the floor covers **the hulls actually flown, not the hull reached**.
+A run restarted on AURUM reaches hull eight having flown one, and the client
+sends both numbers (`levels` and `hullsFlown`) because they mean different
+things — the first to the board, the second to the validator.
+
+**Being wrong in the strict direction is the expensive failure.** A bound that
+is too loose lets a fabricated number onto the board; a bound that is too tight
+only ever fires on people who really played. Both halves of this have now
+happened in anger:
+
+- The floor modelled a run out **and back**, long after the return leg was
+  removed. Harmless over one hull with eight in the campaign; an outright
+  rejection of honest completions at twenty-five.
+- The points ceiling was built before coins, bars, coffins and treasure
+  existed, so it assumed at most one pickup per kill worth at most 550. A real
+  single-hull run scored **4,650,367** against a ceiling of **1,744,776** and
+  was thrown away — and because the end screen said `SENDING RUN...` whatever
+  the answer was, the rejection was invisible and looked like a slow network.
+
+All three are now bounded by tests built from that exact submission
+(`TestTheRunThatWasWronglyRefused`), the end screen states every outcome, and
+`test/parity.test.mjs` recomputes each mirrored economy constant from
+`src/config.js` so they cannot drift again.
 
 **These are plausibility bounds, not anti-cheat.** They stop someone curling a
 score of 10⁹ onto the board. They do not stop anyone who reads the rules and
@@ -1187,6 +1309,18 @@ it is a separate piece of work and it is not done here.
 An in-process store behind a `Store` interface, snapshotted to JSON (written to
 a temp file and renamed, so a crash cannot truncate your data). Periodic saves
 plus a final one on `SIGTERM`.
+
+Open runs are snapshotted alongside it, to `<data>.runs`. A twenty-five-hull
+campaign cannot be flown in under eighteen minutes and in practice takes a
+good deal longer, so a restart in the middle of one is not a rare event — and
+it used to void every run in flight: the run vanished, the submission came
+back `409 no such run, or it has expired`, and the player lost a campaign to a
+deploy. That is the same failure as the leaderboard rejecting an honest score,
+and just as invisible from where they are sitting. A used or expired run is
+not resurrected, a run that expires *while the server is down* is not
+restored, and one unreadable entry is dropped rather than failing the whole
+restore — losing everybody's campaign to one bad record would be a worse bug
+than the one this fixes.
 
 This is right for now and wrong later. It does not survive beyond one process,
 so there is no horizontal scaling; everything is resident in memory; and top
@@ -1245,19 +1379,100 @@ thrown — while the screen rendered black. State tests cannot see that.
 ### Tests
 
 `make check` runs everything: gofmt, vet, Go tests under `-race`, the client
-tests, a JS syntax gate, and the browser smoke test.
+tests, a JS syntax gate, and the browser smoke test. `make coverage-gate`
+adds the coverage floor.
 
 Client tests live in `test/` on node's built-in runner. `_setup.mjs` provides
 deliberately inert `localStorage`, canvas and `AudioContext` stubs - anything
 depending on what was actually drawn or heard belongs in the smoke test.
 
+Two of them are not unit tests at all and earn their place anyway:
+
+- **`test/soak.test.mjs`** plays the game headlessly for two simulated
+  minutes with input arriving, and after *every* frame asserts the things
+  that must never stop being true: nothing is `NaN`, no pool has
+  overflowed, the camera is inside the hull, the shield is under its
+  ceiling, no state is wedged. It also flies into every one of the
+  twenty-five hulls. These are failures that do not look like failures from
+  inside any single module — a `NaN` camera renders black while every
+  health signal reads fine, and an unwinnable hull only shows up by flying
+  it.
+- **`test/draw.test.mjs`** executes every draw path in every state, on
+  every hull, with every toggle both ways. It does **not** check that
+  anything was drawn correctly — the canvas is a stub and judging a picture
+  is the smoke test's job. It checks that nothing *throws*, which matters
+  because `startLoop` catches, drops the frame and carries on: a renderer
+  throwing sixty times a second presents as a frozen picture with a healthy
+  score, a moving camera and a plausible frame rate.
+
+### CI
+
+`.github/workflows/ci.yml`, four jobs in parallel rather than one, because
+they fail for different reasons and a single red tick tells you nothing
+about which:
+
+| Job | Gate |
+| --- | --- |
+| **Go** | gofmt, vet, build, `go test -race` |
+| **JavaScript** | the ESM syntax gate, then the client tests |
+| **Coverage** | `make coverage-gate` |
+| **Smoke** | the real browser, reading pixels |
+
+The thresholds live in `tools/coverage.sh`, not in the workflow, so
+`make coverage-gate` gives the same answer on your machine as it does in
+CI. A gate you cannot reproduce locally is one people learn to ignore, and
+then to delete. The floor is **85%** each side; `cmd/server` is excluded
+because it is `main()` — flag parsing, a listener and a signal handler —
+and the only way to cover it is to start the process, which `make smoke`
+already does end to end. Counting it would mean either a permanently
+depressed number or tests that assert nothing in order to raise one.
+
+The gate also prints every function under 60%, so the number comes with a
+list of where to go next rather than just a verdict.
+
+### Client error reporting
+
+The frame loop catches everything, drops the bad frame and carries on.
+That is right — a glitchy frame is recoverable and a dead loop is not —
+but it is also why a renderer that throws every frame goes unnoticed. So
+the exceptions get sent to `POST /api/errors` and into the server log,
+along with uncaught errors and unhandled rejections. Three rules, in order
+of how much they matter:
+
+1. **Reporting cannot affect the game.** Every call is best-effort: it
+   swallows its own failures, never awaits, never throws back into the
+   caller. A reporter that can break the thing it is reporting on is worse
+   than no reporter — tested by breaking the reporter's own internals and
+   asserting the frame loop survives.
+2. **One fault is not a thousand reports.** Identical faults are counted
+   rather than resent, grouped by where they came from rather than by their
+   text — a message that interpolates a changing value (`foe 41 is at NaN`)
+   would otherwise be a new fault every frame. There is a hard per-session
+   cap, and the number dropped is reported too, because hitting the cap is
+   itself a signal.
+3. **Nothing sensitive leaves.** The auth token is the one thing here worth
+   stealing, and a stack frame or a thrown object can easily carry one.
+   Anything that looks like a credential is stripped from both the message
+   and the stack before a report goes anywhere.
+
+Server side it is treated as hostile input from any browser, because it is:
+unauthenticated, bounded batch, truncated strings, a fixed-size ring, and
+the same per-IP rate limiter as everything else under `/api/`. `/api/stats`
+reports *how much* is going wrong but not *what* — the reports carry stack
+traces from other people's machines and there is no admin tier here to put
+them behind. The contents go to the log.
+
 Several exist because of bugs that shipped:
 
 - **`test/parity.test.mjs`** reads `internal/validate/score.go` and compares
   it against `src/config.js`. The Go validator mirrors hull lengths, top
-  speed and boss rewards to decide what is physically possible; drift makes
-  it reject honest runs with a 422, which has happened twice. Going from
-  three hulls to eight broke four of these at once and this caught all four.
+  speed, boss rewards and the whole pickup economy to decide what is
+  physically possible; drift makes it reject honest runs with a 422, which
+  has happened three times. Going from three hulls to eight broke four of
+  these at once and this caught all four. The pickup economy was not covered
+  and that is the drift that threw away a 4.65-million run; it is covered now,
+  down to the treasure rate, which climbs per hull and so is derived from the
+  hull count on both sides rather than written down on either.
 - **`test/camera.test.mjs`** asserts the camera survives a malformed `dt`.
   A mis-ordered argument once made it `NaN`, which renders a black screen
   while score, ship and frame rate all still look healthy.

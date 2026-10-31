@@ -59,20 +59,36 @@ export function rollTreasure() {
 
 // Weighted drop table. Shield refills are the backbone; an extra ship is the
 // rare one, because handing them out freely removes the run's whole tension.
-const TABLE = [
-  ['shield', 34],
-  ['gunspeed', 22],
-  ['gunblaze', 20],
-  ['healthbar', 16],
-  ['life', 8],
-];
-const TOTAL_WEIGHT = TABLE.reduce((a, [, w]) => a + w, 0);
+const CRATE_KINDS = ['shield', 'healthbar', 'gunspeed', 'gunblaze', 'life'];
+const GUNS = { gunspeed: 'gunSpeed', gunblaze: 'gunBlaze' };
 
-function rollKind() {
-  let r = Math.random() * TOTAL_WEIGHT;
-  for (const [kind, w] of TABLE) {
-    r -= w;
-    if (r <= 0) return kind;
+// What a crate is worth rolling, given what the pilot already has.
+//
+// Flat weights meant the two gun upgrades were 42% of every crate whatever
+// you were carrying, so both reached their cap inside the first hull and
+// stayed there — and a capped upgrade went on eating 42% of the table to
+// hand back a consolation 300 points. Both halves of that are fixed here:
+// the odds decay per level held, and a level at its cap is not rolled.
+export function dropWeight(kind, pl) {
+  const base = PICKUP.dropWeights[kind] || 0;
+  const field = GUNS[kind];
+  if (!field) return base;
+  const held = pl ? (pl[field] || 0) : 0;
+  const cap = pl ? pl.gunCap : PICKUP.gunLevels;
+  if (held >= cap) return 0;
+  return base * PICKUP.gunDropFalloff ** held;
+}
+
+export function rollKind(pl) {
+  const weights = CRATE_KINDS.map((k) => dropWeight(k, pl));
+  const total = weights.reduce((a, w) => a + w, 0);
+  // Everything a crate could hold is capped out. Shields are always worth
+  // something, so the table can never be empty.
+  if (total <= 0) return 'shield';
+  let r = Math.random() * total;
+  for (let i = 0; i < CRATE_KINDS.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return CRATE_KINDS[i];
   }
   return 'shield';
 }
@@ -93,7 +109,7 @@ function freeSpot(level, x, y) {
   return null;
 }
 
-export function spawnPickup(game, x, y, kind = rollKind()) {
+export function spawnPickup(game, x, y, kind = rollKind(game.player)) {
   const sy = freeSpot(game.level, x, clamp(y, FIELD_TOP + 10, FIELD_BOT - 10));
   if (sy === null) return null;
   const p = pickups.spawn();

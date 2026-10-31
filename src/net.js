@@ -15,6 +15,8 @@ const S = {
   checked: false,
   player: null,        // { id, name, token }
   top: [],        // one row per player
+  submitState: 'idle',   // idle | sending | recorded | refused
+  submitError: null,     // why the backend refused it, in its own words
   runs: [],       // best individual runs
   board: 'pilots',// which of the two the UI is showing
   best: 0,
@@ -194,6 +196,8 @@ export async function refreshStats() {
 // without having started a run through the game. See internal/api/runs.go
 // for what this does and does not actually prove.
 export async function startRun(modId = '') {
+  S.submitState = 'idle';
+  S.submitError = null;
   S.run = null;
   if (!S.player) return null;
   const data = await call('/api/runs/start', { method: 'POST', auth: true, body: { modId } });
@@ -221,15 +225,24 @@ async function signRun(run, points, timeSec, levels) {
   return b64url(mac);
 }
 
-export async function submitRun({ modId = '', points, timeSec, turrets, deaths, completed, levels = 1 }) {
+export async function submitRun({
+  modId = '', points, timeSec, turrets, deaths, completed, levels = 1, hullsFlown = 0,
+}) {
   if (!S.player) return null;
-  const body = { modId, points, timeSec, turrets, deaths, completed, levels };
+  const body = { modId, points, timeSec, turrets, deaths, completed, levels, hullsFlown };
   if (S.run) {
     body.runId = S.run.id;
     try { body.sig = await signRun(S.run, points, timeSec, levels); } catch { /* unsigned */ }
   }
+  S.submitState = 'sending';
   const data = await call('/api/scores', { method: 'POST', auth: true, body });
   S.run = null;        // a run is good for one submission
+  // A run the backend refuses is not a run that is still sending. The end
+  // screen used to show SENDING RUN... for as long as you left it sitting
+  // there, which is how a rejected 4.6-million run looked exactly like a
+  // slow network.
+  S.submitState = data ? 'recorded' : 'refused';
+  S.submitError = data ? null : S.lastError;
   if (data) {
     S.rank = data.rank || null;
     if (data.score && data.score.points > S.best) S.best = data.score.points;
