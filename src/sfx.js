@@ -101,8 +101,11 @@ export function sfxRespawn() {
   tone({ type: 'square', f0: 220, f1: 880, t, attack: 0.02, decay: 0.2, peak: 0.12, sweep: 'lin' });
 }
 
-// Arpeggio stingers. The turnaround and the dock are the two moments the run
-// has structure, so they get the only melodic sounds outside the music.
+// Arpeggio stingers. Something arriving and reaching the dock are the two
+// moments the run has structure, so they get the only melodic sounds
+// outside the music. (The first was called sfxTurnaround until well after
+// the turnaround itself was removed; it now plays when a boss or a
+// miniboss shows up.)
 function arp(semis, t, peak, type = 'square', step = 0.075, root = 293.66) {
   semis.forEach((s, i) => {
     tone({
@@ -112,7 +115,7 @@ function arp(semis, t, peak, type = 'square', step = 0.075, root = 293.66) {
   });
 }
 
-export function sfxTurnaround() {
+export function sfxArrival() {
   if (!ready()) return;
   const t = now();
   duckMusic(0.45, 0.8, 0.4);

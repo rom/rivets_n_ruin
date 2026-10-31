@@ -1,7 +1,9 @@
 const down = new Set();
 const pressed = new Set();
 
-const MAP = {
+// Exported so the README's controls table can be checked against it: a
+// key that is bound but undocumented is a feature nobody finds.
+export const MAP = {
   ArrowLeft: 'left',  KeyA: 'left',
   ArrowRight: 'right', KeyD: 'right',
   ArrowUp: 'up',      KeyW: 'up',

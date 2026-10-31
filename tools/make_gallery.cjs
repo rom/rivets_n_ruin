@@ -337,7 +337,7 @@ const OUT = path.join(__dirname, '..', 'docs');
     const sh = await import('./src/shop.js');
     const g = window.game;
     g.levelIndex = fit.lvl;
-    g.level = buildLevel(g.specs[0]);        // one backdrop for all eight
+    g.level = buildLevel(g.specs[0]);        // one backdrop for every mark
     g.boss = null;
     fo.resetFoes();
     en.resetEnemies();
@@ -364,6 +364,19 @@ const OUT = path.join(__dirname, '..', 'docs');
     { lvl: 6, gs: 4, gb: 4, ammo: { bomb: 8, grenade: 9, missile: 5 }, mods: { magnet: 2, plating: 1, autoloader: 1, scavenger: 2, afterburner: 1 } },
     { lvl: 7, gs: 5, gb: 5, ammo: { bomb: 9, grenade: 12, missile: 6 }, mods: { magnet: 3, plating: 1, autoloader: 1, scavenger: 3, afterburner: 1, reclaimer: 1 } },
   ];
+  // The eight above cover the eight hand-authored hulls, which is the
+  // whole campaign this table was written for. There are twenty-five marks
+  // now, so the last ship anyone actually flies was not photographable at
+  // all — shot separately rather than renumbering the eight the README
+  // already points at.
+  const FINAL_FIT = {
+    lvl: 24, gs: 5, gb: 5,
+    ammo: { bomb: 12, grenade: 16, missile: 8 },
+    mods: {
+      magnet: 3, plating: 1, autoloader: 1, scavenger: 3, afterburner: 1,
+      reclaimer: 1, mount: 1, drone: 2, pointdef: 1, regen: 2, siege: 1,
+    },
+  };
   for (let i = 0; i < FITS.length; i++) {
     await clear();
     await quiet();
@@ -373,6 +386,13 @@ const OUT = path.join(__dirname, '..', 'docs');
       Math.round(box.height * (110 / 384)));
     await freeze(false);
   }
+  await clear();
+  await quiet();
+  await freeze(true);
+  await poseShip(FINAL_FIT);
+  await cropShot('ship-25.png', Math.round(box.height * (96 / 384)),
+    Math.round(box.height * (110 / 384)));
+  await freeze(false);
 
   // --- a laser gate, with the ship held against it
   console.log('laser:');

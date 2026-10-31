@@ -108,8 +108,8 @@ export const THEMES = {
   },
 };
 
-// Each hull is guarded at its far end. The boss gates the turnaround, so a
-// run is approach -> boss -> escape, and reaching the dock is earned twice.
+// Each hull is guarded at its far end. The boss gates the way out, so a
+// hull is approach -> boss -> escape and the dock is earned, not reached.
 export const BOSS = {
   arenaMargin: 40,
   // How long the arena stays open after the boss dies. Its hold scatters
@@ -322,6 +322,12 @@ const THEME_CYCLE = Object.keys(THEMES);
 const ALL_FOES = ['mine', 'lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech'];
 const ALL_TOWERS = ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket'];
 
+// Binary floating point gives 0.64 - 3 * 0.018 as 0.5860000000000001, and
+// those digits escaped into the README's hull table, where they read as a
+// bug in the game rather than in the arithmetic. Rounded at the source, so
+// anything generated from these is clean too.
+const r3 = (x) => Math.round(x * 1000) / 1000;
+
 const DEEP_LEVELS = DEEP_HULLS.map(([name, subtitle], i) => {
   const n = CORE_LEVELS.length + i;        // campaign index, 8..24
   const k = i + 1;                         // how far past the core, 1..17
@@ -335,13 +341,13 @@ const DEEP_LEVELS = DEEP_HULLS.map(([name, subtitle], i) => {
     // No cap: two hulls of the same length read as a mistake, and the
     // texture is chunked so length costs nothing it did not already cost.
     length: 25000 + k * 950,
-    gapScale: Math.max(0.40, 0.55 - k * 0.009),
-    clearChance: Math.max(0.015, 0.03 - k * 0.001),
+    gapScale: r3(Math.max(0.40, 0.55 - k * 0.009)),
+    clearChance: r3(Math.max(0.015, 0.03 - k * 0.001)),
     turretHp: 18 + k * 2,
-    turretCooldown: Math.max(0.52, 0.80 - k * 0.017),
+    turretCooldown: r3(Math.max(0.52, 0.80 - k * 0.017)),
     turretRange: Math.min(580, 460 + k * 7),
     interceptorSpeed: Math.min(400, 294 + k * 6),
-    interceptorSpawn: Math.max(0.34, 0.64 - k * 0.018),
+    interceptorSpawn: r3(Math.max(0.34, 0.64 - k * 0.018)),
     interceptorHp: 6 + Math.floor(k / 3),
     foes: ALL_FOES,
     towers: ALL_TOWERS,
@@ -384,10 +390,24 @@ export const LEVEL_UP = {
   maxVXAdd: 24,
   maxVYAdd: 18,
   bulletSpeedAdd: 50,
-  gunSpeed: 1,     // free levels granted
-  gunBlaze: 1,
-  gunCap: 1,       // and the ceiling rises with them
   lives: 1,
+
+  // Free gun levels for clearing a hull, and how fast the ceiling rises.
+  //
+  // These used to be +1 of each, every hull. Combined with a cap that also
+  // rose every hull, the free grants alone drove both guns to their
+  // ceiling by hull five of twenty-five whatever the drops did — so making
+  // the drops rarer just moved the point where the grants took over.
+  // Spaced out, they are a thing that happens a few times in a campaign
+  // rather than a tick-over, and the drops and the armourer decide the
+  // rest.
+  //
+  // Over twenty-five hulls: gun speed at 5, 10, 15, 20, 25; blaze at 6,
+  // 12, 18, 24; the cap at 7 and 14, which is where it reaches its hard
+  // maximum of PICKUP.gunCapMax.
+  gunSpeedEvery: 5,
+  gunBlazeEvery: 6,
+  gunCapEvery: 7,
 };
 
 export const DT = 1 / 120;               // fixed physics step
@@ -535,7 +555,7 @@ export const PICKUP = {
   shieldCeiling: 220,    // and stops here
   maxLives: 6,
 
-  gunLevels: 3,          // base cap; LEVEL_UP.gunCap raises it each hull
+  gunLevels: 3,          // base cap; LEVEL_UP.gunCapEvery raises it
   // The hard ceiling on gun upgrades, stated rather than falling out of an
   // array length. With eight hulls, +1 cap each would reach level 10: that
   // is 22 bullets a volley at 40 volleys a second, which starves the shot

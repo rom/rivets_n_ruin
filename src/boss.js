@@ -1,8 +1,8 @@
 // Bosses.
 //
-// One guards the far end of each hull, and killing it is what opens the
-// turnaround — so a run reads as approach, fight, escape, rather than a lap
-// with a waypoint. The fight happens in a locked arena at the hull's end:
+// One guards the far end of each hull, and killing it is what opens the way
+// out — so a hull reads as approach, fight, escape, rather than a lap with
+// a waypoint. The fight happens in a locked arena at the hull's end:
 // the camera pins, the ship is walled in, and there is nowhere to run.
 //
 // Each boss is a different problem. The Warden is a static fortress whose

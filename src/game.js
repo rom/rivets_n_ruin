@@ -32,7 +32,7 @@ import { tapped, anyTapped, endFrame } from './input.js';
 import {
   sfxCoin, sfxGoldBar, sfxCoffin, sfxTreasure,
   sfxPickup, sfxPlayerHit, sfxHullAbsorb, sfxDeath, sfxRespawn,
-  sfxTurnaround, sfxComplete, sfxGameOver, sfxUi,
+  sfxArrival, sfxComplete, sfxGameOver, sfxUi,
 } from './sfx.js';
 import { setIntensity, setTune } from './music.js';
 import { submitRun, heartbeat, serverBest, startRun } from './net.js';
@@ -104,7 +104,7 @@ export function makeGame(modSpec = null) {
   game.onMiniArrive = (name) => {
     game.toast = { text: name, kind: 'coffin', t: 2.2 };
     kick(game.cam, 5);
-    sfxTurnaround();
+    sfxArrival();
   };
   game.onMiniEscort = () => spawnFoeForLevel(game);
 
@@ -217,6 +217,12 @@ function reset(game) {
 // difficulty curve.
 function applyRefit(game) {
   const p = game.player;
+  // Which refit this is. Counted on the player rather than passed in,
+  // because reset() credits the hulls you skipped by calling this in a
+  // loop and the end-of-hull path calls it once — a caller that had to
+  // work out the number itself is a caller that can get it wrong.
+  p.refits = (p.refits || 0) + 1;
+  const every = (n) => n > 0 && p.refits % n === 0;
 
   p.shieldMax += LEVEL_UP.shieldMax;
   p.shield = p.shieldMax;
@@ -227,12 +233,20 @@ function applyRefit(game) {
   // The refit raises the base; applyMods adds any extra mounts on top of
   // it. Raising the live cap here would be lost the next time mods are
   // applied, and raising both would double-count.
-  p.gunCapBase = Math.min(PICKUP.gunCapMax, (p.gunCapBase || p.gunCap) + LEVEL_UP.gunCap);
+  if (every(LEVEL_UP.gunCapEvery)) {
+    p.gunCapBase = Math.min(PICKUP.gunCapMax, (p.gunCapBase || p.gunCap) + 1);
+  } else {
+    p.gunCapBase = p.gunCapBase || p.gunCap;
+  }
   p.gunCap = Math.max(p.gunCap, p.gunCapBase);
   // The refit raises the floor as well as the current level, so a ship lost
   // on a later hull does not fall back to a factory-standard gun.
-  p.gunSpeedBase = Math.min(p.gunCap, p.gunSpeedBase + LEVEL_UP.gunSpeed);
-  p.gunBlazeBase = Math.min(p.gunCap, p.gunBlazeBase + LEVEL_UP.gunBlaze);
+  if (every(LEVEL_UP.gunSpeedEvery)) {
+    p.gunSpeedBase = Math.min(p.gunCap, p.gunSpeedBase + 1);
+  }
+  if (every(LEVEL_UP.gunBlazeEvery)) {
+    p.gunBlazeBase = Math.min(p.gunCap, p.gunBlazeBase + 1);
+  }
   p.gunSpeed = Math.max(p.gunSpeed, p.gunSpeedBase);
   p.gunBlaze = Math.max(p.gunBlaze, p.gunBlazeBase);
   p.lives = Math.min(PICKUP.maxLives, p.lives + LEVEL_UP.lives);
@@ -320,8 +334,9 @@ function reportRun(game) {
 }
 
 // Drive the score from what is actually happening: sparse on the title,
-// full kit in flight, an extra layer for the return run and for a shield
-// about to give out.
+// full kit in flight, an extra layer for the boss fight and for a shield
+// about to give out. (It used to say "the return run", which outlived the
+// return run by some margin.)
 function scoreIntensity(game) {
   if (game.state !== 'play' && game.state !== 'dying') return 0;
   // The boss fight and a failing shield are the two moments worth a layer.
@@ -506,7 +521,7 @@ export function update(game, dt) {
   if (inArena && !game.boss) {
     game.boss = makeBoss(game);
     banner(game, game.boss.name, game.boss.spec.tag, 3.0);
-    sfxTurnaround();
+    sfxArrival();
   }
   if (game.boss && !bossBeaten(game.boss)) {
     // Wall the ship in. There is no retreating from a boss, and the camera
