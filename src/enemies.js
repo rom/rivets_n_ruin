@@ -4,6 +4,7 @@ import {
 import { makePool } from './pool.js';
 import { enemyShots, fire } from './projectiles.js';
 import { explode, sparks } from './particles.js';
+import { sfxTurretShot, sfxEnemyHit, sfxExplode } from './sfx.js';
 
 export const interceptors = makePool(INTERCEPTOR.maxActive + 2, () => ({
   x: 0, y: 0, baseY: 0, dirX: -1, t: 0, hp: 0, fireCd: 0,
@@ -65,6 +66,7 @@ function shootTurret(t, p) {
   const my = t.y + Math.sin(a) * 9;
   fire(enemyShots, mx, my, Math.cos(a) * TURRET.bulletSpeed, Math.sin(a) * TURRET.bulletSpeed, 3.4, 9, 2);
   sparks(mx, my, Math.cos(a), Math.sin(a), 3, '#ff7a2f');
+  sfxTurretShot();
 }
 
 // -------------------------------------------- pattern 2: weaving interceptors
@@ -118,6 +120,7 @@ export function updateInterceptors(game, dt) {
       fire(enemyShots, e.x, e.y,
         Math.cos(a) * INTERCEPTOR.bulletSpeed, Math.sin(a) * INTERCEPTOR.bulletSpeed,
         3.2, 8, 2);
+      sfxTurretShot();
     }
 
     // despawn once well past the viewport
@@ -130,9 +133,11 @@ export function hitInterceptor(game, i, dmg) {
   e.hp -= dmg;
   if (e.hp > 0) {
     sparks(e.x, e.y, -e.dirX, 0, 4, '#ffd24a');
+    sfxEnemyHit();
     return false;
   }
   explode(e.x, e.y, 1);
+  sfxExplode(1);
   game.score += INTERCEPTOR.score;
   interceptors.kill(i);
   return true;
@@ -142,10 +147,12 @@ export function hitTurret(game, t, dmg) {
   t.hp -= dmg;
   if (t.hp > 0) {
     sparks(t.x, t.y - t.dir * 6, 0, -t.dir, 4, '#ffd24a');
+    sfxEnemyHit();
     return false;
   }
   t.dead = true;
   explode(t.x, t.y - t.dir * 5, 1.5);
+  sfxExplode(1.5);
   game.score += TURRET.score;
   game.turretsKilled++;
   return true;

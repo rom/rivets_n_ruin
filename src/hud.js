@@ -13,7 +13,7 @@ function text(ctx, str, x, y, color = COL.hudText, font = FONT, align = 'left') 
   ctx.fillText(str, x, y);
 }
 
-export function drawHud(ctx, game) {
+export function drawHud(ctx, game, audio = {}) {
   const p = game.player;
   const y0 = FIELD_H;
 
@@ -73,6 +73,9 @@ export function drawHud(ctx, game) {
   }
 
   text(ctx, 'BEST ' + String(game.best).padStart(8, '0'), VIEW_W - 10, y0 + 6, COL.hudLine, FONT, 'right');
+  // audio state, bottom-right: a muted game should never look like a broken one
+  const sym = !audio.audio ? 'SND --' : audio.muted ? 'SND OFF' : 'SND ON';
+  text(ctx, sym + '  [M]', VIEW_W - 10, y0 + 18, audio.muted ? COL.danger : COL.hudText, FONT, 'right');
 
   if (game.banner) drawBanner(ctx, game.banner);
   if (game.state !== 'play' && game.state !== 'dying') drawScreen(ctx, game);
@@ -94,7 +97,7 @@ function drawScreen(ctx, game) {
   if (game.state === 'title') {
     text(ctx, "RIVETS 'N RUIN", cx, 96, COL.hudBright, 'bold 30px ui-monospace, Menlo, monospace', 'center');
     text(ctx, 'SKIM THE HULL · BREAK THE GUNS · COME BACK ALIVE', cx, 134, COL.cool, FONT, 'center');
-    text(ctx, 'ARROWS / WASD  THRUST      Z / SPACE  FIRE', cx, 174, COL.hudText, FONT, 'center');
+    text(ctx, 'ARROWS / WASD  THRUST      Z / SPACE  FIRE      M  MUTE', cx, 174, COL.hudText, FONT, 'center');
     text(ctx, 'REVERSE THRUST FLIPS THE SHIP — THE HULL SCROLLS BOTH WAYS', cx, 190, COL.hudText, FONT, 'center');
     const pulse = 0.55 + 0.45 * Math.sin(game.stateT * 4);
     ctx.globalAlpha = pulse;
