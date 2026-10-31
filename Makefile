@@ -103,11 +103,23 @@ check: ## Everything CI would run: format check, vet, race tests, JS syntax
 
 SMOKE_PORT ?= 8399
 
+# Wait until the server is actually listening, rather than assuming a fixed
+# number of seconds is enough. It was not: under load the binary took longer
+# than the 1.5s sleep to bind, the browser got a connection refused, and the
+# smoke gate failed with one assertion of nine passing — which looks like a
+# catastrophic rendering regression rather than a race.
+define wait_for
+	for i in $$(seq 1 100); do \
+		curl -sf --max-time 1 http://127.0.0.1:$(1)/api/health >/dev/null 2>&1 && break; \
+		sleep 0.2; \
+	done
+endef
+
 smoke: build ## Launch the game and assert it actually renders and scrolls
 	@./$(BUILD_DIR)/$(BINARY) -addr 127.0.0.1:$(SMOKE_PORT) -data $(BUILD_DIR)/smoke.json & \
 	pid=$$!; \
 	trap "kill $$pid 2>/dev/null" EXIT; \
-	sleep 1.5; \
+	$(call wait_for,$(SMOKE_PORT)); \
 	$(NODE) tools/smoke.cjs http://127.0.0.1:$(SMOKE_PORT)/
 
 tidy: ## Tidy go.mod
@@ -117,7 +129,7 @@ gallery: build ## Regenerate the README images from the live game
 	@./$(BUILD_DIR)/$(BINARY) -addr 127.0.0.1:$(SMOKE_PORT) -data $(BUILD_DIR)/gallery.json & \
 	pid=$$!; \
 	trap "kill $$pid 2>/dev/null" EXIT; \
-	sleep 1.5; \
+	$(call wait_for,$(SMOKE_PORT)); \
 	$(NODE) tools/make_gallery.cjs http://127.0.0.1:$(SMOKE_PORT)/
 	@python3 tools/optimise_gallery.py
 
