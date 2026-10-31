@@ -5,6 +5,7 @@ import { netState } from './net.js';
 import { PICKUP } from './config.js';
 import { tint } from './pickups.js';
 import { tuneName, TUNES } from './music.js';
+import { livingParts, shellUp } from './boss.js';
 import { activeMod } from './mods.js';
 
 const FONT = 'bold 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
@@ -105,6 +106,7 @@ export function drawHud(ctx, game, audio = {}) {
   const sym = !audio.audio ? 'SND --' : audio.muted ? 'SND OFF' : 'SND ON';
   text(ctx, sym + '  [M]', VIEW_W - 10, y0 + 18, audio.muted ? COL.danger : COL.hudText, FONT, 'right');
 
+  if (game.boss) drawBossBar(ctx, game.boss);
   if (game.toast) drawToast(ctx, game.toast);
   if (game.banner) drawBanner(ctx, game.banner);
   if (game.state !== 'play' && game.state !== 'dying') drawScreen(ctx, game);
@@ -112,6 +114,30 @@ export function drawHud(ctx, game, audio = {}) {
 
 // Says what the pickup just did. Without this the player sees a flash and
 // has to infer the effect from the HUD.
+// Boss health, across the top of the playfield. Shows the shell separately
+// from the core, because "my shots are doing nothing" needs an answer on
+// screen rather than only in the sound.
+function drawBossBar(ctx, b) {
+  if (b.entry > 0) return;
+  const w = 420;
+  const x = (VIEW_W - w) / 2;
+
+  text(ctx, b.name, VIEW_W / 2, 8, COL.hudBright, FONT, 'center');
+
+  ctx.fillStyle = '#10141b';
+  ctx.fillRect(x - 2, 21, w + 4, 9);
+
+  const frac = Math.max(0, b.hp / b.maxHp);
+  ctx.fillStyle = shellUp(b) ? '#3a4250' : frac < 0.34 ? COL.danger : COL.warm;
+  ctx.fillRect(x, 23, Math.round(w * frac), 5);
+
+  if (shellUp(b)) {
+    const alive = livingParts(b).length;
+    const total = b.parts.length;
+    text(ctx, 'ARMOUR HOLDING — ' + alive + '/' + total + ' SECTIONS', VIEW_W / 2, 32, COL.warmHi, FONT, 'center');
+  }
+}
+
 function drawToast(ctx, t) {
   const a = Math.min(1, t.t / 0.4);
   ctx.globalAlpha = clamp(a, 0, 1);

@@ -5,6 +5,7 @@ import { interceptors } from './enemies.js';
 import { playerShots, enemyShots } from './projectiles.js';
 import { particles } from './particles.js';
 import { pickups, tint } from './pickups.js';
+import { livingParts, shellUp } from './boss.js';
 import { PICKUP } from './config.js';
 
 let scanlines = null;
@@ -57,6 +58,7 @@ export function drawWorld(ctx, game) {
 
   drawTurrets(ctx, game, camX);
   drawInterceptors(ctx, game);
+  if (game.boss) drawBoss(ctx, game.boss);
   drawPickups(ctx);
   drawShots(ctx);
   if (game.player.alive) drawShip(ctx, game.player);
@@ -290,6 +292,95 @@ function drawPickups(ctx) {
     }
     ctx.restore();
   }
+}
+
+// Bosses are drawn big and plated, so they read as structures rather than
+// large enemies. Each silhouette is distinct enough to recognise from the
+// edge of the arena.
+function drawBoss(ctx, b) {
+  const x = Math.round(b.x);
+  const y = Math.round(b.y);
+  ctx.save();
+  ctx.translate(x, y);
+
+  if (b.dead) {
+    // coming apart: flicker and sink
+    ctx.globalAlpha = 0.35 + 0.4 * Math.abs(Math.sin(b.death * 22));
+  }
+
+  const lit = b.flash > 0;
+
+  if (b.kind === 'warden') {
+    // spine
+    ctx.fillStyle = '#20252e';
+    ctx.fillRect(-10, -96, 22, 192);
+    ctx.fillStyle = '#39404c';
+    ctx.fillRect(-8, -94, 18, 188);
+    for (let ry = -90; ry < 90; ry += 14) {
+      ctx.fillStyle = '#7b8795';
+      ctx.fillRect(-6, ry, 2, 2);
+      ctx.fillRect(6, ry, 2, 2);
+    }
+    // core, exposed only once the pods are gone
+    const open = !shellUp(b);
+    ctx.fillStyle = lit ? '#ffd24a' : open ? '#5b2730' : '#2a3038';
+    ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = open ? '#e8434f' : '#4b5462';
+    ctx.lineWidth = 3; ctx.stroke();
+    if (open) {
+      ctx.fillStyle = '#ff7a2f';
+      ctx.beginPath(); ctx.arc(0, 0, 12 + Math.sin(b.t * 7) * 3, 0, Math.PI * 2); ctx.fill();
+    }
+  } else if (b.kind === 'drayline') {
+    ctx.fillStyle = '#1b2029';
+    ctx.beginPath();
+    ctx.moveTo(-40, 0); ctx.lineTo(-14, -42); ctx.lineTo(34, -26);
+    ctx.lineTo(34, 26); ctx.lineTo(-14, 42); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = lit ? '#ffd24a' : '#444d5a';
+    ctx.beginPath();
+    ctx.moveTo(-34, 0); ctx.lineTo(-12, -36); ctx.lineTo(28, -22);
+    ctx.lineTo(28, 22); ctx.lineTo(-12, 36); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#8e9aa9';
+    ctx.fillRect(-36, -6, 16, 12);
+    ctx.fillStyle = '#e8434f';
+    ctx.fillRect(-4, -5, 10, 10);
+    for (let ry = -30; ry < 30; ry += 12) {
+      ctx.fillStyle = '#7b8795';
+      ctx.fillRect(14, ry, 2, 2);
+    }
+  } else {
+    // riveter: core plus rotating plates
+    ctx.fillStyle = lit ? '#ffd24a' : '#333a45';
+    ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#59636f'; ctx.lineWidth = 3; ctx.stroke();
+    const open = !shellUp(b);
+    ctx.fillStyle = open ? '#ff7a2f' : '#20262e';
+    ctx.beginPath(); ctx.arc(0, 0, open ? 15 + Math.sin(b.t * 9) * 3 : 12, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // destructible parts
+  for (const part of b.parts) {
+    if (part.dead) continue;
+    const hurt = 1 - part.hp / part.maxHp;
+    ctx.save();
+    ctx.translate(part.dx, part.dy);
+    ctx.fillStyle = '#161b22';
+    ctx.fillRect(-part.r - 2, -part.r - 2, part.r * 2 + 4, part.r * 2 + 4);
+    ctx.fillStyle = part.flash > 0 ? '#ffd24a' : '#4e5765';
+    ctx.fillRect(-part.r, -part.r, part.r * 2, part.r * 2);
+    ctx.fillStyle = '#9fadbd';
+    ctx.fillRect(-part.r, -part.r, part.r * 2, 2);
+    // damage shows as a reddening eye
+    ctx.fillStyle = hurt > 0.6 ? '#e8434f' : hurt > 0.3 ? '#ff7a2f' : '#ffd24a';
+    ctx.fillRect(-4, -4, 8, 8);
+    ctx.fillStyle = '#b4c0ce';
+    ctx.fillRect(-part.r + 2, -part.r + 2, 2, 2);
+    ctx.fillRect(part.r - 4, part.r - 4, 2, 2);
+    ctx.restore();
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.restore();
 }
 
 function drawShots(ctx) {

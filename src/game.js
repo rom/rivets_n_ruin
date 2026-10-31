@@ -1,8 +1,9 @@
 import {
-  SHIP, INTERCEPTOR, LEVELS, LEVEL_UP, PICKUP, APRON, VIEW_W,
+  SHIP, INTERCEPTOR, LEVELS, LEVEL_UP, PICKUP, BOSS, APRON, VIEW_W,
   FIELD_TOP, FIELD_BOT, clamp,
 } from './config.js';
 import { buildLevel, obstaclesNear } from './level.js';
+import { makeBoss, updateBoss, hitBoss, bossBeaten, arenaLeft } from './boss.js';
 import { makeCamera, updateCamera, kick } from './camera.js';
 import { makePlayer, updatePlayer, respawn } from './player.js';
 import {
@@ -45,6 +46,7 @@ export function makeGame(modSpec = null) {
     runTime: 0,     // clock for the whole campaign, which is what gets submitted
     toast: null,
     returning: false,      // outbound leg done, now fly the hull back
+    boss: null,            // set once the arena at the far end is entered
     banner: null,
     best: Number(localStorage.getItem('rnr.best') || 0),
     onPickup: (kind) => sfxPickup(kind),
@@ -74,6 +76,7 @@ function reset(game) {
   game.submitted = false;
   game.spawnCd = 1.2;
   game.returning = false;
+  game.boss = null;
   game.flash = 0;
   game.time = 0;
   game.runTime = 0;
@@ -122,6 +125,7 @@ function loadNextHull(game) {
 
   game.returning = false;
   game.submitted = false;
+  game.boss = null;
   game.time = 0;          // per-hull clock restarts; runTime keeps going
   game.spawnCd = 1.2;
   game.toast = null;
@@ -237,17 +241,35 @@ export function update(game, dt) {
   updatePlayer(p, game, dt);
   updateTurrets(game, dt);
   updateInterceptors(game, dt);
+  updateBoss(game, dt);
   updatePickups(game, dt);
   advance(playerShots, dt);
   advance(enemyShots, dt);
   updateParticles(dt);
   collide(game);
-  updateCamera(game.cam, p, game.level.length, dt);
+  updateCamera(game.cam, p, game.level.length, dt,
+    game.boss && !bossBeaten(game.boss) ? arenaLeft(game) : null);
 
-  // two-way objective: the far end turns you around, the near end finishes you
-  if (!game.returning && p.x > game.level.length - APRON * 0.55) {
+  // --- the arena at the far end
+  const inArena = !game.returning && p.x > arenaLeft(game) + 70;
+  if (inArena && !game.boss) {
+    game.boss = makeBoss(game);
+    banner(game, game.boss.name, game.boss.spec.tag, 3.0);
+    sfxTurnaround();
+  }
+  if (game.boss && !bossBeaten(game.boss)) {
+    // Wall the ship in. There is no retreating from a boss, and the camera
+    // pins so the fight reads as a single room rather than a scroll.
+    const left = arenaLeft(game);
+    p.x = clamp(p.x, left + 24, game.level.length - BOSS.arenaMargin);
+    if (p.x <= left + 24 && p.vx < 0) p.vx = 0;
+  }
+
+  // two-way objective: the boss opens the way back, the dock finishes you
+  if (!game.returning && game.boss && bossBeaten(game.boss)) {
     game.returning = true;
-    banner(game, 'TURN AND BURN', 'RUN THE HULL BACK TO THE DOCK', 2.8);
+    game.boss = null;
+    banner(game, 'WAY OPEN — TURN AND BURN', 'RUN THE HULL BACK TO THE DOCK', 3.0);
     game.score += 2500;
     sfxTurnaround();
   } else if (game.returning && p.x < APRON * 0.55) {
@@ -324,6 +346,8 @@ function collide(game) {
         gone = true;
       }
     }
+
+    if (!gone && game.boss && hitBoss(game, game.boss, s.x, s.y, s.dmg)) gone = true;
 
     if (!gone) {
       for (const t of game.level.turrets) {
