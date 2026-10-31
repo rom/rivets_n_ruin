@@ -6,11 +6,12 @@ import { netState } from './net.js';
 import { PICKUP, ARMORY, APRON, LASER } from './config.js';
 import { tint, pickups, isTreasure } from './pickups.js';
 import { minis } from './miniboss.js';
+import { markName } from './shipart.js';
 import { radarProfile } from './level.js';
 import { tuneName, TUNES } from './music.js';
 import { get as setting, DEFS, display } from './settings.js';
 import { rows as shopRows, MODS, modLevel, modName, maxLevel } from './shop.js';
-import { drawSplash, drawLaunchBanner, drawExitBanner,
+import { drawSplash, drawLaunchBanner, drawExitBanner, drawTitleBackdrop,
   SPLASH_TIME, LAUNCH_TIME, EXIT_TIME, ENDING_TIME } from './sequences.js';
 import { VERSION } from './config.js';
 import { livingParts, shellUp } from './boss.js';
@@ -491,7 +492,10 @@ function drawBonus(ctx, game, x, y) {
 function drawFit(ctx, game, x, y) {
   const p = game.player;
   const W = 272;   // x + W must stay inside VIEW_W
+  // The airframe has a name, and it changes: the ship you launch on the
+  // next hull is a different ship, and the overview is where you are told.
   text(ctx, 'REFIT COMPLETE', x, y, COL.warmHi, FONT);
+  text(ctx, markName(game.levelIndex + 1), x + W, y, COL.coolHi, FONT, 'right');
   const refit = [
     ['SHIELD', String(p.shieldMax)],
     ['ACCEL', '+' + Math.round((p.accelMul - 1) * 100) + '%'],
@@ -544,43 +548,58 @@ function drawScreen(ctx, game) {
   const BOARD_X = Math.round((VIEW_W - BOARD_W) / 2);
 
   if (game.state === 'title') {
-    text(ctx, "RIVETS 'N RUIN", cx, 34, COL.hudBright, 'bold 30px ui-monospace, Menlo, monospace', 'center');
-    text(ctx, 'SKIM THE HULL · BREAK THE GUNS · RUN IT THROUGH', cx, 72, COL.cool, FONT, 'center');
+    // The backdrop is drawn over the dim rect, not under it: this is a
+    // menu, not a paused game, and it should not be showing whatever the
+    // last run happened to leave on screen.
+    drawTitleBackdrop(ctx, game.stateT);
+
+    text(ctx, "RIVETS 'N RUIN", cx, 30, COL.hudBright,
+      'bold 32px ui-monospace, Menlo, monospace', 'center');
+    text(ctx, 'SKIM THE HULL · BREAK THE GUNS · RUN IT THROUGH', cx, 70, COL.cool, FONT, 'center');
 
     const mod = activeMod();
     if (mod) {
-      text(ctx, 'MOD: ' + mod.name.toUpperCase() + ' BY ' + mod.author.toUpperCase(), cx, 78, COL.warmHi, FONT, 'center');
+      text(ctx, 'MOD: ' + mod.name.toUpperCase() + ' BY ' + mod.author.toUpperCase(),
+        cx, 84, COL.warmHi, FONT, 'center');
     }
 
-    text(ctx, LEVELS.map((l) => l.name).join('  ·  '), cx, 92, COL.cool, FONT, 'center');
-    text(ctx, 'ARROWS THRUST  Z FIRE  X ORDNANCE  C CYCLE  M MUTE  T TUNE  Q QUIT', cx, 112, COL.hudText, FONT, 'center');
-    text(ctx, 'REVERSE THRUST FLIPS THE SHIP — THE GUNS FIRE BOTH WAYS', cx, 126, COL.hudText, FONT, 'center');
-
-    if (net.online && net.player) {
-      text(ctx, 'PILOT ' + net.player.name.toUpperCase() + '   [N] RENAME', cx, 146, COL.cool, FONT, 'center');
-    }
-    text(ctx, 'TUNE ' + tuneName() + '   BEST ' + String(game.best).padStart(8, '0'),
-      cx, 158, COL.hudLine, FONT, 'center');
-
-    // --- hull select
+    // --- hull select, which is the only choice this screen asks for
     const sel = game.specs[game.startHull];
     const canLeft = game.startHull > 0;
     const canRight = game.startHull < game.unlocked;
-    text(ctx, canLeft ? '<' : ' ', cx - 112, 166, canLeft ? COL.cool : '#20262e', FONT_BIG, 'center');
-    text(ctx, canRight ? '>' : ' ', cx + 112, 166, canRight ? COL.cool : '#20262e', FONT_BIG, 'center');
-    text(ctx, sel.name + '   ' + (game.startHull + 1) + '/' + game.specs.length,
-      cx, 170, COL.hudBright, FONT, 'center');
-    text(ctx, game.unlocked > 0
-      ? 'ARROWS SELECT HULL — REACHED ' + game.specs[game.unlocked].name
-      : 'CLEAR A HULL TO UNLOCK THE NEXT',
-      cx, 186, COL.hudText, FONT, 'center');
+    ctx.fillStyle = 'rgba(8,12,18,0.72)';
+    ctx.fillRect(cx - 140, 98, 280, 34);
+    ctx.fillStyle = COL.hudLine;
+    ctx.fillRect(cx - 140, 98, 280, 1);
+    ctx.fillRect(cx - 140, 131, 280, 1);
+    text(ctx, canLeft ? '<' : ' ', cx - 118, 104, canLeft ? COL.cool : '#20262e', FONT_BIG, 'center');
+    text(ctx, canRight ? '>' : ' ', cx + 118, 104, canRight ? COL.cool : '#20262e', FONT_BIG, 'center');
+    text(ctx, sel.name, cx, 104, COL.hudBright, FONT, 'center');
+    text(ctx, sel.subtitle, cx, 118, COL.hudText, FONT, 'center');
+    text(ctx, (game.startHull + 1) + '/' + game.specs.length, cx + 96, 118, COL.coolHi, FONT, 'right');
 
     ctx.globalAlpha = pulse;
-    text(ctx, 'PRESS ENTER TO LAUNCH', cx, 204, COL.warmHi, FONT, 'center');
+    text(ctx, 'ENTER TO LAUNCH', cx, 142, COL.warmHi, FONT, 'center');
     ctx.globalAlpha = 1;
-    text(ctx, 'O  SETTINGS', cx, 218, COL.hudText, FONT, 'center');
 
-    drawBoard(ctx, BOARD_X, 236, 10);
+    // --- one line of status, and one line of exits
+    const bits = [];
+    if (net.online && net.player) bits.push('PILOT ' + net.player.name.toUpperCase());
+    bits.push('BEST ' + String(game.best).padStart(8, '0'));
+    if (game.unlocked > 0) bits.push('REACHED ' + game.specs[game.unlocked].name);
+    text(ctx, bits.join('   ·   '), cx, 162, COL.hudLine, FONT, 'center');
+    text(ctx, 'H  HELP      O  SETTINGS      B  BOARD'
+      + (net.online && net.player ? '      N  RENAME' : ''),
+      cx, 178, COL.hudText, FONT, 'center');
+
+    // The board gets a plate of its own: ten rows of small text over a
+    // moving starfield is unreadable, however good the starfield is.
+    ctx.fillStyle = 'rgba(6,9,14,0.86)';
+    ctx.fillRect(BOARD_X - 12, 194, BOARD_W + 24, 86);
+    ctx.fillStyle = COL.hudLine;
+    ctx.fillRect(BOARD_X - 12, 194, BOARD_W + 24, 1);
+    ctx.fillRect(BOARD_X - 12, 279, BOARD_W + 24, 1);
+    drawBoard(ctx, BOARD_X, 202, 10);
     return;
   }
 
@@ -836,6 +855,125 @@ export function drawShop(ctx, game, sel, note) {
   text(ctx, 'ARROWS CHOOSE    ENTER BUY    E / ESC LEAVE', cx, 298, COL.hudText, FONT, 'center');
 }
 
+// The help page. Everything that used to be crammed onto the title, plus
+// the half of it that was never written down anywhere.
+//
+// The layout is data so a test can measure a page against it. A page that
+// runs past its own footer is invisible from anywhere except that page.
+export const HELP_LAYOUT = {
+  top: 58, pitch: 12, headGap: 4, headPitch: 16,
+  keyX: 40, valX: 168, bottom: SCREEN_H - 30,
+};
+export function drawHelp(ctx, page) {
+  ctx.fillStyle = '#04060a';
+  ctx.fillRect(0, 0, VIEW_W, SCREEN_H);
+  const cx = VIEW_W / 2;
+  const pages = HELP;
+  const p = pages[Math.max(0, Math.min(pages.length - 1, page))];
+
+  text(ctx, p.title, cx, 14, COL.hudBright, FONT_BIG, 'center');
+  text(ctx, p.sub, cx, 40, COL.cool, FONT, 'center');
+
+  let y = HELP_LAYOUT.top;
+  for (const row of p.rows) {
+    if (row.head) {
+      y += HELP_LAYOUT.headGap;
+      text(ctx, row.head, HELP_LAYOUT.keyX, y, COL.warmHi, FONT);
+      ctx.fillStyle = COL.hudLine;
+      ctx.fillRect(HELP_LAYOUT.keyX, y + 11, VIEW_W - HELP_LAYOUT.keyX * 2, 1);
+      y += HELP_LAYOUT.headPitch;
+      continue;
+    }
+    text(ctx, row.k, HELP_LAYOUT.keyX, y, COL.coolHi, FONT);
+    text(ctx, row.v, HELP_LAYOUT.valX, y, COL.hudText, FONT);
+    y += HELP_LAYOUT.pitch;
+  }
+
+  // page dots, so it is obvious there is more than one
+  for (let i = 0; i < pages.length; i++) {
+    ctx.fillStyle = i === page ? COL.coolHi : '#2b3440';
+    ctx.fillRect(cx - pages.length * 5 + i * 10, SCREEN_H - 26, 6, 3);
+  }
+  text(ctx, 'LEFT / RIGHT  PAGE        H / ESC  BACK',
+    cx, SCREEN_H - 16, COL.hudText, FONT, 'center');
+}
+
+export const HELP_PAGES = () => HELP.length;
+
+// Exported so a test can measure the layout: a page that overruns its own
+// footer is invisible from anywhere but the page itself.
+export const HELP = [
+  {
+    title: 'CONTROLS',
+    sub: 'EVERYTHING THE SHIP ANSWERS TO',
+    rows: [
+      { head: 'FLYING' },
+      { k: 'ARROWS / WASD', v: 'Thrust. There is no brake; you have inertia' },
+      { k: 'REVERSE THRUST', v: 'Flips the ship. The guns fire whichever way it faces' },
+      { head: 'FIGHTING' },
+      { k: 'Z / SPACE', v: 'Cannon' },
+      { k: 'X / SHIFT', v: 'Fire the selected ordnance' },
+      { k: 'C', v: 'Cycle bomb / grenade / missile' },
+      { k: '1  2  3', v: 'Select one of them directly' },
+      { head: 'EVERYTHING ELSE' },
+      { k: 'ENTER', v: 'Launch, advance, buy' },
+      { k: 'E', v: 'The armourer, between hulls' },
+      { k: 'P / ESC', v: 'Pause' },
+      { k: 'Q', v: 'Quit the run — it is still recorded' },
+      { k: 'R', v: 'Restart' },
+      { k: 'M', v: 'Mute' },
+      { k: 'T', v: 'Next tune' },
+      { k: 'B', v: 'Switch the board between pilots and runs' },
+      { k: 'O', v: 'Settings' },
+    ],
+  },
+  {
+    title: 'THE RUN',
+    sub: 'WHAT A HULL ASKS OF YOU',
+    rows: [
+      { head: 'THE OBJECTIVE' },
+      { k: 'ONE DIRECTION', v: 'Fly to the far end of the hull' },
+      { k: 'THE ARENA', v: 'A boss guards it, and the camera pins' },
+      { k: 'THE WAY OUT', v: 'Break the boss and the ship runs out through it' },
+      { head: 'WHAT PAYS' },
+      { k: 'GUNS BROKEN', v: 'Paid on the fraction of the hull you cleared' },
+      { k: 'SHIPS LEFT', v: 'Paid per ship still in the hangar' },
+      { k: 'NO LOSSES', v: 'Paid for a hull flown without losing one' },
+      { k: 'THE HAUL', v: 'A share of everything you picked up' },
+      { head: 'WHAT COSTS' },
+      { k: 'SCRAPING', v: 'The hull itself hurts, in proportion to speed' },
+      { k: 'LOSING A SHIP', v: 'Every weapon addon since the last refit' },
+      { k: 'A LASER GATE', v: 'Cannot be flown through. Shoot the emitter' },
+    ],
+  },
+  {
+    title: 'READING THE SCREEN',
+    sub: 'THE RADAR, THE LOOT AND THE THINGS SHOOTING AT YOU',
+    rows: [
+      { head: 'THE RADAR STRIP' },
+      { k: 'TOP AND BOTTOM', v: 'The hull, as a silhouette' },
+      { k: 'THE LANE', v: 'Loot: coins dim, bars and coffins taller' },
+      { k: 'FULL-HEIGHT MARK', v: 'Treasure. Worth turning round for' },
+      { k: 'COLOURED TICKS', v: 'Guns, in their own colour. Dim once broken' },
+      { k: 'DIAMONDS', v: 'Minibosses. Hollow ones have not arrived yet' },
+      { k: 'PINK BARS', v: 'Laser gates' },
+      { head: 'WHAT IS SHOOTING' },
+      { k: 'A WHITE PLATE', v: 'A warder. Shots bounce off the front' },
+      { k: 'A FACETED BUBBLE', v: 'A deflector. Put damage through it' },
+      { k: 'A LENGTHENING LINE', v: 'A lancer, about to charge down it' },
+      { k: 'A PINK MISSILE', v: 'It follows. Out-turn it, or shoot it down' },
+    ],
+  },
+];
+
+// Like the help page, the settings layout is data: adding a row pushes the
+// per-row explanation down, and the twelfth one pushed it straight into the
+// footer. A test measures it rather than waiting for a screenshot.
+export const SETTINGS_LAYOUT = {
+  top: 56, pitch: 17, helpGap: 12,
+  footer: SCREEN_H - 30, footer2: SCREEN_H - 16,
+};
+
 export function drawSettings(ctx, game, sel) {
   ctx.fillStyle = '#04060a';
   ctx.fillRect(0, 0, VIEW_W, SCREEN_H);
@@ -843,15 +981,15 @@ export function drawSettings(ctx, game, sel) {
 
   text(ctx, 'SETTINGS', cx, 16, COL.hudBright, FONT_BIG, 'center');
 
-  const top = 56;
+  const top = SETTINGS_LAYOUT.top;
   DEFS.forEach((d, i) => {
-    const y = top + i * 18;
+    const y = top + i * SETTINGS_LAYOUT.pitch;
     const on = i === sel;
     if (on) {
       ctx.fillStyle = '#131c26';
-      ctx.fillRect(96, y - 3, VIEW_W - 192, 16);
+      ctx.fillRect(96, y - 3, VIEW_W - 192, 15);
       ctx.fillStyle = COL.cool;
-      ctx.fillRect(96, y - 3, 2, 16);
+      ctx.fillRect(96, y - 3, 2, 15);
     }
     text(ctx, d.label, 110, y, on ? COL.hudBright : COL.hudText, FONT);
 
@@ -873,10 +1011,16 @@ export function drawSettings(ctx, game, sel) {
   });
 
   const d = DEFS[sel];
-  if (d) text(ctx, d.help, cx, top + DEFS.length * 18 + 12, COL.hudLine, FONT, 'center');
+  if (d) {
+    text(ctx, d.help, cx,
+      top + DEFS.length * SETTINGS_LAYOUT.pitch + SETTINGS_LAYOUT.helpGap,
+      COL.hudLine, FONT, 'center');
+  }
 
-  text(ctx, 'UP / DOWN  CHOOSE      LEFT / RIGHT  CHANGE', cx, 286, COL.hudText, FONT, 'center');
-  text(ctx, 'R  RESET TO DEFAULTS       O / ESC  BACK', cx, 300, COL.hudText, FONT, 'center');
+  text(ctx, 'UP / DOWN  CHOOSE      LEFT / RIGHT  CHANGE',
+    cx, SETTINGS_LAYOUT.footer, COL.hudText, FONT, 'center');
+  text(ctx, 'R  RESET TO DEFAULTS       O / ESC  BACK',
+    cx, SETTINGS_LAYOUT.footer2, COL.hudText, FONT, 'center');
 }
 
 export function drawQuitPrompt(ctx, game) {

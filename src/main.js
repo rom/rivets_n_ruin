@@ -4,7 +4,9 @@ import { initInput, tapped, endFrame } from './input.js';
 import { startLoop } from './loop.js';
 import { makeGame, update, syncBest } from './game.js';
 import { drawWorld } from './render.js';
-import { drawHud, drawPaused, drawQuitPrompt, drawSettings, drawShop } from './hud.js';
+import {
+  drawHud, drawPaused, drawQuitPrompt, drawSettings, drawShop, drawHelp, HELP_PAGES,
+} from './hud.js';
 import { rows as shopRows, buy as shopBuy } from './shop.js';
 import { unlock, toggleMute, isMuted, ready } from './audio.js';
 import { startMusic, stopMusic, musicRunning } from './music.js';
@@ -31,7 +33,7 @@ const SCREEN_STATES = new Set([
   'splash', 'title', 'levelclear', 'gameover', 'ending', 'victory',
 ]);
 function isOverlay() {
-  return shopOpen || settingsOpen || paused || game.quitting
+  return shopOpen || settingsOpen || helpOpen || paused || game.quitting
     || SCREEN_STATES.has(game.state);
 }
 window.addEventListener('resize', fit);
@@ -53,6 +55,8 @@ settings.onChange(() => applySettings(settings.all()));
 
 // The settings screen is modal and owns the keyboard while it is open.
 let settingsOpen = false;
+let helpOpen = false;
+let helpPage = 0;
 let settingsSel = 0;
 let shopOpen = false;
 let shopSel = 0;
@@ -124,12 +128,24 @@ startLoop(
     if (tapped('shop') && game.state === 'levelclear') {
       shopOpen = true; shopSel = 0; shopNote = ''; sfxUi(); endFrame(); return;
     }
+    if (helpOpen) {
+      const n = HELP_PAGES();
+      if (tapped('left')) { helpPage = (helpPage - 1 + n) % n; sfxUi(); }
+      if (tapped('right')) { helpPage = (helpPage + 1) % n; sfxUi(); }
+      if (tapped('help') || tapped('pause') || tapped('start')) { helpOpen = false; sfxUi(); }
+      endFrame();
+      return;
+    }
+    if (tapped('help') && game.state !== 'play' && game.state !== 'dying') {
+      helpOpen = true; helpPage = 0; sfxUi(); endFrame(); return;
+    }
     if (settingsOpen) {
       const n = settings.DEFS.length;
       if (tapped('up')) { settingsSel = (settingsSel - 1 + n) % n; sfxUi(); }
       if (tapped('down')) { settingsSel = (settingsSel + 1) % n; sfxUi(); }
-      if (tapped('left')) { settings.nudge(settings.DEFS[settingsSel].id, -1, TUNES.length); sfxUi(); }
-      if (tapped('right')) { settings.nudge(settings.DEFS[settingsSel].id, 1, TUNES.length); sfxUi(); }
+      const bounds = { tuneCount: TUNES.length, hullMax: game.unlocked };
+      if (tapped('left')) { settings.nudge(settings.DEFS[settingsSel].id, -1, bounds); sfxUi(); }
+      if (tapped('right')) { settings.nudge(settings.DEFS[settingsSel].id, 1, bounds); sfxUi(); }
       if (tapped('restart')) { settings.reset(); sfxUi(); }
       if (tapped('options') || tapped('pause') || tapped('start')) { settingsOpen = false; sfxUi(); }
       if (settings.get('tune') !== undefined) setTune(settings.get('tune'));
@@ -159,6 +175,12 @@ startLoop(
       sfxUi();
     }
     if (paused) { endFrame(); return; }
+    // A hold for the tooling. make gallery poses a roster of attackers and
+    // then screenshots it; with the simulation running, everything with a
+    // speed had moved and everything with a spawn timer had spawned by the
+    // time the shutter opened, so half the roster was missing from the
+    // sheet. Nothing in the game sets this.
+    if (window.__freeze) { endFrame(); return; }
     update(game, dt);
   },
   () => {
@@ -172,6 +194,7 @@ startLoop(
     drawWorld(ctx, game);
     drawHud(ctx, game, { muted: isMuted(), audio: ready() });
     if (shopOpen) drawShop(ctx, game, shopSel, shopNote);
+    else if (helpOpen) drawHelp(ctx, helpPage);
     else if (settingsOpen) drawSettings(ctx, game, settingsSel);
     else if (game.quitting) drawQuitPrompt(ctx, game);
     else if (paused) drawPaused(ctx);

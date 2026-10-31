@@ -5,7 +5,7 @@
 // screen that draws them needs no knowledge of what any particular setting
 // means — adding one is an entry in this list.
 
-import { DIFFICULTY } from './config.js';
+import { DIFFICULTY, LEVELS } from './config.js';
 
 const KEY = 'rnr.settings';
 
@@ -20,6 +20,8 @@ export const DEFS = [
     help: 'Each hull picks its own unless you override it here.' },
   { id: 'difficulty', label: 'DIFFICULTY', kind: 'difficulty', def: 1,
     help: 'Takes effect on the next run. Harder settings score more.' },
+  { id: 'startHull', label: 'START HULL', kind: 'hull', def: 0,
+    help: 'Begin on any hull you have reached. Earlier refits are credited.' },
   { id: 'radar', label: 'RADAR STRIP', kind: 'bool', def: true,
     help: 'The map across the top: guns, loot, minibosses, the boss.' },
   { id: 'bloom', label: 'BLOOM', kind: 'bool', def: true,
@@ -54,6 +56,9 @@ function load() {
       if (d.kind === 'difficulty' && Number.isFinite(saved[d.id])) {
         state[d.id] = Math.max(0, Math.min(DIFFICULTY.length - 1, saved[d.id]));
       }
+      if (d.kind === 'hull' && Number.isFinite(saved[d.id])) {
+        state[d.id] = Math.max(0, Math.min(LEVELS.length - 1, saved[d.id]));
+      }
     }
   } catch { /* corrupt or unavailable; defaults stand */ }
 }
@@ -71,7 +76,13 @@ export function set(id, value) {
 }
 
 // Steps a setting by one notch in the given direction.
-export function nudge(id, dir, tuneCount = 1) {
+//
+// `ctx` carries the bounds this module cannot know on its own: how many
+// tunes there are, and how far through the campaign the pilot has actually
+// got. A start hull beyond that is not a setting, it is a cheat.
+export function nudge(id, dir, ctx = {}) {
+  const tuneCount = ctx.tuneCount || 1;
+  const hullMax = ctx.hullMax === undefined ? 0 : ctx.hullMax;
   const d = DEFS.find((x) => x.id === id);
   if (!d) return;
   if (d.kind === 'bool') set(id, !state[id]);
@@ -81,6 +92,8 @@ export function nudge(id, dir, tuneCount = 1) {
     set(id, ((state[id] + dir) % tuneCount + tuneCount) % tuneCount);
   } else if (d.kind === 'difficulty') {
     set(id, Math.max(0, Math.min(DIFFICULTY.length - 1, state[id] + dir)));
+  } else if (d.kind === 'hull') {
+    set(id, Math.max(0, Math.min(hullMax, state[id] + dir)));
   }
 }
 
@@ -99,5 +112,9 @@ export function display(d, tuneName) {
   if (d.kind === 'range') return String(state[d.id]);
   if (d.kind === 'tune') return tuneName || String(state[d.id]);
   if (d.kind === 'difficulty') return DIFFICULTY[state[d.id]].name;
+  if (d.kind === 'hull') {
+    const i = Math.max(0, Math.min(LEVELS.length - 1, state[d.id] | 0));
+    return LEVELS[i].name + '  ' + (i + 1) + '/' + LEVELS.length;
+  }
   return '';
 }

@@ -17,6 +17,7 @@ const MAP = {
   KeyY: 'yes',
   KeyQ: 'quit',
   KeyO: 'options',
+  KeyH: 'help', Slash: 'help',
   KeyB: 'board',
   KeyE: 'shop',
   KeyX: 'secondary', ShiftLeft: 'secondary',

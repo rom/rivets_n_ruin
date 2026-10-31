@@ -167,3 +167,103 @@ export function drawPad(ctx, camX, camY) {
   ctx.fillRect(px - 56, py - 4, 4, 4);
   ctx.fillRect(px + 52, py - 4, 4, 4);
 }
+
+// ------------------------------------------------------- the title backdrop
+//
+// The title used to be a wall of text over a dimmed frame of whatever the
+// last run had left on screen. It is a menu, so it gets a backdrop of its
+// own: deep stars, the dreadnought itself passing below, and a patrol
+// crossing in front of it.
+//
+// Everything is a function of one clock, so it needs no state and cannot
+// drift out of step with anything.
+
+const STARS = 110;
+
+export function drawTitleBackdrop(ctx, t) {
+  const H = FIELD_H;
+
+  // deep space
+  ctx.fillStyle = '#04060a';
+  ctx.fillRect(0, 0, VIEW_W, H);
+
+  // three parallax star layers, the near ones brighter and faster
+  for (let i = 0; i < STARS; i++) {
+    const layer = i % 3;
+    const speed = 3 + layer * 7;
+    const x = VIEW_W - ((i * 97.3 + t * speed) % (VIEW_W + 20));
+    const y = (i * 53.7) % H;
+    ctx.fillStyle = ['#2b3346', '#4a5470', '#cfd8f0'][layer];
+    const s = layer === 2 ? 1.5 : 1;
+    ctx.fillRect(x, y, s, s);
+  }
+
+  // a nebula wash, so the field is not evenly black
+  const g = ctx.createRadialGradient(VIEW_W * 0.72, H * 0.22, 10,
+    VIEW_W * 0.72, H * 0.22, VIEW_W * 0.55);
+  g.addColorStop(0, 'rgba(60,40,90,0.30)');
+  g.addColorStop(1, 'rgba(10,12,24,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, VIEW_W, H);
+
+  // The dreadnought, passing below: a long plated band with lit windows and
+  // the occasional tower. It is the thing the whole game happens on, so it
+  // ought to be on the title.
+  const scroll = (t * 11) % 160;
+  const topY = H - 46;
+  ctx.fillStyle = '#0a0e15';
+  ctx.fillRect(0, topY - 6, VIEW_W, H - topY + 6);
+  ctx.fillStyle = '#141b25';
+  ctx.fillRect(0, topY, VIEW_W, H - topY);
+  ctx.fillStyle = '#1d2733';
+  ctx.fillRect(0, topY, VIEW_W, 3);
+
+  for (let x = -scroll; x < VIEW_W + 160; x += 40) {
+    ctx.fillStyle = '#19222e';
+    ctx.fillRect(x + 2, topY + 6, 36, H - topY - 10);
+    ctx.fillStyle = '#242f3d';
+    ctx.fillRect(x + 2, topY + 6, 36, 1);
+    // lit windows, on a pattern that does not read as a pattern
+    for (let k = 0; k < 4; k++) {
+      const on = ((Math.floor((x + scroll) / 40) * 7 + k * 13) % 11) < 4;
+      if (!on) continue;
+      ctx.fillStyle = k % 2 ? '#4fd0e8' : '#ffd24a';
+      ctx.globalAlpha = 0.4;
+      ctx.fillRect(x + 7 + k * 8, topY + 12 + (k % 2) * 12, 3, 4);
+      ctx.globalAlpha = 1;
+    }
+  }
+  // towers and masts on the skyline
+  for (let x = -scroll; x < VIEW_W + 160; x += 120) {
+    const h = 14 + ((Math.floor((x + scroll) / 120) * 37) % 20);
+    ctx.fillStyle = '#19222e';
+    ctx.fillRect(x + 30, topY - h, 10, h);
+    ctx.fillStyle = Math.sin(t * 3 + x) > 0 ? '#e8434f' : '#4a2026';
+    ctx.fillRect(x + 33, topY - h - 3, 3, 3);
+  }
+
+  // a patrol crossing, right to left, with a trail
+  const px = VIEW_W + 40 - ((t * 46) % (VIEW_W + 220));
+  const py = H * 0.42 + Math.sin(t * 0.7) * 22;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = '#4fd0e8';
+  ctx.fillRect(px + 6, py - 1, 34, 2);
+  ctx.restore();
+  ctx.fillStyle = '#6e7b8a';
+  ctx.beginPath();
+  ctx.moveTo(px - 9, py); ctx.lineTo(px + 5, py - 3);
+  ctx.lineTo(px + 8, py); ctx.lineTo(px + 5, py + 3);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = COL.coolHi;
+  ctx.fillRect(px + 1, py - 1, 3, 2);
+
+  // a dim vignette, so the text on top always has something to sit against
+  const v = ctx.createRadialGradient(VIEW_W / 2, H * 0.42, 40,
+    VIEW_W / 2, H * 0.42, VIEW_W * 0.62);
+  v.addColorStop(0, 'rgba(4,6,10,0.55)');
+  v.addColorStop(1, 'rgba(4,6,10,0.86)');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, VIEW_W, H);
+}
