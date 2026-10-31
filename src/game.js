@@ -3,6 +3,7 @@ import {
   FIELD_TOP, FIELD_BOT, clamp,
 } from './config.js';
 import { diff, award } from './score.js';
+import { get as setting, set as setSetting, onChange as onSetting } from './settings.js';
 import { buildLevel, obstaclesNear } from './level.js';
 import { updateGates, hitGate, gateHit, liveGates } from './gates.js';
 import { makeBoss, updateBoss, hitBoss, bossBeaten, arenaLeft } from './boss.js';
@@ -83,7 +84,7 @@ export function makeGame(modSpec = null) {
     // screen. Progress through an eight-hull campaign should not be lost
     // every time a run ends.
     unlocked: clamp(Number(localStorage.getItem('rnr.unlocked') || 0), 0, LEVELS.length - 1),
-    startHull: clamp(Number(localStorage.getItem('rnr.unlocked') || 0), 0, LEVELS.length - 1),
+    startHull: 0,          // set below, from the setting, bounded by unlocked
     onPickup: (kind) => sfxPickup(kind),
     // Loot has its own sound family, escalating with value.
     onHaul: (kind) => {
@@ -101,6 +102,20 @@ export function makeGame(modSpec = null) {
     sfxTurnaround();
   };
   game.onMiniEscort = () => spawnFoeForLevel(game);
+
+  // Where a run begins. The setting owns it, so it can be changed from the
+  // settings page as well as from the title, and it survives a reload —
+  // but it is always bounded by how far the pilot has actually got.
+  const syncStartHull = () => {
+    game.startHull = clamp(Number(setting('startHull')) || 0, 0, game.unlocked);
+  };
+  syncStartHull();
+  onSetting((id) => { if (id === 'startHull' || id === null) syncStartHull(); });
+  game.setStartHull = (n) => {
+    const v = clamp(n, 0, game.unlocked);
+    game.startHull = v;
+    setSetting('startHull', v);
+  };
   game.cam.x = clamp(game.player.x - VIEW_W / 2 + SHIP.w, 0, level.length - VIEW_W);
   return game;
 }
@@ -369,8 +384,8 @@ export function update(game, dt) {
 
   if (game.state === 'title' || game.state === 'gameover' || game.state === 'victory') {
     // Pick a hull: anything up to the furthest ever reached.
-    if (tapped('left') && game.startHull > 0) { game.startHull--; sfxUi(); }
-    if (tapped('right') && game.startHull < game.unlocked) { game.startHull++; sfxUi(); }
+    if (tapped('left') && game.startHull > 0) { game.setStartHull(game.startHull - 1); sfxUi(); }
+    if (tapped('right') && game.startHull < game.unlocked) { game.setStartHull(game.startHull + 1); sfxUi(); }
     if (tapped('start') || tapped('fire')) {
       sfxUi();
       reset(game);

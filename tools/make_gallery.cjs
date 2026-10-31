@@ -489,9 +489,28 @@ const OUT = path.join(__dirname, '..', 'docs');
   await page.waitForTimeout(200);
   await page.keyboard.press('KeyO');
   await page.waitForTimeout(400);
+  // park on the start-hull row so the shot shows the setting being used
+  await page.evaluate(async () => {
+    const st = await import('./src/settings.js');
+    window.game.unlocked = 4;
+    st.set('startHull', 2);
+  });
+  for (let i = 0; i < 5; i++) { await page.keyboard.press('ArrowDown'); await page.waitForTimeout(60); }
+  await page.waitForTimeout(250);
   await shot('settings.png');
   await page.keyboard.press('KeyO');
   await page.waitForTimeout(200);
+
+  // --- the help pages
+  console.log('help:');
+  await page.keyboard.press('KeyH');
+  await page.waitForTimeout(350);
+  for (let i = 0; i < 3; i++) {
+    if (i) { await page.keyboard.press('ArrowRight'); await page.waitForTimeout(220); }
+    await shot(`help-${i + 1}.png`);
+  }
+  await page.keyboard.press('KeyH');
+  await page.waitForTimeout(250);
 
   // --- the title, with the hull selector
   await page.evaluate(() => {

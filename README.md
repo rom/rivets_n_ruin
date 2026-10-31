@@ -70,8 +70,10 @@ backend down**; you lose the leaderboard, not the game.
 
 | | |
 | --- | --- |
-| ![Title](docs/scene-title.png) | ![Refit](docs/scene-refit.png) |
-| Hull select — anything up to the furthest you have reached | The refit between hulls, with the next one drawn to scale |
+| ![Title](docs/scene-title.png) | ![Help](docs/help-1.png) |
+| The title: a backdrop, a hull to pick, and four ways out | Help, on three pages — `H` from anywhere that is not flight |
+| ![Refit](docs/scene-refit.png) | ![Settings](docs/settings.png) |
+| The refit between hulls, with the next one drawn to scale | Settings, including which hull a run starts on |
 | ![Armory](docs/armory.png) | ![Attackers](docs/attackers.png) |
 | A bomb, a grenade and a missile in the air at once | The attacker roster |
 | ![Minibosses](docs/minibosses.png) | ![Boss](docs/scene-boss.png) |
@@ -664,6 +666,39 @@ height is used to say what a thing *is* instead.
 
 `RADAR STRIP` in settings turns it off.
 
+## The title
+
+![The title screen](docs/scene-title.png)
+
+It used to carry the name, the tagline, the names of all eight hulls, two
+lines of key bindings, the pilot, the tune, the best score, the hull
+selector, two lines explaining the hull selector, the launch prompt, a
+settings prompt and a ten-row board — over a dimmed frame of whatever the
+last run had left on screen. It is a menu, so it now looks like one.
+
+What is left is the name, the one choice the screen actually asks for
+(which hull to start on), the prompt to launch, a line of status and a
+line of exits. Everything that was instruction has moved to the help page.
+
+The backdrop is its own thing rather than a dimmed game: three parallax
+star layers, the dreadnought passing below with its windows lit and masts
+on the skyline, and a patrol crossing in front of it. It is a function of
+one clock, so it holds no state and cannot drift out of step.
+
+## Help
+
+![Controls](docs/help-1.png)
+
+`H` from anywhere that is not flight. Three pages: **CONTROLS**, **THE
+RUN** — what a hull asks of you, what pays and what costs — and **READING
+THE SCREEN**, which is the radar legend, the loot legend and the tells
+that say what is about to shoot you.
+
+A test measures each page against the layout and fails if one runs past
+its own footer, checks every row fits its column, and asserts that every
+key the help names is a key `input.js` actually binds. Documentation of a
+game that is not this one is worse than none.
+
 ## Settings
 
 ![Settings](docs/settings.png)
@@ -674,6 +709,14 @@ the foreground layer and pickup toasts — the visual ones double as a
 performance escape hatch on a slow machine. Everything persists, and the
 definitions are data, so adding a setting is a list entry rather than a UI
 change.
+
+### Starting hull
+
+`START HULL` begins a run on any hull you have reached — the same choice
+the title screen offers with its arrows, in the place people look for
+settings. It is bounded by how far you have actually got, because a start
+hull past that is not a setting. Earlier refits are credited, so arriving
+on PYRITE in a factory-standard ship is not a thing that can happen.
 
 ### Difficulty
 
@@ -1163,6 +1206,11 @@ Several exist because of bugs that shipped:
   at all — so the test has to go through `update()`, not through the helper.
 - **`test/radar.test.mjs`** asserts the three bands stack without
   overlapping and that no gun on any hull reaches into the radar's band.
+- **`test/screens.test.mjs`** measures the help and settings layouts. The
+  twelfth setting pushed the per-row explanation straight into the footer
+  under it, which is the kind of thing that is only ever noticed in a
+  screenshot; both layouts are data now and both are measured. It also
+  asserts every key the help page names is a key `input.js` binds.
 - **`test/art.test.mjs`** asserts every attacker kind has a body of its
   own — a missing one silently falls back to a warder, so a leech would
   just quietly be drawn as something else — and that each of the eight
