@@ -11,6 +11,7 @@ const MAP = {
   KeyP: 'pause', Escape: 'pause',
   KeyR: 'restart',
   KeyM: 'mute',
+  KeyN: 'rename',
 };
 
 export function initInput(target = window) {
