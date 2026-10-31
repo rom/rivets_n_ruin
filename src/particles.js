@@ -1,5 +1,25 @@
 import { makePool } from './pool.js';
 import { COL } from './config.js';
+import { makePool as makePool2 } from './pool.js';
+
+// Dynamic lights. An explosion should illuminate the hull around it, not just
+// sit on top of it — this is the cheapest way to make the scene feel lit
+// rather than composited.
+export const lights = makePool2(40, () => ({ x: 0, y: 0, r: 0, life: 0, maxLife: 1, color: '#ffd24a' }));
+
+export function addLight(x, y, r, life, color) {
+  const l = lights.spawn();
+  if (!l) return;
+  l.x = x; l.y = y; l.r = r; l.life = life; l.maxLife = life; l.color = color;
+}
+
+export function updateLights(dt) {
+  for (let i = lights.count - 1; i >= 0; i--) {
+    const l = lights.items[i];
+    l.life -= dt;
+    if (l.life <= 0) lights.kill(i);
+  }
+}
 
 export const particles = makePool(520, () => ({
   x: 0, y: 0, vx: 0, vy: 0, life: 0, maxLife: 1, size: 1, color: '#fff', drag: 2,
@@ -13,6 +33,7 @@ function emit(x, y, vx, vy, life, size, color, drag = 2.2) {
 }
 
 export function explode(x, y, scale = 1, hot = COL.warmHi, cool = COL.warm) {
+  addLight(x, y, 60 * scale + 30, 0.34 * scale, hot);
   const n = Math.round(16 * scale);
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2;
@@ -46,6 +67,7 @@ export function thrust(x, y, dirX, vy) {
 }
 
 export function updateParticles(dt) {
+  updateLights(dt);
   for (let i = particles.count - 1; i >= 0; i--) {
     const p = particles.items[i];
     p.life -= dt;

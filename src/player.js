@@ -4,7 +4,7 @@ import {
 import { axisX, axisY, held } from './input.js';
 import { obstaclesNear, pointBlocked } from './level.js';
 import { playerShots, fire } from './projectiles.js';
-import { sparks, thrust } from './particles.js';
+import { sparks, thrust, addLight } from './particles.js';
 import { kick } from './camera.js';
 import { sfxShoot, sfxScrape, sfxFlip } from './sfx.js';
 
@@ -78,6 +78,7 @@ export function updatePlayer(p, game, dt) {
     thrust(p.x - p.facing * 13, p.y, -p.facing, p.vy);
   }
 
+  // muzzle flash lights the hull in front of the ship
   if (held('fire') && p.fireCd <= 0 && p.flip <= 0) {
     // gunspeed shortens the interval; gunblaze adds mirrored angled barrels
     p.fireCd = SHIP.fireRate * PICKUP.speedScale[p.gunSpeed];
@@ -98,6 +99,7 @@ export function updatePlayer(p, game, dt) {
       }
     }
     sparks(p.x + p.facing * 15, p.y, p.facing, 0, 2 + p.gunBlaze, '#b4f4ff');
+    addLight(p.x + p.facing * 18, p.y, 26, 0.07, '#b4f4ff');
     sfxShoot();
   }
 }

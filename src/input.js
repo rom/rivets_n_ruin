@@ -11,7 +11,11 @@ const MAP = {
   KeyP: 'pause', Escape: 'pause',
   KeyR: 'restart',
   KeyM: 'mute',
-  KeyN: 'rename',
+  // 'no' serves double duty: cancel on the quit prompt, rename on the title.
+  // The two states are disjoint, so there is no ambiguity to resolve.
+  KeyN: 'no',
+  KeyY: 'yes',
+  KeyQ: 'quit',
   KeyT: 'tune',
   BracketRight: 'tune',
 };
