@@ -17,6 +17,7 @@ import { explode, sparks } from './particles.js';
 import { kick } from './camera.js';
 import { sfxExplode, sfxEnemyHit, sfxTurretShot } from './sfx.js';
 import { spawnPickup, spoils, scatterCoins } from './pickups.js';
+import { diff, award } from './score.js';
 import { spawnInterceptor } from './enemies.js';
 
 // ------------------------------------------------------------------ spawn
@@ -35,8 +36,8 @@ export function makeBoss(game) {
     x: left + 470,
     y: (FIELD_TOP + FIELD_BOT) / 2,
     baseY: (FIELD_TOP + FIELD_BOT) / 2,
-    hp: spec.coreHp,
-    maxHp: spec.coreHp,
+    hp: Math.round(spec.coreHp * diff().bossHp),
+    maxHp: Math.round(spec.coreHp * diff().bossHp),
     parts: [],
     phase: 0,
     t: 0,
@@ -486,7 +487,7 @@ export function hitBoss(game, b, sx, sy, dmg) {
       explode(b.x + part.dx, b.y + part.dy, 1.6);
       sfxExplode(1.6);
       kick(game.cam, 6);
-      game.score += b.spec.podScore || b.spec.plateScore || 300;
+      award(game, b.spec.podScore || b.spec.plateScore || 300);
       spawnPickup(game, b.x + part.dx - 30, b.y + part.dy);
       scatterCoins(game, b.x + part.dx, b.y + part.dy, 8);
     } else {
@@ -496,12 +497,23 @@ export function hitBoss(game, b, sx, sy, dmg) {
     return true;
   }
 
-  // The shell has to come off before the core can be hurt. Shots still stop
-  // on it, with a duller sound, so "that did nothing" is audible.
   const onCore = Math.abs(sx - b.x) < 34 && Math.abs(sy - b.y) < 46;
   if (!onCore) return false;
 
   if (shellUp(b)) {
+    // The shell has to come off before the core can be hurt, and shots stop
+    // on it with a duller sound so "that did nothing" is audible.
+    //
+    // But NOT when a living section lies at this height. The Warden's
+    // middle pod sits inside the core's box, so absorbing there ate every
+    // shot before it could reach the pod: two of three sections could be
+    // destroyed and the boss could never be killed at all. Any section
+    // overlapping the core would have the same problem, so this is a rule
+    // rather than a nudged coordinate.
+    for (const part of b.parts) {
+      if (part.dead) continue;
+      if (Math.abs(sy - (b.y + part.dy)) <= part.r) return false;   // let it through
+    }
     sparks(sx, sy, -1, 0, 3, '#8e9aa9');
     return true;
   }
@@ -518,7 +530,7 @@ function killBoss(game, b) {
   b.dead = true;
   b.hp = 0;
   b.death = BOSS.deathTime;
-  game.score += b.spec.score;
+  award(game, b.spec.score);
   explode(b.x, b.y, 3.4, '#ffd24a', '#ff7a2f');
   sfxExplode(2.6);
   kick(game.cam, 16);

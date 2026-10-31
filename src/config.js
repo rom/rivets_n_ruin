@@ -206,6 +206,16 @@ export const LEVELS = [
 // These stack, so arriving at TANTALUM you are flying a markedly different
 // craft from the one that launched at ARGENTUM — which is the point: the
 // difficulty curve is met with a power curve, not just better flying.
+// Difficulty. One multiplier set, applied where the numbers are actually
+// used, so changing it takes effect without rebuilding anything.
+export const DIFFICULTY = [
+  { id: 'cadet',   name: 'CADET',   enemyDmg: 0.6, bossHp: 0.7, spawn: 1.35, scrape: 0.6, scoreMul: 0.7 },
+  { id: 'pilot',   name: 'PILOT',   enemyDmg: 1.0, bossHp: 1.0, spawn: 1.0,  scrape: 1.0, scoreMul: 1.0 },
+  { id: 'veteran', name: 'VETERAN', enemyDmg: 1.4, bossHp: 1.3, spawn: 0.8,  scrape: 1.3, scoreMul: 1.3 },
+  { id: 'ruin',    name: 'RUIN',    enemyDmg: 1.9, bossHp: 1.6, spawn: 0.62, scrape: 1.7, scoreMul: 1.7 },
+];
+export const DEFAULT_DIFFICULTY = 1;
+
 export const LEVEL_UP = {
   shieldMax: 45,
   accelMul: 1.09,
@@ -315,8 +325,13 @@ export const PICKUP = {
   size: 12,
   life: 11.0,            // seconds on the hull before it expires
   blinkAt: 3.0,          // starts flashing with this long left
-  magnet: 38,            // soft attraction, so near-misses still count
-  magnetPull: 210,
+  // Magnetism. Generous by default: chasing a coin across the hull is not
+  // interesting, and the old radius was small enough that flying fast lost
+  // most of a kill's loot. Loot reaches further than upgrades do.
+  magnet: 74,
+  magnetLoot: 118,
+  magnetLevels: [1, 1.45, 1.95, 2.6],   // what the shop sells
+  magnetPull: 320,
   drift: 13,
   bob: 9,                // vertical bob amplitude, px
   score: 50,

@@ -6,6 +6,7 @@ import { enemyShots, fire } from './projectiles.js';
 import { explode, sparks } from './particles.js';
 import { sfxTurretShot, sfxEnemyHit, sfxExplode } from './sfx.js';
 import { spoils } from './pickups.js';
+import { diff, award } from './score.js';
 
 export const interceptors = makePool(INTERCEPTOR.maxActive + 2, () => ({
   x: 0, y: 0, baseY: 0, dirX: -1, t: 0, hp: 0, fireCd: 0,
@@ -131,7 +132,7 @@ export function updateInterceptors(game, dt) {
   if (game.state === 'play') {
     game.spawnCd -= dt;
     if (game.spawnCd <= 0) {
-      game.spawnCd = game.level.spec.interceptorSpawn * (0.75 + Math.random() * 0.6);
+      game.spawnCd = game.level.spec.interceptorSpawn * diff().spawn * (0.75 + Math.random() * 0.6);
       // quiet aprons at both ends of the hull
       if (p.x > APRON * 0.6 && p.x < game.level.length - APRON * 0.6) spawnInterceptor(game);
     }
@@ -177,7 +178,7 @@ export function hitInterceptor(game, i, dmg) {
   explode(e.x, e.y, 1);
   sfxExplode(1);
   spoils(game, e.x, e.y, 'interceptor');
-  game.score += INTERCEPTOR.score;
+  award(game, INTERCEPTOR.score);
   interceptors.kill(i);
   return true;
 }
@@ -198,7 +199,7 @@ export function hitTurret(game, t, dmg) {
   explode(t.x, t.y - t.dir * 5, 1.5);
   sfxExplode(1.5);
   spoils(game, t.x, t.y - t.dir * 14, 'turret');
-  game.score += (t.tower && t.tower.score) || TURRET.score;
+  award(game, (t.tower && t.tower.score) || TURRET.score);
   game.turretsKilled++;
   return true;
 }

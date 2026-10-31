@@ -2,6 +2,7 @@ import {
   SHIP, INTERCEPTOR, LEVELS, LEVEL_UP, PICKUP, BOSS, APRON, VIEW_W,
   FIELD_TOP, FIELD_BOT, clamp,
 } from './config.js';
+import { diff, award } from './score.js';
 import { buildLevel, obstaclesNear } from './level.js';
 import { makeBoss, updateBoss, hitBoss, bossBeaten, arenaLeft } from './boss.js';
 import { makeCamera, updateCamera, kick } from './camera.js';
@@ -14,6 +15,9 @@ import { updateParticles, explode, sparks, particles, thrust as thrustPlume } fr
 import { updatePickups, resetPickups, pickups } from './pickups.js';
 import { updateFoes, resetFoes, foes, hitFoe, spawnFoeForLevel, SPEC as FOE_SPEC } from './foes.js';
 import { updateOrdnance, resetOrdnance, ordnance } from './armory.js';
+import {
+  minis, resetMinis, planMinis, updateMinis, hitMini, hitMinis, miniTargets,
+} from './miniboss.js';
 import { resetShop, applyMods } from './shop.js';
 import { SPLASH_TIME, LAUNCH_TIME, LANDING_TIME, ENDING_TIME, launchPose, landingPose } from './sequences.js';
 import { tapped, anyTapped, endFrame } from './input.js';
@@ -25,6 +29,8 @@ import {
 import { setIntensity, setTune } from './music.js';
 import { submitRun, heartbeat, serverBest, startRun } from './net.js';
 import { activeModId } from './mods.js';
+
+export { diff } from './score.js';
 
 export function makeGame(modSpec = null) {
   // A mod overrides the first hull's seed; the rest of the campaign is
@@ -59,6 +65,7 @@ export function makeGame(modSpec = null) {
     toast: null,
     returning: false,      // outbound leg done, now fly the hull back
     boss: null,            // set once the arena at the far end is entered
+    miniPlan: planMinis(level, 0),   // where along this hull minibosses wait
     quitting: false,       // quit confirmation is open
     banner: null,
     best: Number(localStorage.getItem('rnr.best') || 0),
@@ -75,6 +82,14 @@ export function makeGame(modSpec = null) {
       else sfxCoffin();
     },
   };
+  // A miniboss announces itself: it is not another interceptor, and the
+  // pilot gets a moment to decide whether to stop for it.
+  game.onMiniArrive = (name) => {
+    game.toast = { text: name, kind: 'coffin', t: 2.2 };
+    kick(game.cam, 5);
+    sfxTurnaround();
+  };
+  game.onMiniEscort = () => spawnFoeForLevel(game);
   game.cam.x = clamp(game.player.x - VIEW_W / 2 + SHIP.w, 0, level.length - VIEW_W);
   return game;
 }
@@ -132,6 +147,8 @@ function reset(game) {
   resetFoes();
   resetPickups();
   resetOrdnance();
+  resetMinis();
+  game.miniPlan = planMinis(game.level, at);
   playerShots.clear();
   enemyShots.clear();
   particles.clear();
@@ -186,6 +203,8 @@ function loadNextHull(game) {
   resetPickups();
   resetFoes();
   resetOrdnance();
+  resetMinis();
+  game.miniPlan = planMinis(game.level, game.levelIndex);
   playerShots.clear();
   enemyShots.clear();
   particles.clear();
@@ -375,6 +394,7 @@ export function update(game, dt) {
   updateTurrets(game, dt);
   updateInterceptors(game, dt);
   updateFoes(game, dt);
+  updateMinis(game, dt);
   updateBoss(game, dt);
   // Missiles need something to chase; gather it once rather than per missile.
   collectSeekable(game);
@@ -408,14 +428,14 @@ export function update(game, dt) {
     game.returning = true;
     game.boss = null;
     banner(game, 'WAY OPEN — TURN AND BURN', 'RUN THE HULL BACK TO THE DOCK', 3.0);
-    game.score += 2500;
+    award(game, 2500);
     sfxTurnaround();
   } else if (game.returning && p.x < APRON * 0.55) {
     game.seqFromX = p.x;
     // Award the bonus BEFORE anything reads the score. This used to report
     // the run to the backend first, so every submitted completion was short
     // by its own completion bonus.
-    game.score += 5000 + Math.max(0, Math.round((260 - game.time) * 25));
+    award(game, 5000 + Math.max(0, Math.round((260 - game.time) * 25)));
     game.stateT = 0;
     sfxComplete();
 
@@ -461,6 +481,7 @@ function collectSeekable(game) {
   const px = game.player.x;
   for (let i = 0; i < interceptors.count; i++) out.push(interceptors.items[i]);
   for (let i = 0; i < foes.count; i++) out.push(foes.items[i]);
+  miniTargets(out);
   for (const t of game.level.turrets) {
     if (!t.dead && Math.abs(t.x - px) < 420) out.push(t);
   }
@@ -490,6 +511,10 @@ function applyBlasts(game) {
       const f = foes.items[i];
       // a blast ignores a warder's frontal plate, which is rather the point
       if (hit(f.x, f.y)) hitFoe(game, i, f.x, f.y - 999, bl.dmg);
+    }
+    for (let i = minis.count - 1; i >= 0; i--) {
+      const m = minis.items[i];
+      if (!m.dead && hit(m.x, m.y)) hitMini(game, i, m.x, m.y, bl.dmg);
     }
     for (const t of game.level.turrets) {
       if (!t.dead && hit(t.x, t.y)) hitTurret(game, t, bl.dmg);
@@ -576,6 +601,8 @@ function collide(game) {
       if (Math.abs(s.x - f.x) < r && Math.abs(s.y - f.y) < r) gone = hitFoe(game, j, s.x, s.y, s.dmg);
     }
 
+    if (!gone && hitMinis(game, s.x, s.y, s.dmg)) gone = true;
+
     if (!gone && game.boss && hitBoss(game, game.boss, s.x, s.y, s.dmg)) gone = true;
 
     if (!gone) {
@@ -615,7 +642,7 @@ function collide(game) {
     if (Math.abs(s.x - p.x) < hw + s.r && Math.abs(s.y - p.y) < hh + s.r) {
       enemyShots.kill(i);
       if (p.invuln <= 0) {
-        p.shield -= s.dmg;
+        p.shield -= s.dmg * diff().enemyDmg;
         game.flash = Math.max(game.flash, 0.3);
         kick(game.cam, 3.5);
         sparks(s.x, s.y, -Math.sign(s.vx), 0, 6, '#e8434f');

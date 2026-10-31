@@ -7,6 +7,7 @@ import {
   PICKUP, SHIP, FIELD_TOP, FIELD_BOT, VIEW_W, clamp,
 } from './config.js';
 import { makePool } from './pool.js';
+import { award } from './score.js';
 import { pointBlocked } from './level.js';
 import { sparks } from './particles.js';
 
@@ -147,7 +148,11 @@ export function updatePickups(game, dt) {
     const dx = pl.x - p.x;
     const dy = pl.y - p.y;
     const d = Math.hypot(dx, dy);
-    const magnet = PICKUP.magnet * (pl.magnetMul || 1);
+    // Loot is pulled from further than upgrade crates: a coin you flew past
+    // is a coin you earned, and chasing it back is not gameplay.
+    const loot = p.kind === 'coin' || p.kind === 'goldbar' || p.kind === 'coffin';
+    const base = loot ? PICKUP.magnetLoot : PICKUP.magnet;
+    const magnet = base * (pl.magnetMul || 1);
     if (d < magnet && d > 0.01) {
       const pull = (1 - d / magnet) * PICKUP.magnetPull * dt;
       p.x += (dx / d) * pull;
@@ -169,23 +174,23 @@ function collect(game, p) {
   let label = '';
   // Coins and coffins carry their own value; everything else pays the flat
   // pickup score on top of its effect.
-  if (p.kind !== 'coin' && p.kind !== 'coffin') game.score += PICKUP.score;
+  if (p.kind !== 'coin' && p.kind !== 'coffin') award(game, PICKUP.score);
 
   switch (p.kind) {
     case 'goldbar':
-      game.score += PICKUP.barValue * (pl.coinMul || 1);
+      award(game, PICKUP.barValue * (pl.coinMul || 1));
       game.coins = (game.coins || 0) + 10 * (pl.coinMul || 1);
       game.bars = (game.bars || 0) + 1;
       game.onHaul?.('goldbar');
       label = 'GOLD BAR  +' + PICKUP.barValue;
       break;
     case 'coin':
-      game.score += PICKUP.coinValue * (pl.coinMul || 1);
+      award(game, PICKUP.coinValue * (pl.coinMul || 1));
       game.coins = (game.coins || 0) + (pl.coinMul || 1);
       game.onHaul?.('coin');
       return;                       // no toast: coins are constant background
     case 'coffin':
-      game.score += PICKUP.coffinValue;
+      award(game, PICKUP.coffinValue);
       game.onHaul?.('coffin');
       game.coffins = (game.coffins || 0) + 1;
       label = 'GOLD COFFIN  +' + PICKUP.coffinValue;
@@ -199,7 +204,7 @@ function collect(game, p) {
         pl.lives++;
         label = 'LIFESAVER  +1 SHIP';
       } else {
-        game.score += 500;
+        award(game, 500);
         label = 'LIFESAVER  +500';
       }
       break;
@@ -210,7 +215,7 @@ function collect(game, p) {
         label = 'HEALTHBAR  MAX ' + pl.shieldMax;
       } else {
         pl.shield = pl.shieldMax;
-        game.score += 300;
+        award(game, 300);
         label = 'HEALTHBAR  FULL';
       }
       break;
@@ -219,7 +224,7 @@ function collect(game, p) {
         pl.gunSpeed++;
         label = 'GUNSPEED  ' + pl.gunSpeed + '/' + pl.gunCap;
       } else {
-        game.score += 300;
+        award(game, 300);
         label = 'GUNSPEED  MAX';
       }
       break;
@@ -228,7 +233,7 @@ function collect(game, p) {
         pl.gunBlaze++;
         label = 'GUNBLAZE  ' + pl.gunBlaze + '/' + pl.gunCap;
       } else {
-        game.score += 300;
+        award(game, 300);
         label = 'GUNBLAZE  MAX';
       }
       break;

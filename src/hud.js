@@ -139,20 +139,51 @@ export function drawHud(ctx, game, audio = {}) {
 // Boss health, across the top of the playfield. Shows the shell separately
 // from the core, because "my shots are doing nothing" needs an answer on
 // screen rather than only in the sound.
+// Boss health. Two bars rather than one, because while the shell is up the
+// core takes no damage — so a single bar driven by core health sat
+// completely still through the entire first phase and showed no progress
+// for the work actually being done.
 function drawBossBar(ctx, b) {
   if (b.entry > 0) return;
   const w = 420;
   const x = (VIEW_W - w) / 2;
+  const plated = shellUp(b);
+
   text(ctx, b.name, VIEW_W / 2, 8, COL.hudBright, FONT, 'center');
+
+  // --- the core, always shown; dim while it cannot be hurt
   ctx.fillStyle = '#10141b';
   ctx.fillRect(x - 2, 21, w + 4, 9);
   const frac = Math.max(0, b.hp / b.maxHp);
-  ctx.fillStyle = shellUp(b) ? '#3a4250' : frac < 0.34 ? COL.danger : COL.warm;
+  ctx.fillStyle = plated ? '#2a3140' : frac < 0.34 ? COL.danger : COL.warm;
   ctx.fillRect(x, 23, Math.round(w * frac), 5);
-  if (shellUp(b)) {
-    const alive = livingParts(b).length;
-    text(ctx, 'ARMOUR HOLDING — ' + alive + '/' + b.parts.length + ' SECTIONS',
-      VIEW_W / 2, 32, COL.warmHi, FONT, 'center');
+  // segment ticks, so a long bar still reads as a quantity
+  ctx.fillStyle = '#10141b';
+  for (let i = 1; i < 10; i++) ctx.fillRect(x + Math.round(w * i / 10), 23, 1, 5);
+
+  if (!b.parts.length) return;
+
+  // --- the shell: total remaining section health, which is what your
+  // shots are actually reducing in the first phase
+  const total = b.parts.reduce((a, p) => a + p.maxHp, 0);
+  const left = b.parts.reduce((a, p) => a + Math.max(0, p.hp), 0);
+  const sfrac = total ? left / total : 0;
+
+  ctx.fillStyle = '#10141b';
+  ctx.fillRect(x - 2, 33, w + 4, 7);
+  ctx.fillStyle = plated ? COL.warmHi : '#243040';
+  ctx.fillRect(x, 34, Math.round(w * sfrac), 5);
+  // one divider per section, so you can see which is next to go
+  ctx.fillStyle = '#10141b';
+  for (let i = 1; i < b.parts.length; i++) {
+    ctx.fillRect(x + Math.round(w * i / b.parts.length), 34, 1, 5);
+  }
+
+  if (plated) {
+    text(ctx, 'ARMOUR HOLDING — ' + livingParts(b).length + '/' + b.parts.length + ' SECTIONS',
+      VIEW_W / 2, 43, COL.warmHi, FONT, 'center');
+  } else {
+    text(ctx, 'ARMOUR BREACHED — CORE EXPOSED', VIEW_W / 2, 43, COL.danger, FONT, 'center');
   }
 }
 
@@ -176,12 +207,35 @@ function drawBanner(ctx, b) {
 
 // The top list. Drawn on every non-playing screen, because a score board
 // nobody sees is not a score board.
-function drawBoard(ctx, x, y, title, rows = 8) {
+// "when" as a relative age, which is what a leaderboard reader actually
+// wants to know: a run from four minutes ago means something different from
+// one from last March.
+function ago(iso) {
+  if (!iso) return '';
+  const secs = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (!Number.isFinite(secs) || secs < 0) return '';
+  if (secs < 60) return 'JUST NOW';
+  if (secs < 3600) return Math.floor(secs / 60) + 'M AGO';
+  if (secs < 86400) return Math.floor(secs / 3600) + 'H AGO';
+  if (secs < 86400 * 30) return Math.floor(secs / 86400) + 'D AGO';
+  return new Date(iso).toISOString().slice(2, 10);   // YY-MM-DD, eight characters like the rest
+}
+
+// The score board. Ten rows is what was asked for, and ten rows stacked
+// vertically do not fit under either screen that shows them, so they run in
+// two columns of five — which is also how an arcade board looked.
+const BOARD_COLW = 176;
+const BOARD_GAP = 8;
+export const BOARD_W = BOARD_COLW * 2 + BOARD_GAP;
+
+function drawBoard(ctx, x, y, rows = 10) {
   const net = netState();
   const runs = net.board === 'runs';
   // Two different questions: who is best, and what are the best runs. The
   // second lets one pilot hold several places, which the first hides.
   text(ctx, (runs ? 'HIGH SCORES' : 'TOP PILOTS') + '   [B]', x, y, COL.hudText, FONT);
+  text(ctx, runs ? 'BEST RUNS, HIGHEST FIRST' : 'EACH PILOT\u2019S BEST RUN',
+    x + BOARD_W, y, COL.hudLine, FONT, 'right');
 
   if (!net.online) {
     text(ctx, 'BACKEND UNREACHABLE — PLAYING OFFLINE', x, y + 16, COL.hudLine, FONT);
@@ -194,15 +248,19 @@ function drawBoard(ctx, x, y, title, rows = 8) {
     text(ctx, 'NO RUNS YET — BE FIRST', x, y + 16, COL.hudLine, FONT);
     return;
   }
-  list.slice(0, rows).forEach((row, i) => {
+
+  const shown = list.slice(0, rows);
+  const perCol = Math.ceil(Math.min(rows, Math.max(shown.length, 1)) / 2);
+  shown.forEach((row, i) => {
     const s = row.score;
     const mine = s.playerId === me;
     const col = mine ? COL.warmHi : i === 0 ? COL.coolHi : COL.hudText;
-    const ry = y + 16 + i * 12;
-    text(ctx, String(row.position).padStart(2, ' '), x, ry, col, FONT);
-    text(ctx, s.name.slice(0, 16), x + 22, ry, col, FONT);
-    text(ctx, String(s.points).padStart(8, '0'), x + 150, ry, col, FONT);
-    if (s.completed) text(ctx, 'OK', x + 216, ry, COL.cool, FONT);
+    const cx0 = x + (i < perCol ? 0 : BOARD_COLW + BOARD_GAP);
+    const ry = y + 16 + (i % perCol) * 12;
+    text(ctx, String(row.position).padStart(2, ' '), cx0, ry, col, FONT);
+    text(ctx, s.name.slice(0, 9), cx0 + 16, ry, col, FONT);
+    text(ctx, String(s.points).padStart(8, '0'), cx0 + 72, ry, col, FONT);
+    text(ctx, ago(s.created), cx0 + BOARD_COLW, ry, s.completed ? COL.cool : COL.hudLine, FONT, 'right');
   });
 }
 
@@ -219,7 +277,7 @@ function drawScreen(ctx, game) {
   const cx = VIEW_W / 2;
   const net = netState();
   const pulse = 0.55 + 0.45 * Math.sin(game.stateT * 4);
-  const BOARD_X = 186;
+  const BOARD_X = Math.round((VIEW_W - BOARD_W) / 2);
 
   if (game.state === 'title') {
     text(ctx, "RIVETS 'N RUIN", cx, 34, COL.hudBright, 'bold 30px ui-monospace, Menlo, monospace', 'center');
@@ -258,7 +316,7 @@ function drawScreen(ctx, game) {
     ctx.globalAlpha = 1;
     text(ctx, 'O  SETTINGS', cx, 218, COL.hudText, FONT, 'center');
 
-    drawBoard(ctx, BOARD_X, 234, 'TOP PILOTS', 3);
+    drawBoard(ctx, BOARD_X, 236, 10);
     return;
   }
 
@@ -360,7 +418,7 @@ function drawScreen(ctx, game) {
     cx, infoY + 62, COL.warmHi, FONT, 'center');
   ctx.globalAlpha = 1;
 
-  drawBoard(ctx, BOARD_X, infoY + 84, 'TOP PILOTS', 5);
+  drawBoard(ctx, BOARD_X, infoY + 84, 10);
 }
 
 // Where that run put you. Blank until the backend answers.

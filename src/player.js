@@ -17,6 +17,7 @@ import { obstaclesNear, pointBlocked } from './level.js';
 import { playerShots, fire } from './projectiles.js';
 import { sparks, thrust, addLight } from './particles.js';
 import { fireSecondary } from './armory.js';
+import { diff } from './score.js';
 import { kick } from './camera.js';
 import { sfxShoot, sfxScrape, sfxFlip } from './sfx.js';
 
@@ -35,6 +36,7 @@ export function makePlayer() {
     gunSpeed: 0,                 // gunspeed pickups: faster fire
     gunBlaze: 0,                 // gunblaze pickups: wider spread
     gunCap: PICKUP.gunLevels,    // clearing a hull raises this
+    magnetLevel: 0,             // tractor coils bought at the armourer
     // What the guns revert to when a ship is lost. The refit granted by
     // clearing a hull is part of the ship and survives; everything picked up
     // since is lost with the hull it was collected on.
@@ -180,7 +182,7 @@ function impact(p, game, speed, hx, hy, nx, ny) {
   sfxScrape(speed);
   if (p.scrapeCd > 0 || p.invuln > 0) return;
   p.scrapeCd = SHIP.scrapeCd;
-  const dmg = (SHIP.grindDamage + speed * SHIP.impactDamage) * (p.scrapeMul || 1);
+  const dmg = (SHIP.grindDamage + speed * SHIP.impactDamage) * (p.scrapeMul || 1) * diff().scrape;
   p.shield -= dmg;
   kick(game.cam, 2.5 + speed * 0.02);
   game.flash = Math.max(game.flash, Math.min(0.5, 0.12 + speed * 0.0012));

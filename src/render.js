@@ -11,6 +11,7 @@ import { renderScale, scaleGeneration, hullScale } from './display.js';
 import { pickups, tint } from './pickups.js';
 import { livingParts, shellUp } from './boss.js';
 import { foes, SPEC as FOE_SPEC } from './foes.js';
+import { drawMinis } from './miniboss.js';
 import { drawOrdnance } from './armory.js';
 import { drawPad } from './sequences.js';
 import { PICKUP } from './config.js';
@@ -122,6 +123,7 @@ export function drawWorld(ctx, game) {
   drawTurrets(ctx, game, camX);
   drawInterceptors(ctx, game);
   drawFoes(ctx);
+  drawMinis(ctx);
   if (game.boss) drawBoss(ctx, game.boss);
   drawPickups(ctx);
   drawOrdnance(ctx);

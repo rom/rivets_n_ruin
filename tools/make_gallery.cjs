@@ -27,10 +27,32 @@ const OUT = path.join(__dirname, '..', 'docs');
 
   await page.goto(URL_BASE, { waitUntil: 'load' });
   await page.waitForFunction(() => window.game);
-  await page.keyboard.press('Enter');
-  await page.waitForTimeout(600);
+  // Enter until the ship is actually flying: splash -> title -> launching
+  // -> play. One press used to be enough; the splash and launch sequences
+  // each added a screen, and until this was fixed every gallery image was
+  // shot with the title screen drawn over the scene.
+  for (let i = 0; i < 8; i++) {
+    if (await page.evaluate(() => window.game.state) === 'play') break;
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(350);
+  }
+  const reached = await page.evaluate(() => window.game.state);
+  if (reached !== 'play') throw new Error(`could not reach play: stuck in ${reached}`);
   await page.evaluate(() => { window.game.player.invuln = 1e9; });
   const el = await page.$('#game');
+
+  // Every scene below poses the world by hand, so nothing may be mid-banner,
+  // mid-sequence or mid-menu when the shutter opens.
+  const clear = () => page.evaluate(() => {
+    const g = window.game;
+    g.state = 'play';
+    g.stateT = 9;
+    g.banner = null;
+    g.toast = null;
+    g.quitting = false;
+    g.player.alive = true;
+    g.player.invuln = 1e9;
+  });
 
   const shot = async (name, clip) => {
     await el.screenshot({ path: path.join(OUT, name), ...(clip ? { clip } : {}) });
@@ -55,7 +77,9 @@ const OUT = path.join(__dirname, '..', 'docs');
       g.player.y = 170;
       g.cam.x = o.x - 420;
     }, i);
+    await clear();
     await page.waitForTimeout(450);
+    await clear();
     await shot(`hull-${String(i + 1).padStart(2, '0')}-${hulls[i].toLowerCase()}.png`,
       { x: 0, y: 0, width: 1400, height: 660 });
   }
@@ -85,8 +109,42 @@ const OUT = path.join(__dirname, '..', 'docs');
     });
     en.spawnInterceptor(g);
   });
+  await clear();
   await page.waitForTimeout(120);
   await shot('attackers.png', { x: 0, y: 0, width: 1400, height: 660 });
+
+  // --- the miniboss roster, one of each posed on one screen
+  console.log('minibosses:');
+  const poseMinis = (fresh) => page.evaluate(async (fresh) => {
+    const mb = await import('./src/miniboss.js');
+    const fo = await import('./src/foes.js');
+    const en = await import('./src/enemies.js');
+    const g = window.game;
+    if (fresh) {
+      fo.resetFoes();
+      en.resetEnemies();
+      mb.resetMinis();
+      g.player.x = 600; g.player.y = 300; g.cam.x = 300; g.player.invuln = 1e9;
+      for (const k of Object.keys(mb.KINDS)) mb.spawnMini(g, k, 0);
+    }
+    // Two of them chase the ship, so re-pose immediately before the shutter
+    // rather than trusting where they were a frame ago.
+    const hp = [1, 0.55, 1, 0.25];
+    for (let i = 0; i < mb.minis.count; i++) {
+      const m = mb.minis.items[i];
+      m.x = g.cam.x + 95 + i * 150;
+      m.baseY = 150;
+      m.y = 150;
+      m.t = 0.4;
+      m.hp = Math.round(m.maxHp * hp[i % hp.length]);
+    }
+  }, fresh);
+  await clear();
+  await poseMinis(true);
+  await page.waitForTimeout(120);
+  await clear();
+  await poseMinis(false);
+  await shot('minibosses.png', { x: 0, y: 0, width: 1400, height: 560 });
 
   // --- the armory in flight
   console.log('armory:');
@@ -105,6 +163,7 @@ const OUT = path.join(__dirname, '..', 'docs');
     const f = fo.spawnFoe(g, 'orbiter');
     if (f) { f.x = g.player.x + 240; f.baseY = 150; f.y = 150; f.state = 1; }
   });
+  await clear();
   await page.waitForTimeout(320);
   await shot('armory.png', { x: 0, y: 0, width: 1400, height: 760 });
 
@@ -120,6 +179,7 @@ const OUT = path.join(__dirname, '..', 'docs');
     g.player.y = 180; g.player.invuln = 1e9;
     g.player.gunBlaze = 4; g.player.gunSpeed = 4;
   });
+  await clear();
   await page.waitForTimeout(3600);
   await page.keyboard.down('KeyZ');
   await page.waitForTimeout(700);

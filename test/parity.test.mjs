@@ -63,3 +63,29 @@ test('the validator allows for the most heavily defended hull', () => {
   const maxTurretsSeen = goConst('MaxTurretsPerHull');
   assert.ok(maxTurretsSeen >= 40, 'turret allowance looks too low for eight hulls');
 });
+
+// --- the README is the third copy of these facts, and it drifted furthest.
+//
+// Its hull table went on claiming three hulls long after there were eight,
+// and its gap list described systems that had since been built. Nobody
+// notices a stale README from inside the code, so the table is checked.
+
+const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+
+test('the README hull table lists every hull, with its real length', () => {
+  const rows = [...readme.matchAll(/\|\s*\*\*([A-Z]+)\*\*[^|]*\|\s*([\d,]+)px\s*\|/g)]
+    .map((m) => ({ name: m[1], length: Number(m[2].replace(/,/g, '')) }));
+  assert.equal(rows.length, LEVELS.length,
+    `README lists ${rows.length} hulls, the game has ${LEVELS.length}`);
+  rows.forEach((row, i) => {
+    assert.equal(row.name, LEVELS[i].name, `README hull ${i + 1} is out of order`);
+    assert.equal(row.length, LEVELS[i].length,
+      `README says ${LEVELS[i].name} is ${row.length}px, config says ${LEVELS[i].length}px`);
+  });
+});
+
+test('the README names every boss', () => {
+  for (const b of BOSSES) {
+    assert.ok(readme.includes(b.name), `the README never mentions ${b.name}`);
+  }
+});
