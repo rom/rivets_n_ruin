@@ -49,6 +49,19 @@ const (
 	MaxPerPickup   = PointsPickup + MaxPickupBonus
 )
 
+// BossRewards mirrors BOSSES[] in src/config.js: the kill score for each
+// hull's boss plus the most its destructible sections can pay out. Every
+// hull ends in a fight, so leaving these out rejects every finished run.
+var BossRewards = []int{
+	6000 + 3*400,  // THE WARDEN: core + three pods
+	9000,          // DRAYLINE: no sections
+	14000 + 4*600, // THE RIVETER: core + four plates
+}
+
+// BossPickupDrops is how many pickups a boss can shed: one per section
+// destroyed plus a payload on death.
+var BossPickupDrops = []int{3 + 4, 0 + 4, 4 + 4}
+
 // HullLengths mirrors LEVELS[].length in src/config.js.
 var HullLengths = []float64{12000, 14500, 17000}
 
@@ -128,8 +141,16 @@ func MaxPlausiblePoints(s Submission) int {
 	kills := turrets + interceptors
 	total += PointsTurret * turrets
 	total += PointsIntercept * interceptors
-	// One pickup per kill at most, each worth up to MaxPerPickup.
-	total += MaxPerPickup * kills
+
+	// Each hull reached means its boss could have been fought and killed.
+	bossDrops := 0
+	for i := 0; i < n && i < len(BossRewards); i++ {
+		total += BossRewards[i]
+		bossDrops += BossPickupDrops[i]
+	}
+
+	// One pickup per kill at most, plus whatever the bosses shed.
+	total += MaxPerPickup * (kills + bossDrops)
 	return total + 1000 // slack for tuning drift
 }
 

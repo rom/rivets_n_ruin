@@ -47,6 +47,26 @@ func TestCampaignCompletionBoundary(t *testing.T) {
 	}
 }
 
+// Bosses are a large chunk of a finished run's score. A campaign that kills
+// all three must fit under the ceiling, or every completed run is rejected.
+func TestBossScoresFitTheCeiling(t *testing.T) {
+	bosses := 0
+	for _, r := range BossRewards {
+		bosses += r
+	}
+	if bosses < 20000 {
+		t.Fatalf("boss rewards total %d, which looks out of step with src/config.js", bosses)
+	}
+	s := Submission{Points: 60444, TimeSec: 400, Turrets: 60, Completed: true, Levels: 3}
+	if err := Score(s); err != nil {
+		t.Fatalf("rejected a campaign that killed all three bosses: %v", err)
+	}
+	// and it must still be a ceiling, not a blank cheque
+	if err := Score(Submission{Points: 50_000_000, TimeSec: 400, Completed: true, Levels: 3}); err == nil {
+		t.Fatal("ceiling no longer rejects an absurd score")
+	}
+}
+
 func TestTooManyLevelsRejected(t *testing.T) {
 	if err := Score(Submission{Points: 10, TimeSec: 100, Levels: 99}); err == nil {
 		t.Fatal("accepted more hulls than the campaign has")

@@ -376,6 +376,10 @@ func TestValidatorConstantsTrackTheGame(t *testing.T) {
 	if validate.HullLengths[0] != 12000 {
 		t.Errorf("validate.HullLengths[0] is %v but src/config.js LEVELS[0].length is 12000", validate.HullLengths[0])
 	}
+	if len(validate.BossRewards) != validate.NumLevels() {
+		t.Errorf("validate has %d boss reward entries for %d hulls — src/config.js BOSSES must match LEVELS",
+			len(validate.BossRewards), validate.NumLevels())
+	}
 	if validate.NumLevels() != 3 {
 		t.Errorf("validate has %d hulls but src/config.js LEVELS has 3", validate.NumLevels())
 	}

@@ -66,8 +66,36 @@ than the last, and each is named for a metal — Uridium's stage-naming ritual.
 | **OSMIUM** — line hull | 14,500px | 4 | 196px/s, every 1.2s | QUENCH |
 | **TANTALUM** — flagship hull | 17,000px | 5 | 220px/s, every 0.98s | OVERDRIVE |
 
-On each hull: fly to the far end, turn around, fly back to the dock. Both legs
-scores a time bonus. Dying out of ships ends the run wherever you are.
+On each hull: fly to the far end, **kill what is guarding it**, then run back to
+the dock. Dying out of ships ends the run wherever you are.
+
+## Bosses
+
+Each hull is guarded at its far end, and the boss is what opens the way home —
+so a run reads as approach, fight, escape rather than a lap with a waypoint.
+The fight happens in a locked arena: the camera pins, the ship is walled in,
+and there is nowhere to retreat to.
+
+**THE WARDEN** — ARGENTUM. An emplaced fortress: three gun pods on a spine
+firing aimed bursts, around a core that cannot be hurt until they are gone.
+Once the pods are off it opens up and sprays radially, rotating a little each
+volley so the gaps move.
+
+**DRAYLINE** — OSMIUM. A mobile gunship that tracks your altitude and has to be
+led. Alternates an aimed spread with a horizontal wall that has exactly one gap
+in it, placed away from where you currently are. Below half health it speeds up
+and widens the spread.
+
+**THE RIVETER** — TANTALUM. Four armour plates over a core, and all of the
+above layered. Spirals while plated; once stripped it switches to aimed
+barrages and starts calling interceptors. Below a third it adds a dense radial
+on top of everything else.
+
+Destructible sections pay score and drop pickups when they go, and a kill
+showers the arena with them — so stripping a boss is worth doing carefully
+rather than just surviving it. Shots that hit intact armour stop dead with a
+duller sound, and the HUD says `ARMOUR HOLDING`, because "my shots are doing
+nothing" needs an answer on screen.
 
 ### The refit
 
@@ -325,6 +353,12 @@ internal/api/     routing, handlers, auth, rate limiting
 internal/validate/ score plausibility, derived from the game's physics
 ```
 
+`make smoke` flies the game in a headless browser and reads pixels, asserting
+the camera is finite, the world scrolls and the hull is actually drawn. It
+exists because a camera signature change once left `cam.x` as `NaN`: every
+state assertion still passed — score rising, ship moving, 60fps, nothing
+thrown — while the screen rendered black. State tests cannot see that.
+
 Run the Go tests with `go test ./...` (and `-race`, which the suite is clean
 under — it covers concurrent submission and concurrent store access).
 
@@ -337,8 +371,12 @@ These are deliberate omissions from the vertical slice, not bugs:
 
 - **No upgrade shop.** The weapon-mount economy that drives Jets'n'Guns is the
   obvious next system — the single forward cannon is a placeholder for it.
-- **No boss, no landing sequence.** Uridium ends each level with a landing
-  minigame; the dock here is just a position.
+- **No landing sequence.** Uridium ends each level with a landing minigame;
+  the dock here is just a position.
+- **Boss difficulty is unplayed.** Health pools, fire rates and pattern timing
+  are first guesses, and the arena is deliberately escape-proof — whether that
+  reads as tense or unfair is a thing only playing decides. All of it is in
+  `BOSSES` in `src/config.js`.
 - **The refit curve is unplayed.** Three hulls and the per-hull upgrades are
   first guesses; whether the ship outgrows the difficulty is exactly the thing
   only playing will tell you. All of it is in `LEVELS` and `LEVEL_UP` in
