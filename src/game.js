@@ -15,9 +15,11 @@ import {
   sfxTurnaround, sfxComplete, sfxGameOver, sfxUi,
 } from './sfx.js';
 import { setIntensity } from './music.js';
+import { submitRun, heartbeat } from './net.js';
+import { activeModId } from './mods.js';
 
-export function makeGame() {
-  const level = buildLevel(LEVEL_SEED);
+export function makeGame(seed = LEVEL_SEED) {
+  const level = buildLevel(seed);
   const game = {
     level,
     cam: makeCamera(),
@@ -26,6 +28,8 @@ export function makeGame() {
     stateT: 0,
     score: 0,
     turretsKilled: 0,
+    deaths: 0,
+    submitted: false,
     spawnCd: 1.2,
     flash: 0,
     time: 0,
@@ -48,6 +52,8 @@ function reset(game) {
   game.player = makePlayer();
   game.score = 0;
   game.turretsKilled = 0;
+  game.deaths = 0;
+  game.submitted = false;
   game.spawnCd = 1.2;
   game.returning = false;
   game.flash = 0;
@@ -62,6 +68,21 @@ function reset(game) {
 
 function banner(game, text, sub = '', life = 2.4) {
   game.banner = { text, sub, t: life, max: life };
+}
+
+// Report a finished run to the backend. Fire-and-forget: submitRun never
+// throws and never blocks, so a dead backend cannot stall the end screen.
+function reportRun(game) {
+  if (game.submitted) return;
+  game.submitted = true;
+  submitRun({
+    modId: activeModId(),
+    points: game.score,
+    timeSec: Number(game.time.toFixed(2)),
+    turrets: game.turretsKilled,
+    deaths: game.deaths,
+    completed: game.state === 'complete',
+  });
 }
 
 // Drive the score from what is actually happening: sparse on the title,
@@ -107,6 +128,7 @@ export function update(game, dt) {
         game.state = 'gameover';
         game.stateT = 0;
         sfxGameOver();
+        reportRun(game);
         if (game.score > game.best) {
           game.best = game.score;
           localStorage.setItem('rnr.best', String(game.score));
@@ -145,12 +167,16 @@ export function update(game, dt) {
     game.state = 'complete';
     game.stateT = 0;
     sfxComplete();
+    reportRun(game);
     game.score += 5000 + Math.max(0, Math.round((260 - game.time) * 25));
     if (game.score > game.best) {
       game.best = game.score;
       localStorage.setItem('rnr.best', String(game.score));
     }
   }
+
+  // Tell the backend we are out here. Self-throttling to one beat every 5s.
+  heartbeat(activeModId(), p.x / LEVEL_LEN, game.score);
 
   if (p.shield <= 0 && p.alive) die(game);
   endFrame();
@@ -160,6 +186,7 @@ function die(game) {
   const p = game.player;
   p.alive = false;
   p.lives--;
+  game.deaths++;
   explode(p.x, p.y, 2.4, '#b4f4ff', '#4fd0e8');
   explode(p.x, p.y, 1.6);
   sfxDeath();
