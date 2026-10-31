@@ -14,6 +14,7 @@ import { drawBossBody, drawBossParts } from './bossart.js';
 import { drawGates } from './gates.js';
 import { drawFoeBody, drawInterceptorBody } from './foeart.js';
 import { drawShipBody, markOf } from './shipart.js';
+import { droneAt } from './player.js';
 import { foes, SPEC as FOE_SPEC, SHIELD as FOE_SHIELD } from './foes.js';
 import { drawMinis } from './miniboss.js';
 import { drawOrdnance } from './armory.js';
@@ -134,7 +135,11 @@ export function drawWorld(ctx, game) {
   drawOrdnance(ctx);
   drawShots(ctx);
   drawPad(ctx, camX, camY);
-  if (game.player.alive) drawShip(ctx, game.player, game.seqTilt, game);
+  if (game.player.alive) {
+    drawDrones(ctx, game.player);
+    drawShip(ctx, game.player, game.seqTilt, game);
+  }
+  if (game.pdFlash && game.pdFlash.t > 0) drawPointDefence(ctx, game);
   drawParticles(ctx);
 
   ctx.restore();
@@ -352,6 +357,56 @@ function drawShip(ctx, p, seqTilt, game) {
 
   if (p.invuln > 0 && Math.floor(p.invuln * 18) % 2 === 0) ctx.globalAlpha = 0.4;
   drawShipBody(ctx, p, game);
+  ctx.restore();
+}
+
+// DRONE WING: escorts holding station off a wing. Small, lit, and plainly
+// the same fleet as the ship they are flying with.
+function drawDrones(ctx, p) {
+  for (let i = 0; i < (p.drones || 0); i++) {
+    const d = droneAt(p, i);
+    ctx.save();
+    ctx.translate(Math.round(d.x), Math.round(d.y));
+    ctx.scale(p.facing, 1);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = COL.cool;
+    ctx.fillRect(-9 - Math.random() * 3, -1, 4, 2);
+    ctx.restore();
+    ctx.fillStyle = '#5e6b7a';
+    ctx.beginPath();
+    ctx.moveTo(7, 0); ctx.lineTo(0, -3.5); ctx.lineTo(-6, -2.5);
+    ctx.lineTo(-5, 0); ctx.lineTo(-6, 2.5); ctx.lineTo(0, 3.5);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#0b0e13';
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    ctx.fillStyle = '#aab7c7';
+    ctx.fillRect(-4, -2.4, 7, 1.2);
+    ctx.fillStyle = COL.coolHi;
+    ctx.fillRect(1, -0.9, 3, 1.8);
+    ctx.restore();
+  }
+}
+
+// The moment point defence takes a missile: a bright cross where it went.
+function drawPointDefence(ctx, game) {
+  const f = game.pdFlash;
+  const k = f.t / 0.12;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = k;
+  ctx.strokeStyle = '#b4f4ff';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(game.player.x, game.player.y);
+  ctx.lineTo(f.x, f.y);
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  const r = 3 + (1 - k) * 7;
+  ctx.fillRect(f.x - r, f.y - 1, r * 2, 2);
+  ctx.fillRect(f.x - 1, f.y - r, 2, r * 2);
   ctx.restore();
 }
 

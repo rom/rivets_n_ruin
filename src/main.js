@@ -1,11 +1,15 @@
 import { VIEW_W, VIEW_H } from './config.js';
 import { fitCanvas, applyTransform, reportFrame, setStatic } from './display.js';
-import { initInput, tapped, endFrame } from './input.js';
+import {
+  initInput, tapped, endFrame, setSynthetic, realAnyTapped,
+} from './input.js';
+import { demoActions, IDLE_BEFORE_DEMO } from './demo.js';
 import { startLoop } from './loop.js';
 import { makeGame, update, syncBest } from './game.js';
 import { drawWorld } from './render.js';
 import {
   drawHud, drawPaused, drawQuitPrompt, drawSettings, drawShop, drawHelp, HELP_PAGES,
+  drawDemoBadge,
 } from './hud.js';
 import { rows as shopRows, buy as shopBuy } from './shop.js';
 import { unlock, toggleMute, isMuted, ready } from './audio.js';
@@ -26,6 +30,24 @@ const ctx = canvas.getContext('2d', { alpha: false });
 // and especially text — is rasterised at display resolution rather than
 // drawn into 640x360 and blown up. See display.js.
 function fit() { fitCanvas(canvas, ctx); }
+
+// Launching the demo is launching a run: the same reset, the same states.
+// It starts on the furthest hull reached, because that is the hull worth
+// showing somebody who has walked away from the machine.
+function startDemo(g) {
+  g.setStartHull(g.unlocked);
+  g.state = 'title';
+  g.stateT = 0;
+}
+
+// And stopping it is going back to the title with nothing kept.
+function toTitle(g) {
+  g.state = 'title';
+  g.stateT = 0;
+  g.banner = null;
+  g.toast = null;
+  g.quitting = false;
+}
 
 // Everything that is a screen rather than a flight: a menu, a prompt, or one
 // of the states whose whole content is drawn over a dimmed world.
@@ -55,6 +77,10 @@ settings.onChange(() => applySettings(settings.all()));
 
 // The settings screen is modal and owns the keyboard while it is open.
 let settingsOpen = false;
+// Attract mode. demoT counts seconds since anybody touched a key; demoOn
+// says the machine is flying itself.
+let demoT = 0;
+let demoOn = false;
 let helpOpen = false;
 let helpPage = 0;
 let settingsSel = 0;
@@ -174,6 +200,31 @@ startLoop(
       if (paused) stopMusic(); else startMusic();
       sfxUi();
     }
+    // --- attract mode
+    //
+    // A real keypress always wins: it stops the demo, drops the run and
+    // puts the title back, so nobody ever finds themselves fighting a ship
+    // that is also being flown by something else.
+    if (realAnyTapped()) {
+      demoT = 0;
+      if (demoOn) {
+        demoOn = false;
+        setSynthetic(null);
+        toTitle(game);
+        endFrame();
+        return;
+      }
+    } else {
+      demoT += dt;
+    }
+
+    if (!demoOn && settings.get('demo') && demoT > IDLE_BEFORE_DEMO
+      && game.state === 'title' && !shopOpen && !settingsOpen && !helpOpen && !paused) {
+      demoOn = true;
+      startDemo(game);
+    }
+    if (demoOn) setSynthetic(demoActions(game));
+
     if (paused) { endFrame(); return; }
     // A hold for the tooling. make gallery poses a roster of attackers and
     // then screenshots it; with the simulation running, everything with a
@@ -193,6 +244,7 @@ startLoop(
     applyTransform(ctx);   // a resize resets context state; re-establish it
     drawWorld(ctx, game);
     drawHud(ctx, game, { muted: isMuted(), audio: ready() });
+    if (demoOn) drawDemoBadge(ctx, game);
     if (shopOpen) drawShop(ctx, game, shopSel, shopNote);
     else if (helpOpen) drawHelp(ctx, helpPage);
     else if (settingsOpen) drawSettings(ctx, game, settingsSel);

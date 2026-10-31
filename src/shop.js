@@ -46,6 +46,38 @@ export const MODS = {
     name: 'RECLAIMER',
     tiers: [{ cost: 1500, blurb: 'Keep one gun level when a ship is lost.' }],
   },
+
+  // --- frames and systems. These change what the ship *is* rather than
+  // what a number on it says, and every one of them is visible on the hull.
+  mount: {
+    name: 'EXTRA MOUNT',
+    tiers: [
+      { cost: 1600, blurb: 'A third gun rail: one more level of speed and spread.' },
+      { cost: 3000, blurb: 'A fourth rail. The nose is mostly gun now.' },
+    ],
+  },
+  drone: {
+    name: 'DRONE WING',
+    tiers: [
+      { cost: 1900, blurb: 'An escort drone flies your wing and fires with you.' },
+      { cost: 3400, blurb: 'A second drone, on the other wing.' },
+    ],
+  },
+  pointdef: {
+    name: 'POINT DEFENCE',
+    tiers: [{ cost: 2100, blurb: 'Shoots down enemy missiles that get close. Automatic.' }],
+  },
+  regen: {
+    name: 'CELL REGENERATOR',
+    tiers: [
+      { cost: 1700, mul: 2.5, blurb: 'The shield comes back on its own, slowly.' },
+      { cost: 3200, mul: 6, blurb: 'The shield comes back on its own, rather less slowly.' },
+    ],
+  },
+  siege: {
+    name: 'SIEGE FRAME',
+    tiers: [{ cost: 2600, blurb: '+60 maximum shield and heavier plating. Slower to turn.' }],
+  },
 };
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
@@ -195,6 +227,27 @@ export function applyMods(game) {
     p._afterburner = true;
     p.maxVXBonus += 40;
     p.accelMul *= 1.12;
+  }
+
+  // --- frames and systems
+  //
+  // These set fields the rest of the game already reads, the same way the
+  // older mods do, rather than being checked for by name wherever they
+  // happen to matter.
+  // Mounts raise the ceiling the refit has been building toward, so the
+  // base is tracked separately — adding the mod's bonus to the live cap
+  // would stack it again on every call.
+  const mounts = modLevel(game, 'mount');
+  p.gunCap = Math.min(PICKUP.gunCapMax, (p.gunCapBase || PICKUP.gunLevels) + mounts);
+  p.drones = modLevel(game, 'drone');
+  p.pointDefence = modLevel(game, 'pointdef') > 0;
+  p.shieldRegen = modLevel(game, 'regen') ? modMul(game, 'regen') : 0;
+  if (modLevel(game, 'siege') && !p._siege) {
+    p._siege = true;
+    p.shieldMax += 60;
+    p.shield = p.shieldMax;
+    p.scrapeMul *= 0.75;
+    p.accelMul *= 0.88;        // the armour has to cost something
   }
 }
 

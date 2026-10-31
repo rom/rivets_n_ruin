@@ -36,10 +36,13 @@ const (
 	PointsIntercept = 100
 
 	// Interceptors spawn on spawnEvery * (0.75..1.35); TANTALUM is fastest.
-	FastestSpawnInterval = 0.64 * 0.75
+	FastestSpawnInterval = 0.34 * 0.75
 
 	// Generous allowance for turret count on any one hull.
-	MaxTurretsPerHull = 45
+	// Measured against the generator, not guessed: the longest hull in the
+	// deep campaign carries 113. A ceiling under the real count rejects
+	// honest runs with a 422, which has happened before.
+	MaxTurretsPerHull = 130
 
 	// Pickups. At most one drops per kill, and the richest outcome is a
 	// lifesaver collected at maximum lives: its own score plus the 500
@@ -53,36 +56,46 @@ const (
 // hull's boss plus the most its destructible sections can pay out. Every
 // hull ends in a fight, so leaving these out rejects every finished run.
 var BossRewards = []int{
-	6800,  // THE WARDEN
-	9000,  // DRAYLINE
-	16400, // THE RIVETER
-	20400, // COLDFORGE
-	26600, // SLAGHEART
-	32000, // NIGHTFALL
-	44500, // THE SEXTON
-	66600, // GILTHAMMER
+	7200, 9000, 16400, 20400, 26600,
+	32000, 44500, 66600, 68370, 72600,
+	84780, 89966, 99531, 106294, 125273,
+	139295, 146007, 155625, 179627, 191866,
+	211796, 227850, 263385, 291658, 309958,
 }
 
 // BossPickupDrops is how many pickups a boss can shed: one per section
 // destroyed plus a payload on death.
-var BossPickupDrops = []int{6, 4, 8, 6, 6, 4, 9, 10}
+var BossPickupDrops = []int{
+	7, 4, 8, 6, 6, 4, 9, 10, 7, 4, 8, 6, 6,
+	4, 9, 10, 7, 4, 8, 6, 6, 4, 9, 10, 7,
+}
 
 // HullLengths mirrors LEVELS[].length in src/config.js.
-var HullLengths = []float64{12000, 14500, 17000, 18500, 20000, 21500, 23000, 25000}
+var HullLengths = []float64{
+	12000, 14500, 17000, 18500, 20000, 21500, 23000, 25000,
+	25950, 26900, 27850, 28800, 29750, 30700, 31650, 32600,
+	33550, 34500, 35450, 36400, 37350, 38300, 39250, 40200,
+	41150,
+}
 
 // NumLevels is how many hulls a full campaign runs.
 func NumLevels() int { return len(HullLengths) }
 
-// minHullSec is the fastest hull n can be flown out and back, at the top
-// speed the ship has by the time it gets there.
+// minHullSec is the fastest hull n can be flown, at the top speed the ship
+// has by the time it gets there.
+//
+// This used to model a run out and back, because that is what a run was.
+// The return leg was removed and this was not, so the floor stayed at
+// roughly twice the real one — harmless while the campaign was eight hulls
+// and the bound was loose, and an outright rejection of honest completions
+// at twenty-five. A validator that is wrong in the strict direction is
+// worse than no validator, because it only ever fires on real players.
 func minHullSec(n int) float64 {
 	length := HullLengths[n]
-	turnaround := length - Apron*0.55
-	finish := Apron * 0.55
-	outbound := turnaround - StartX
-	inbound := turnaround - finish
+	// One direction: the launch pad to the boss arena at the far end.
+	distance := length - Apron*0.55 - StartX
 	speed := BaseMaxVX + MaxVXPerLevel*float64(n)
-	return (outbound + inbound) / speed
+	return distance / speed
 }
 
 // MinCompletionSec is the fastest a campaign of the given number of hulls can

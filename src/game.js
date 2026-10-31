@@ -76,6 +76,9 @@ export function makeGame(modSpec = null) {
     runTime: 0,     // clock for the whole campaign, which is what gets submitted
     toast: null,
     boss: null,            // set once the arena at the far end is entered
+    lootT: 0,              // seconds left to sweep a beaten boss's wreck
+    leaving: false,        // the loot window closed; run out through the end
+    bossWreck: null,       // where it died, for the countdown readout
     miniPlan: planMinis(level, 0),   // where along this hull minibosses wait
     quitting: false,       // quit confirmation is open
     banner: null,
@@ -172,6 +175,9 @@ function reset(game) {
   game.spawnCd = 1.2;
   game.foeCd = 3.0;
   game.boss = null;
+  game.lootT = 0;
+  game.leaving = false;
+  game.bossWreck = null;
   game.quitting = false;
   game.flash = 0;
   game.time = 0;
@@ -202,7 +208,11 @@ function applyRefit(game) {
   p.maxVXBonus += LEVEL_UP.maxVXAdd;
   p.maxVYBonus += LEVEL_UP.maxVYAdd;
   p.bulletBonus += LEVEL_UP.bulletSpeedAdd;
-  p.gunCap = Math.min(PICKUP.gunCapMax, p.gunCap + LEVEL_UP.gunCap);
+  // The refit raises the base; applyMods adds any extra mounts on top of
+  // it. Raising the live cap here would be lost the next time mods are
+  // applied, and raising both would double-count.
+  p.gunCapBase = Math.min(PICKUP.gunCapMax, (p.gunCapBase || p.gunCap) + LEVEL_UP.gunCap);
+  p.gunCap = Math.max(p.gunCap, p.gunCapBase);
   // The refit raises the floor as well as the current level, so a ship lost
   // on a later hull does not fall back to a factory-standard gun.
   p.gunSpeedBase = Math.min(p.gunCap, p.gunSpeedBase + LEVEL_UP.gunSpeed);
@@ -210,6 +220,9 @@ function applyRefit(game) {
   p.gunSpeed = Math.max(p.gunSpeed, p.gunSpeedBase);
   p.gunBlaze = Math.max(p.gunBlaze, p.gunBlazeBase);
   p.lives = Math.min(PICKUP.maxLives, p.lives + LEVEL_UP.lives);
+  // Mods act on top of the refit, so they are re-applied after it rather
+  // than left holding values computed against the previous airframe.
+  applyMods(game);
 }
 
 // Then ENTER loads the hull itself.
@@ -230,6 +243,9 @@ function loadNextHull(game) {
 
   game.submitted = false;
   game.boss = null;
+  game.lootT = 0;
+  game.leaving = false;
+  game.bossWreck = null;
   game.time = 0;          // per-hull clock restarts; runTime keeps going
   game.hullHaul = freshHaul();
   game.bonus = null;
@@ -358,6 +374,7 @@ export function update(game, dt) {
     return;
   }
   if (game.flash > 0) game.flash = Math.max(0, game.flash - dt * 2.6);
+  if (game.pdFlash && game.pdFlash.t > 0) game.pdFlash.t -= dt;
   if (game.banner) {
     game.banner.t -= dt;
     if (game.banner.t <= 0) game.banner = null;
@@ -468,8 +485,26 @@ export function update(game, dt) {
   // Flying the same hull back the other way doubled its length without
   // adding anything to it — the guns were already broken and the loot
   // already collected, so the return leg was a commute.
-  if (game.boss && bossBeaten(game.boss)) {
+  //
+  // The wreck pays out, and a boss sheds a hold: bars, coffins, treasure
+  // and a cloud of coins, all of it scattered across an arena the ship was
+  // walled into a second ago. Leaving immediately threw most of it away.
+  // So the arena stays open for a while, with the clock on screen, and
+  // ENTER leaves early for anyone who has already swept it.
+  if (game.boss && bossBeaten(game.boss) && game.lootT === 0) {
+    game.lootT = BOSS.lootWindow;
+    game.bossWreck = { x: game.boss.x, y: game.boss.y };
     game.boss = null;
+    banner(game, 'WRECK CLEARED', 'COLLECT — ENTER TO LAUNCH EARLY', 2.4);
+  }
+  if (game.lootT > 0) {
+    game.lootT = Math.max(0, game.lootT - dt);
+    if (tapped('start') || tapped('fire')) game.lootT = 0;
+    if (game.lootT === 0) game.leaving = true;
+  }
+
+  if (game.leaving) {
+    game.leaving = false;
     game.seqFromX = p.x;
     game.seqFromY = p.y;
     // Award the bonuses BEFORE anything reads the score. This used to report

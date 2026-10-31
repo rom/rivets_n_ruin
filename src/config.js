@@ -112,6 +112,11 @@ export const THEMES = {
 // run is approach -> boss -> escape, and reaching the dock is earned twice.
 export const BOSS = {
   arenaMargin: 40,
+  // How long the arena stays open after the boss dies. Its hold scatters
+  // bars, coffins, treasure and a cloud of coins across a room the ship was
+  // walled into a moment ago; leaving the instant it died threw most of
+  // that away. ENTER skips it.
+  lootWindow: 10,
   entryTime: 2.2,
   deathTime: 2.6,
   hitFlash: 0.08,
@@ -120,45 +125,130 @@ export const BOSS = {
 
 // Eight bosses, one per hull, each harder than the last. `kind` selects the
 // behaviour in boss.js; the numbers here are the whole difficulty curve.
-export const BOSSES = [
-  { name: 'THE WARDEN', tag: 'EMPLACED FORTRESS — ARGENTUM', kind: 'warden',
-    coreHp: 53, podHp: 13, score: 6000, podScore: 400,
-    bulletSpeed: 180, burstGap: 0.128, cycle: 1.75 },
-
-  { name: 'DRAYLINE', tag: 'LINE GUNSHIP — OSMIUM', kind: 'drayline',
-    coreHp: 121, score: 9000,
-    bulletSpeed: 205, burstGap: 0.080, cycle: 1.44, sweepSpeed: 128 },
-
-  { name: 'THE RIVETER', tag: 'FLAGSHIP BATTERY — TANTALUM', kind: 'riveter',
-    coreHp: 186, plateHp: 20, score: 14000, plateScore: 600,
-    bulletSpeed: 225, burstGap: 0.064, cycle: 1.22 },
-
-  { name: 'COLDFORGE', tag: 'MINELAYER — CUPRUM', kind: 'coldforge',
-    coreHp: 256, podHp: 25, score: 19000, podScore: 700,
-    bulletSpeed: 215, burstGap: 0.072, cycle: 1.29, mines: 3 },
-
-  { name: 'SLAGHEART', tag: 'TWIN REACTOR — PYRITE', kind: 'slagheart',
-    coreHp: 326, plateHp: 31, score: 25000, plateScore: 800,
-    bulletSpeed: 240, burstGap: 0.056, cycle: 1.10 },
-
-  { name: 'NIGHTFALL', tag: 'BLINK FRAME — WOLFRAM', kind: 'nightfall',
-    coreHp: 403, score: 32000,
-    bulletSpeed: 250, burstGap: 0.048, cycle: 0.99, blinkEvery: 2.6 },
-
-  { name: 'THE SEXTON', tag: 'HULK TENDER — FERRUM', kind: 'sexton',
-    coreHp: 496, plateHp: 36, score: 40000, plateScore: 900,
-    bulletSpeed: 255, burstGap: 0.048, cycle: 0.91 },
-
-  { name: 'GILTHAMMER', tag: 'ADMIRALTY GUARD — AURUM', kind: 'gilthammer',
-    coreHp: 651, plateHp: 42, score: 60000, plateScore: 1100,
-    bulletSpeed: 270, burstGap: 0.040, cycle: 0.80 },
+// Names are still written down, because a hull called LEVEL 19 is not a
+// place.
+const DEEP_HULLS = [
+  ['PLUMBUM', 'DEAD WEIGHT — BALLAST HULL'],
+  ['STANNUM', 'COLD SHORT — TENDER HULL'],
+  ['ZINCUM', 'SACRIFICIAL — ANODE HULL'],
+  ['NICCOLUM', 'DEVIL\u2019S COPPER — SURVEY HULL'],
+  ['COBALTUM', 'GOBLIN ORE — PICKET HULL'],
+  ['CHROMIUM', 'MIRROR FINISH — PARADE HULL'],
+  ['VANADIUM', 'TOUGH AS TOLD — ARMOUR HULL'],
+  ['TITANIUM', 'UNBOWED — ASSAULT HULL'],
+  ['IRIDIUM', 'FROM THE SKY — RELIC HULL'],
+  ['PLATINUM', 'LITTLE SILVER — TREASURY HULL'],
+  ['RHODIUM', 'ROSE ASH — COURIER HULL'],
+  ['PALLADIUM', 'THE WARD — GUARDIAN HULL'],
+  ['OSMIRIDIUM', 'HEAVIEST THING AFLOAT — ANVIL HULL'],
+  ['THORIUM', 'SLOW FIRE — REACTOR HULL'],
+  ['URANIUM', 'THE LONG HALF — WARHEAD HULL'],
+  ['ADAMAS', 'UNCONQUERABLE — SIEGE CARRIER'],
+  ['ORICHALCUM', 'THE LAST NAME — FLAGSHIP OF THE LINE'],
 ];
 
-export const LEVELS = [
+const CORE_BOSSES = [
+  { name: 'THE WARDEN', tag: 'EMPLACED FORTRESS — ARGENTUM', kind: 'warden',
+    coreHp: 82, podHp: 18, score: 6000, podScore: 400,
+    bulletSpeed: 194, burstGap: 0.100, cycle: 1.33 },
+
+  { name: 'DRAYLINE', tag: 'LINE GUNSHIP — OSMIUM', kind: 'drayline',
+    coreHp: 188, score: 9000,
+    bulletSpeed: 221, burstGap: 0.062, cycle: 1.09, sweepSpeed: 128 },
+
+  { name: 'THE RIVETER', tag: 'FLAGSHIP BATTERY — TANTALUM', kind: 'riveter',
+    coreHp: 288, plateHp: 28, score: 14000, plateScore: 600,
+    bulletSpeed: 243, burstGap: 0.050, cycle: 0.93 },
+
+  { name: 'COLDFORGE', tag: 'MINELAYER — CUPRUM', kind: 'coldforge',
+    coreHp: 397, podHp: 35, score: 19000, podScore: 700,
+    bulletSpeed: 232, burstGap: 0.056, cycle: 0.98, mines: 3 },
+
+  { name: 'SLAGHEART', tag: 'TWIN REACTOR — PYRITE', kind: 'slagheart',
+    coreHp: 505, plateHp: 43, score: 25000, plateScore: 800,
+    bulletSpeed: 259, burstGap: 0.044, cycle: 0.84 },
+
+  { name: 'NIGHTFALL', tag: 'BLINK FRAME — WOLFRAM', kind: 'nightfall',
+    coreHp: 625, score: 32000,
+    bulletSpeed: 270, burstGap: 0.037, cycle: 0.75, blinkEvery: 2.6 },
+
+  { name: 'THE SEXTON', tag: 'HULK TENDER — FERRUM', kind: 'sexton',
+    coreHp: 769, plateHp: 50, score: 40000, plateScore: 900,
+    bulletSpeed: 275, burstGap: 0.037, cycle: 0.69 },
+
+  { name: 'GILTHAMMER', tag: 'ADMIRALTY GUARD — AURUM', kind: 'gilthammer',
+    coreHp: 1009, plateHp: 59, score: 60000, plateScore: 1100,
+    bulletSpeed: 292, burstGap: 0.031, cycle: 0.61 },
+];
+
+// One guard per hull, so the deep campaign needs seventeen more. Their
+// behaviours cycle the eight that exist — a ninth pattern invented to fill
+// a table is a worse boss than a known one at a harder tempo — but every
+// one has its own name, its own numbers and its own place in the curve.
+const DEEP_BOSS_NAMES = [
+  ['THE BALLASTER', 'DEAD WEIGHT'],
+  ['COLDSHORT', 'TENDER GUN'],
+  ['ANODE', 'SACRIFICIAL FRAME'],
+  ['KOBOLD', 'SURVEY PREDATOR'],
+  ['PICKETMASTER', 'LINE WARDEN'],
+  ['THE MIRROR', 'PARADE GUARD'],
+  ['TOLDHAMMER', 'ARMOUR TEST RIG'],
+  ['UNBOWED', 'ASSAULT PRIME'],
+  ['SKYFALL', 'RELIC ENGINE'],
+  ['LITTLE SILVER', 'TREASURY LOCK'],
+  ['ROSE ASH', 'COURIER ESCORT'],
+  ['THE WARD', 'GUARDIAN ABSOLUTE'],
+  ['ANVILHEAD', 'HEAVIEST THING AFLOAT'],
+  ['SLOWFIRE', 'REACTOR CORE'],
+  ['THE LONG HALF', 'WARHEAD MIND'],
+  ['ADAMANT', 'SIEGE CARRIER PRIME'],
+  ['THE LAST NAME', 'FLAGSHIP OF THE LINE'],
+];
+
+const BOSS_KINDS = ['warden', 'drayline', 'riveter', 'coldforge',
+  'slagheart', 'nightfall', 'sexton', 'gilthammer'];
+
+const DEEP_BOSSES = DEEP_BOSS_NAMES.map(([name, tag], i) => {
+  const n = CORE_BOSSES.length + i;        // 8..24
+  const k = i + 1;
+  const kind = BOSS_KINDS[n % BOSS_KINDS.length];
+  // Gentle: GILTHAMMER at 1009 was already the tuned end of an eight-hull
+  // campaign, and a last boss nineteen times that is not harder, it is
+  // longer. The deep run ends at roughly four times it.
+  const scale = Math.pow(1.083, k);
+  const spec = {
+    name,
+    tag: tag + ' — ' + DEEP_HULLS[i][0],
+    kind,
+    coreHp: Math.round(1009 * scale),
+    score: Math.round(60000 * Math.pow(1.10, k)),
+    bulletSpeed: Math.min(360, Math.round(292 + k * 3)),
+    burstGap: Math.max(0.020, +(0.031 - k * 0.0006).toFixed(4)),
+    cycle: Math.max(0.42, +(0.61 - k * 0.011).toFixed(3)),
+  };
+  // Only the kinds that have sections get section numbers, and they are
+  // the same fields the core bosses use.
+  if (kind === 'warden' || kind === 'coldforge') {
+    spec.podHp = Math.round(35 * scale);
+    spec.podScore = 700 + k * 90;
+  } else if (kind === 'riveter' || kind === 'slagheart'
+    || kind === 'sexton' || kind === 'gilthammer') {
+    spec.plateHp = Math.round(45 * scale);
+    spec.plateScore = 900 + k * 110;
+  }
+  if (kind === 'coldforge') spec.mines = 3 + Math.floor(k / 5);
+  if (kind === 'nightfall') spec.blinkEvery = Math.max(1.4, 2.6 - k * 0.07);
+  if (kind === 'drayline') spec.sweepSpeed = 128 + k * 6;
+  return spec;
+});
+
+export const BOSSES = [...CORE_BOSSES, ...DEEP_BOSSES];
+
+const CORE_LEVELS = [
   { name: 'ARGENTUM', subtitle: 'SILVER CLASS — PATROL HULL',
     theme: 'steel', seed: 0x5ca1ab1e, length: 12000,
     gapScale: 1.00, clearChance: 0.13,
-    turretHp: 3, turretCooldown: 1.75, turretRange: 300,
+    turretHp: 6, turretCooldown: 1.75, turretRange: 300,
     interceptorSpeed: 172, interceptorSpawn: 1.50, interceptorHp: 2,
     foes: [],
     towers: ['gun'], lasers: 0, laserHp: 0, tune: 0 },
@@ -166,7 +256,7 @@ export const LEVELS = [
   { name: 'OSMIUM', subtitle: 'DENSEST ALLOY AFLOAT — LINE HULL',
     theme: 'conduit', seed: 0x051f1ed, length: 14500,
     gapScale: 0.86, clearChance: 0.09,
-    turretHp: 4, turretCooldown: 1.45, turretRange: 330,
+    turretHp: 8, turretCooldown: 1.45, turretRange: 330,
     interceptorSpeed: 196, interceptorSpawn: 1.20, interceptorHp: 3,
     foes: ['mine'],
     towers: ['gun'], lasers: 0, laserHp: 1, tune: 1 },
@@ -174,7 +264,7 @@ export const LEVELS = [
   { name: 'TANTALUM', subtitle: 'CORROSION PROOF — FLAGSHIP HULL',
     theme: 'glacier', seed: 0x7a07a1, length: 17000,
     gapScale: 0.78, clearChance: 0.07,
-    turretHp: 5, turretCooldown: 1.20, turretRange: 360,
+    turretHp: 9, turretCooldown: 1.20, turretRange: 360,
     interceptorSpeed: 220, interceptorSpawn: 0.98, interceptorHp: 3,
     foes: ['mine', 'lancer', 'weaver'],
     towers: ['gun', 'flak'], lasers: 1, laserHp: 2, tune: 4 },
@@ -182,7 +272,7 @@ export const LEVELS = [
   { name: 'CUPRUM', subtitle: 'OXIDISED — SALVAGE HULK',
     theme: 'desert', seed: 0xc0ffee, length: 18500,
     gapScale: 0.72, clearChance: 0.06,
-    turretHp: 6, turretCooldown: 1.10, turretRange: 380,
+    turretHp: 11, turretCooldown: 1.10, turretRange: 380,
     interceptorSpeed: 236, interceptorSpawn: 0.90, interceptorHp: 4,
     foes: ['mine', 'lancer', 'orbiter', 'weaver'],
     towers: ['gun', 'flak', 'lance', 'rocket'], lasers: 2, laserHp: 3, tune: 2 },
@@ -190,7 +280,7 @@ export const LEVELS = [
   { name: 'PYRITE', subtitle: 'RUNNING HOT — FOUNDRY HULL',
     theme: 'foundry', seed: 0xf00dface, length: 20000,
     gapScale: 0.67, clearChance: 0.05,
-    turretHp: 7, turretCooldown: 1.00, turretRange: 400,
+    turretHp: 13, turretCooldown: 1.00, turretRange: 400,
     interceptorSpeed: 252, interceptorSpawn: 0.82, interceptorHp: 4,
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter'],
     towers: ['gun', 'flak', 'lance', 'mortar', 'rocket'], lasers: 2, laserHp: 4, tune: 5 },
@@ -198,7 +288,7 @@ export const LEVELS = [
   { name: 'WOLFRAM', subtitle: 'LIGHT SWALLOWING — SIEGE HULL',
     theme: 'void', seed: 0x0b51d1a, length: 21500,
     gapScale: 0.63, clearChance: 0.04,
-    turretHp: 8, turretCooldown: 0.92, turretRange: 420,
+    turretHp: 15, turretCooldown: 0.92, turretRange: 420,
     interceptorSpeed: 266, interceptorSpawn: 0.75, interceptorHp: 5,
     foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech'],
     towers: ['gun', 'lance', 'mortar', 'warden', 'rocket'], lasers: 3, laserHp: 5, tune: 3 },
@@ -206,7 +296,7 @@ export const LEVELS = [
   { name: 'FERRUM', subtitle: 'EATEN THROUGH — DERELICT HULL',
     theme: 'derelict', seed: 0xfe2211, length: 23000,
     gapScale: 0.59, clearChance: 0.035,
-    turretHp: 9, turretCooldown: 0.86, turretRange: 440,
+    turretHp: 16, turretCooldown: 0.86, turretRange: 440,
     interceptorSpeed: 280, interceptorSpawn: 0.70, interceptorHp: 5,
     foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech'],
     towers: ['gun', 'flak', 'mortar', 'warden', 'rocket'], lasers: 3, laserHp: 6, tune: 6 },
@@ -214,11 +304,54 @@ export const LEVELS = [
   { name: 'AURUM', subtitle: 'THE PRIZE — ADMIRALTY HULL',
     theme: 'admiralty', seed: 0xa17aa17a, length: 25000,
     gapScale: 0.55, clearChance: 0.03,
-    turretHp: 10, turretCooldown: 0.80, turretRange: 460,
+    turretHp: 18, turretCooldown: 0.80, turretRange: 460,
     interceptorSpeed: 294, interceptorSpawn: 0.64, interceptorHp: 6,
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech'],
     towers: ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket'], lasers: 4, laserHp: 7, tune: 7 },
 ];
+
+// The campaign past the admiralty hull.
+//
+// The first eight are hand-authored: they are the tutorial, and each one
+// introduces something. Past that the job is a curve rather than a
+// sequence of ideas, so the rest are generated from one — every column
+// only goes one way, and nothing can be left out of a hull by accident.
+//
+
+const THEME_CYCLE = Object.keys(THEMES);
+const ALL_FOES = ['mine', 'lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech'];
+const ALL_TOWERS = ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket'];
+
+const DEEP_LEVELS = DEEP_HULLS.map(([name, subtitle], i) => {
+  const n = CORE_LEVELS.length + i;        // campaign index, 8..24
+  const k = i + 1;                         // how far past the core, 1..17
+  return {
+    name,
+    subtitle,
+    theme: THEME_CYCLE[n % THEME_CYCLE.length],
+    // Distinct, stable, and nothing to do with the index: a seed derived
+    // from the position would make neighbouring hulls look related.
+    seed: (0x9e3779b1 * (n + 1)) >>> 0 ^ 0x5bf03635,
+    // No cap: two hulls of the same length read as a mistake, and the
+    // texture is chunked so length costs nothing it did not already cost.
+    length: 25000 + k * 950,
+    gapScale: Math.max(0.40, 0.55 - k * 0.009),
+    clearChance: Math.max(0.015, 0.03 - k * 0.001),
+    turretHp: 18 + k * 2,
+    turretCooldown: Math.max(0.52, 0.80 - k * 0.017),
+    turretRange: Math.min(580, 460 + k * 7),
+    interceptorSpeed: Math.min(400, 294 + k * 6),
+    interceptorSpawn: Math.max(0.34, 0.64 - k * 0.018),
+    interceptorHp: 6 + Math.floor(k / 3),
+    foes: ALL_FOES,
+    towers: ALL_TOWERS,
+    lasers: Math.min(8, 4 + Math.floor(k / 3)),
+    laserHp: 7 + k,
+    tune: n % 8,
+  };
+});
+
+export const LEVELS = [...CORE_LEVELS, ...DEEP_LEVELS];
 
 // Clearing a hull upgrades the ship permanently for the rest of the run.
 // These stack, so arriving at TANTALUM you are flying a markedly different
@@ -349,7 +482,10 @@ export const LASER = {
 export const TURRET = {
   range: 300,
   wake: 430,            // starts tracking this far out
-  hp: 3,
+  // Only a fallback: every hull states its own turretHp. Guns went down to
+  // a sneeze, which made breaking them a formality rather than the thing
+  // the end-of-hull bonus is paid on.
+  hp: 6,
   turnRate: 2.6,        // rad/s
   aimTol: 0.26,
   burst: 3,

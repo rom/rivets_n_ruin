@@ -14,7 +14,7 @@ function cycleSecondary(p, dir) {
 }
 import { axisX, axisY, held, tapped } from './input.js';
 import { obstaclesNear, pointBlocked } from './level.js';
-import { playerShots, fire } from './projectiles.js';
+import { playerShots, enemyShots, fire } from './projectiles.js';
 import { sparks, thrust, addLight } from './particles.js';
 import { fireSecondary } from './armory.js';
 import { diff } from './score.js';
@@ -36,6 +36,10 @@ export function makePlayer() {
     gunSpeed: 0,                 // gunspeed pickups: faster fire
     gunBlaze: 0,                 // gunblaze pickups: wider spread
     gunCap: PICKUP.gunLevels,    // clearing a hull raises this
+    gunCapBase: PICKUP.gunLevels,  // ...this one; mods add on top of it
+    drones: 0,                   // DRONE WING escorts, one per tier
+    pointDefence: false,         // POINT DEFENCE: missiles get shot down
+    shieldRegen: 0,              // CELL REGENERATOR: shield per second
     magnetLevel: 0,             // tractor coils bought at the armourer
     // What the guns revert to when a ship is lost. The refit granted by
     // clearing a hull is part of the ship and survives; everything picked up
@@ -66,6 +70,16 @@ export function updatePlayer(p, game, dt) {
   if (p.scrapeCd > 0) p.scrapeCd -= dt;
   if (p.invuln > 0) p.invuln -= dt;
   if (p.secondaryCd > 0) p.secondaryCd -= dt;
+  if (p.pdCd > 0) p.pdCd -= dt;
+
+  // CELL REGENERATOR: the shield comes back on its own. Slow enough that
+  // it rewards disengaging rather than removing the reason to.
+  if (p.shieldRegen > 0 && p.alive) {
+    p.shield = Math.min(p.shieldMax, p.shield + p.shieldRegen * dt);
+  }
+
+  updateDrones(p, game, dt);
+  if (p.pointDefence) pointDefence(p, game);
 
   // --- horizontal: thrust along facing, hard brake into a flip when reversing
   if (ix !== 0) {
@@ -122,6 +136,11 @@ export function updatePlayer(p, game, dt) {
           Math.sin(ang) * speed, 1.5, 1, 2);
       }
     }
+    // DRONE WING fires with you, from where the drones actually are
+    for (let i = 0; i < (p.drones || 0); i++) {
+      const d = droneAt(p, i);
+      fire(playerShots, d.x + p.facing * 7, d.y, p.facing * speed + inherit, 0, 1.3, 1, 2);
+    }
     sparks(p.x + p.facing * 15, p.y, p.facing, 0, 2 + p.gunBlaze, '#b4f4ff');
     addLight(p.x + p.facing * 18, p.y, 26, 0.07, '#b4f4ff');
     sfxShoot();
@@ -172,6 +191,54 @@ function resolveHull(p, game) {
       impact(p, game, Math.abs(p.vy), p.x, downward ? o.y + o.h : o.y, 0, downward ? 1 : -1);
       p.vy = -p.vy * 0.25;
     }
+  }
+}
+
+// --- DRONE WING
+//
+// One escort per tier, holding station off a wing. They are a position
+// rather than an entity: nothing collides with them, they cannot be shot,
+// and they fire when you fire. Giving them a life of their own would mean
+// a second thing to look after, which is not what the mod is for.
+export function droneAt(p, i) {
+  const side = i % 2 === 0 ? -1 : 1;
+  const lag = p.droneLag || { x: p.x, y: p.y };
+  return {
+    x: lag.x - p.facing * (16 + (i >> 1) * 9),
+    y: lag.y + side * (13 + (i >> 1) * 4),
+  };
+}
+
+function updateDrones(p, game, dt) {
+  if (!p.drones) { p.droneLag = null; return; }
+  if (!p.droneLag) p.droneLag = { x: p.x, y: p.y };
+  // They trail, so the wing reads as flying in formation rather than as
+  // two sprites welded to the hull.
+  const k = Math.min(1, dt * 7);
+  p.droneLag.x += (p.x - p.droneLag.x) * k;
+  p.droneLag.y += (p.y - p.droneLag.y) * k;
+}
+
+// --- POINT DEFENCE
+//
+// The answer to a rocket tower, bought rather than aimed. It takes one
+// missile at a time and has a cooldown, so it reduces the threat without
+// removing it.
+const PD_RANGE = 74;
+const PD_COOLDOWN = 0.55;
+
+function pointDefence(p, game) {
+  if (p.pdCd > 0 || !p.alive) return;
+  for (let i = enemyShots.count - 1; i >= 0; i--) {
+    const m = enemyShots.items[i];
+    if (m.hp <= 0) continue;                 // only ordnance, never bullets
+    if (Math.hypot(m.x - p.x, m.y - p.y) > PD_RANGE) continue;
+    enemyShots.kill(i);
+    p.pdCd = PD_COOLDOWN;
+    sparks(m.x, m.y, 0, 0, 7, '#b4f4ff');
+    addLight(m.x, m.y, 40, 0.14, '#b4f4ff');
+    game.pdFlash = { x: m.x, y: m.y, t: 0.12 };
+    return;
   }
 }
 
