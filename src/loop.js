@@ -2,7 +2,12 @@ import { DT, MAX_FRAME } from './config.js';
 
 // Fixed-timestep update, free-running render. Physics must not change
 // character with refresh rate: 60Hz and 144Hz fly identically.
-export function startLoop(update, render) {
+// `rate` is an optional function returning a time multiplier — the GAME
+// SPEED accessibility setting. It scales how much time is fed to the
+// accumulator, never the step itself: the simulation still advances in
+// fixed DT increments, so slowing the game cannot change its physics, only
+// how much of it happens per second of wall clock.
+export function startLoop(update, render, rate = null) {
   let last = performance.now() / 1000;
   let acc = 0;
 
@@ -19,6 +24,12 @@ export function startLoop(update, render) {
     let delta = now - last;
     last = now;
     if (delta > MAX_FRAME) delta = MAX_FRAME; // tab was backgrounded; don't catch up
+    if (rate) {
+      const r = rate();
+      // A rate of zero or worse would stall the game with no way back, and
+      // above one it stops being an accessibility setting.
+      if (Number.isFinite(r) && r > 0) delta *= Math.min(1, r);
+    }
     acc += delta;
 
     try {

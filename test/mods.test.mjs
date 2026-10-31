@@ -143,12 +143,21 @@ test('the single-tier mods still work and are offered once', () => {
   assert.equal(p.maxVXBonus, 40);
 });
 
-test('resetShop clears every tier', () => {
+// resetShop used to wipe the mods too, which is what made a paid-for mod
+// vanish the moment you launched again — never mind closed the tab. Mods
+// are the hangar; what resets is the run's loadout.
+test('launching again clears the loadout and keeps the mods', () => {
   const game = fakeGame();
   game.mods = { magnet: 3, scavenger: 2 };
+  game.bought = { gunspeed: 2, magnet: 1 };
   applyMods(game);
   resetShop(game);
-  assert.equal(modLevel(game, 'magnet'), 0);
-  assert.equal(game.player.coinMul, 1);
-  assert.equal(game.player.magnetMul, PICKUP.magnetLevels[0]);
+  assert.equal(modLevel(game, 'magnet'), 3, 'a bought mod did not survive the next launch');
+  assert.equal(modLevel(game, 'scavenger'), 2);
+  assert.deepEqual(game.bought, {}, 'the run loadout was carried into the next run');
+  // ...and the effects those mods have are still applied, not just the
+  // bookkeeping: a mod that is owned but not in force is worse than none.
+  assert.ok(game.player.coinMul > 1, 'SCAVENGER RIG is owned but not doing anything');
+  assert.ok(game.player.magnetMul > PICKUP.magnetLevels[0],
+    'LODESTONE is owned but not doing anything');
 });

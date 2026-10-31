@@ -830,11 +830,76 @@ game that is not this one is worse than none.
 ![Settings](docs/settings.png)
 
 `O` opens them. Music and sound effects separately, master volume, tune
-override, **difficulty**, and switches for bloom, scanlines, screen shake,
-the foreground layer and pickup toasts — the visual ones double as a
-performance escape hatch on a slow machine. Everything persists, and the
-definitions are data, so adding a setting is a list entry rather than a UI
-change.
+override, **difficulty**, accessibility, and switches for bloom, scanlines,
+screen shake, the foreground layer and pickup toasts — the visual ones
+double as a performance escape hatch on a slow machine. Everything
+persists, and the definitions are data, so adding a setting is a list entry
+rather than a UI change.
+
+The list scrolls and the heading names the group you are in. It used to
+place its explanation line below however many rows there happened to be, so
+every setting added pushed that line one notch nearer the footer and the
+twelfth put it through. Widening the gap only moved the cliff; a fixed
+window has no cliff, and the screen now lays out identically whether there
+are five settings or fifty.
+
+### Accessibility
+
+Each of these removes a specific barrier rather than making the game easier
+in general — easier in general is what `DIFFICULTY` is for, and it has its
+own score multiplier so it cannot be used as a silent advantage. All are
+off by default, because a default that changes how the game plays for
+everyone is a redesign and not an accommodation.
+
+| Setting | What it removes |
+| --- | --- |
+| **AUTO FIRE** | Holding a key down for an entire run. The rate is the gun's, not the key's, so this is exactly what holding fire already did. |
+| **GAME SPEED** | Reaction-time pressure. 50–100%, and it scales the time fed to the fixed-step loop rather than the step, so the physics cannot change — only how much of it happens per second. Menus and the attract demo always run at full rate. |
+| **REDUCE FLASHING** | The full-screen flash on hits and big explosions, damped to 22%. Not to zero: the flash is feedback, and removing it takes information away from the player it is meant to help. |
+| **HIGH CONTRAST** | Hunting for enemy fire. Incoming shots get a neutral-grey outline — grey rather than white because under the `lighter` composite a white ring blooms into the shot it is framing. |
+| **FIRING LINE** | Guessing where the ship is actually aiming, which otherwise means learning a 24px sprite. |
+
+A setting that exists but does nothing is worse than none: it says the
+barrier is gone when it is not. `test/access.test.mjs` asserts each one
+reaches the thing it claims to change — auto fire actually fires and does
+*not* raise the rate, game speed actually halves how far the simulation
+advances, a corrupt speed cannot stall the game or run it fast.
+
+### What survives a closed tab
+
+Three different lifetimes, and they used to be tangled:
+
+| | Lifetime | Holds |
+| --- | --- | --- |
+| **Loadout** | the hull | gun levels, armory — forfeit with the ship |
+| **Run** | the campaign | score, clock, hull reached |
+| **Hangar** | the pilot | **coins banked and mods owned** |
+
+The hangar was being thrown away with the other two: close the tab and
+every mod you had paid for was gone — and `resetShop` wiped them the moment
+you launched again, never mind closed anything. Mods are the one purchase
+the game calls permanent, so they are the one purchase that has to outlive
+a session; coins go with them, because a currency you cannot bank is not a
+currency. It saves on a purchase, on a hull cleared, on a run ending, and
+on `pagehide` / `visibilitychange`, because none of those is "the player
+just closed the tab".
+
+What deliberately does *not* persist is anything from the `ITEMS` list.
+Those are the run's loadout, already forfeit on death, and persisting them
+would hand a fresh run a maxed ship.
+
+Storage is the one input a player can edit by hand, so nothing read back is
+trusted: unknown mod ids are dropped, levels and coins are bounded, a save
+from a newer version is ignored rather than half-read, and storage being
+unavailable at all is an empty hangar rather than a crash.
+
+`K` twice on the settings screen clears it. Progress that persists needs a
+way back to nothing, and it asks twice because it is the one irreversible
+thing on that screen. Clearing storage alone was not enough, incidentally:
+the game saves again on `pagehide`, so a wipe that left the live coins in
+place was written straight back when the tab closed — found by doing
+exactly that in a browser, and now `clearHangar` takes the game so the two
+cannot get out of step.
 
 ### Starting hull
 

@@ -1108,21 +1108,56 @@ export const HELP = [
 // Like the help page, the settings layout is data: adding a row pushes the
 // per-row explanation down, and the twelfth one pushed it straight into the
 // footer. A test measures it rather than waiting for a screenshot.
+// The settings screen scrolls. It used to place its explanation line below
+// however many rows there happened to be, so every setting added pushed it
+// one notch closer to the footer and the twelfth put it through — fixed
+// once by widening the gap, which only moved the cliff. A fixed window
+// with a scrolling list has no cliff: the help line is at the same y
+// whether there are five settings or fifty.
 export const SETTINGS_LAYOUT = {
-  top: 56, pitch: 17, helpGap: 12,
+  top: 56, pitch: 17, helpGap: 14,
+  groupY: 36,            // the group heading, above the list
+  rows: 12,              // visible at once
   footer: SCREEN_H - 30, footer2: SCREEN_H - 16,
 };
+SETTINGS_LAYOUT.helpY = SETTINGS_LAYOUT.top
+  + SETTINGS_LAYOUT.rows * SETTINGS_LAYOUT.pitch + SETTINGS_LAYOUT.helpGap;
 
-export function drawSettings(ctx, game, sel) {
+// Which slice of the list to show, given where the cursor is. Kept as
+// arithmetic so a test can walk the cursor over every row and check the
+// selection is always on screen — the failure mode of a scrolling list is
+// a cursor you cannot see, and nothing about the drawing reveals it.
+export function settingsWindow(sel, count, rows = SETTINGS_LAYOUT.rows) {
+  if (count <= rows) return 0;
+  // Keep a row of context either side where there is one to keep.
+  const start = Math.min(Math.max(0, sel - Math.floor(rows / 2)), count - rows);
+  return Math.max(0, start);
+}
+
+export function drawSettings(ctx, game, sel, wipe = {}) {
   ctx.fillStyle = '#04060a';
   ctx.fillRect(0, 0, VIEW_W, SCREEN_H);
   const cx = VIEW_W / 2;
 
   text(ctx, 'SETTINGS', cx, 16, COL.hudBright, FONT_BIG, 'center');
+  // The group heading replaces a row of section header per group: it costs
+  // nothing on a list that scrolls, and it says where you are.
+  const here = DEFS[sel];
+  if (here && here.group) {
+    text(ctx, here.group, cx, SETTINGS_LAYOUT.groupY, COL.cool, FONT, 'center');
+  }
+  // One line carries both "where am I" and "there is more": a pair of
+  // arrow rows above and below the list said the same thing in two more
+  // places, and the upper one sat on top of the group heading.
+  text(ctx, (sel + 1) + ' / ' + DEFS.length,
+    VIEW_W - 110, SETTINGS_LAYOUT.groupY, COL.hudLine, FONT, 'right');
 
   const top = SETTINGS_LAYOUT.top;
-  DEFS.forEach((d, i) => {
-    const y = top + i * SETTINGS_LAYOUT.pitch;
+  const first = settingsWindow(sel, DEFS.length);
+  const shown = DEFS.slice(first, first + SETTINGS_LAYOUT.rows);
+  shown.forEach((d, row) => {
+    const i = first + row;
+    const y = top + row * SETTINGS_LAYOUT.pitch;
     const on = i === sel;
     if (on) {
       ctx.fillStyle = '#131c26';
@@ -1149,17 +1184,19 @@ export function drawSettings(ctx, game, sel) {
     }
   });
 
-  const d = DEFS[sel];
-  if (d) {
-    text(ctx, d.help, cx,
-      top + DEFS.length * SETTINGS_LAYOUT.pitch + SETTINGS_LAYOUT.helpGap,
-      COL.hudLine, FONT, 'center');
-  }
+  if (here) text(ctx, here.help, cx, SETTINGS_LAYOUT.helpY, COL.hudLine, FONT, 'center');
 
   text(ctx, 'UP / DOWN  CHOOSE      LEFT / RIGHT  CHANGE',
     cx, SETTINGS_LAYOUT.footer, COL.hudText, FONT, 'center');
-  text(ctx, 'R  RESET TO DEFAULTS       O / ESC  BACK',
-    cx, SETTINGS_LAYOUT.footer2, COL.hudText, FONT, 'center');
+  if (wipe.wipeArmed) {
+    text(ctx, 'K AGAIN TO CLEAR THE HANGAR — COINS AND MODS, GONE',
+      cx, SETTINGS_LAYOUT.footer2, COL.danger, FONT, 'center');
+  } else if (wipe.wipeNote) {
+    text(ctx, wipe.wipeNote, cx, SETTINGS_LAYOUT.footer2, COL.warmHi, FONT, 'center');
+  } else {
+    text(ctx, 'R  RESET SETTINGS     K  CLEAR HANGAR     O / ESC  BACK',
+      cx, SETTINGS_LAYOUT.footer2, COL.hudText, FONT, 'center');
+  }
 }
 
 export function drawQuitPrompt(ctx, game) {

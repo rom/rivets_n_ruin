@@ -9,32 +9,54 @@ import { DIFFICULTY, LEVELS } from './config.js';
 
 const KEY = 'rnr.settings';
 
+// Grouped only for the heading the screen shows; the list is still flat,
+// because a group is a label and not a structure.
+export const GROUPS = ['AUDIO', 'GAME', 'ACCESSIBILITY', 'PICTURE'];
+
 export const DEFS = [
-  { id: 'music', label: 'MUSIC', kind: 'bool', def: true,
+  { id: 'music', group: 'AUDIO', label: 'MUSIC', kind: 'bool', def: true,
     help: 'The score. Off leaves sound effects alone.' },
-  { id: 'sfx', label: 'SOUND EFFECTS', kind: 'bool', def: true,
+  { id: 'sfx', group: 'AUDIO', label: 'SOUND EFFECTS', kind: 'bool', def: true,
     help: 'Guns, impacts, explosions, pickups.' },
-  { id: 'volume', label: 'MASTER VOLUME', kind: 'range', def: 85, min: 0, max: 100, step: 5,
+  { id: 'volume', group: 'AUDIO', label: 'MASTER VOLUME', kind: 'range', def: 85, min: 0, max: 100, step: 5,
     help: 'Overall output level.' },
-  { id: 'tune', label: 'TUNE', kind: 'tune', def: 0,
+  { id: 'tune', group: 'AUDIO', label: 'TUNE', kind: 'tune', def: 0,
     help: 'Each hull picks its own unless you override it here.' },
-  { id: 'difficulty', label: 'DIFFICULTY', kind: 'difficulty', def: 1,
+  { id: 'difficulty', group: 'GAME', label: 'DIFFICULTY', kind: 'difficulty', def: 1,
     help: 'Takes effect on the next run. Harder settings score more.' },
-  { id: 'startHull', label: 'START HULL', kind: 'hull', def: 0,
+  { id: 'startHull', group: 'GAME', label: 'START HULL', kind: 'hull', def: 0,
     help: 'Begin on any hull you have reached. Earlier refits are credited.' },
-  { id: 'demo', label: 'ATTRACT DEMO', kind: 'bool', def: true,
+  { id: 'demo', group: 'GAME', label: 'ATTRACT DEMO', kind: 'bool', def: true,
     help: 'Plays itself after two minutes idle. Any key stops it.' },
-  { id: 'radar', label: 'RADAR STRIP', kind: 'bool', def: true,
+  // --- accessibility.
+  //
+  // Each of these removes a specific barrier rather than making the game
+  // easier in general — easier in general is what DIFFICULTY is for. They
+  // are off by default because a default that changes how the game looks
+  // or plays for everyone is not an accessibility setting, it is a
+  // redesign.
+  { id: 'autofire', group: 'ACCESSIBILITY', label: 'AUTO FIRE', kind: 'bool', def: false,
+    help: 'Guns fire on their own. No key to hold down for a whole run.' },
+  { id: 'gameSpeed', group: 'ACCESSIBILITY', label: 'GAME SPEED', kind: 'range',
+    def: 100, min: 50, max: 100, step: 10,
+    help: 'Slows everything evenly. More thinking time; the clock slows with it.' },
+  { id: 'reduceFlash', group: 'ACCESSIBILITY', label: 'REDUCE FLASHING', kind: 'bool', def: false,
+    help: 'Damps the full-screen flashes on hits and big explosions.' },
+  { id: 'contrast', group: 'ACCESSIBILITY', label: 'HIGH CONTRAST', kind: 'bool', def: false,
+    help: 'Outlines incoming fire and hazards, and brightens the HUD.' },
+  { id: 'aimLine', group: 'ACCESSIBILITY', label: 'FIRING LINE', kind: 'bool', def: false,
+    help: 'A faint line along the ship\'s line of fire, so aim needs no guessing.' },
+  { id: 'radar', group: 'PICTURE', label: 'RADAR STRIP', kind: 'bool', def: true,
     help: 'The map across the top: guns, loot, minibosses, the boss.' },
-  { id: 'bloom', label: 'BLOOM', kind: 'bool', def: true,
+  { id: 'bloom', group: 'PICTURE', label: 'BLOOM', kind: 'bool', def: true,
     help: 'Glow around bright things. Off is cheaper on a slow machine.' },
-  { id: 'scanlines', label: 'CRT SCANLINES', kind: 'bool', def: true,
+  { id: 'scanlines', group: 'PICTURE', label: 'CRT SCANLINES', kind: 'bool', def: true,
     help: 'The vignette and scanline overlay.' },
-  { id: 'shake', label: 'SCREEN SHAKE', kind: 'bool', def: true,
+  { id: 'shake', group: 'PICTURE', label: 'SCREEN SHAKE', kind: 'bool', def: true,
     help: 'Camera kick on impacts and explosions.' },
-  { id: 'foreground', label: 'FOREGROUND LAYER', kind: 'bool', def: true,
+  { id: 'foreground', group: 'PICTURE', label: 'FOREGROUND LAYER', kind: 'bool', def: true,
     help: 'Girders and cables passing in front of the ship.' },
-  { id: 'damageNumbers', label: 'SHOW PICKUP TOASTS', kind: 'bool', def: true,
+  { id: 'damageNumbers', group: 'PICTURE', label: 'SHOW PICKUP TOASTS', kind: 'bool', def: true,
     help: 'The line naming what a pickup just did.' },
 ];
 

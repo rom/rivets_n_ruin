@@ -3,9 +3,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   HELP, HELP_LAYOUT, HELP_PAGES, SETTINGS_LAYOUT, END_LAYOUT, endLayout,
-  rankLine, REASON_CHARS, drawHelp, drawSettings,
+  rankLine, REASON_CHARS, settingsWindow, drawHelp, drawSettings,
 } from '../src/hud.js';
-import { DEFS, get as setting, set as setSetting, nudge, reset, display } from '../src/settings.js';
+import {
+  DEFS, GROUPS, get as setting, set as setSetting, nudge, reset, display,
+} from '../src/settings.js';
 import { LEVELS, VIEW_W, FIELD_H } from '../src/config.js';
 import { TUNES } from '../src/music.js';
 
@@ -161,12 +163,82 @@ test('every setting row fits the screen', () => {
 // footer under it. The layout is data so the next one cannot.
 test('the settings list and its explanation clear the footer', () => {
   const L = SETTINGS_LAYOUT;
-  const lastRow = L.top + (DEFS.length - 1) * L.pitch;
-  const helpY = L.top + DEFS.length * L.pitch + L.helpGap;
-  assert.ok(lastRow + 12 < helpY, 'the last row overlaps its own explanation');
-  assert.ok(helpY + 12 <= L.footer,
-    `${DEFS.length} settings put the explanation at y=${helpY}, the footer is at ${L.footer}`);
+  // The list scrolls, so the geometry no longer depends on how many
+  // settings there are — which is the point. It used to: every setting
+  // added pushed the explanation one notch nearer the footer, and the
+  // twelfth put it through.
+  const lastRow = L.top + (L.rows - 1) * L.pitch;
+  assert.ok(lastRow + 12 < L.helpY, 'the last visible row overlaps the explanation');
+  assert.ok(L.helpY + 12 <= L.footer,
+    `the explanation sits at y=${L.helpY}, the footer is at ${L.footer}`);
   assert.ok(L.footer + 12 <= L.footer2 + 12, 'the two footer lines overlap');
+});
+
+test('the group heading clears the first row of the list', () => {
+  const L = SETTINGS_LAYOUT;
+  assert.ok(L.groupY + 12 <= L.top,
+    `the heading at y=${L.groupY} runs into the first row at y=${L.top}`);
+});
+
+test('the settings screen fits any number of settings', () => {
+  const L = SETTINGS_LAYOUT;
+  // A hundred settings must lay out exactly like twelve. If this ever
+  // stops being true, the screen has gone back to being count-dependent.
+  for (const count of [1, 5, L.rows, L.rows + 1, 40, 100]) {
+    const first = settingsWindow(count - 1, count);
+    const visible = Math.min(count, L.rows);
+    assert.ok(first + visible <= count, `window runs past the end with ${count} settings`);
+    assert.ok(L.top + (visible - 1) * L.pitch + 12 < L.helpY,
+      `${count} settings overrun the explanation`);
+  }
+});
+
+test('the cursor is always inside the visible window', () => {
+  const L = SETTINGS_LAYOUT;
+  for (const count of [1, 3, L.rows, L.rows + 1, DEFS.length, 60]) {
+    for (let sel = 0; sel < count; sel++) {
+      const first = settingsWindow(sel, count);
+      assert.ok(sel >= first && sel < first + L.rows,
+        `with ${count} settings, selecting ${sel} shows rows ${first}..${first + L.rows - 1} — `
+        + 'the cursor is off screen');
+      assert.ok(first >= 0 && first <= Math.max(0, count - L.rows),
+        `window start ${first} is out of range for ${count} settings`);
+    }
+  }
+});
+
+test('every setting belongs to a group, and every group has settings', () => {
+  for (const d of DEFS) {
+    assert.ok(d.group, `"${d.label}" has no group, so the screen has no heading for it`);
+    assert.ok(GROUPS.includes(d.group), `"${d.label}" is in unknown group "${d.group}"`);
+  }
+  for (const g of GROUPS) {
+    assert.ok(DEFS.some((d) => d.group === g), `group "${g}" is empty`);
+  }
+});
+
+// A group whose rows are scattered through the list makes the heading
+// flicker as you scroll past them.
+test('a group\'s settings are contiguous', () => {
+  const seen = [];
+  for (const d of DEFS) {
+    if (seen[seen.length - 1] !== d.group) {
+      assert.ok(!seen.includes(d.group),
+        `group "${d.group}" appears in two separate stretches of the list`);
+      seen.push(d.group);
+    }
+  }
+});
+
+test('there are accessibility settings, and they do not change the game by default', () => {
+  const access = DEFS.filter((d) => d.group === 'ACCESSIBILITY');
+  assert.ok(access.length >= 4, `only ${access.length} accessibility settings`);
+  for (const d of access) {
+    const off = d.kind === 'bool' ? false : d.max;
+    assert.equal(d.def, off,
+      `"${d.label}" defaults to ${d.def}; an accessibility setting that is on `
+      + 'for everyone by default is a redesign, not an accommodation');
+  }
 });
 
 // --- the overview between hulls
