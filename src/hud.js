@@ -6,6 +6,7 @@ import { netState } from './net.js';
 import { PICKUP, ARMORY, APRON, LASER } from './config.js';
 import { tint, pickups, isTreasure } from './pickups.js';
 import { minis } from './miniboss.js';
+import { markName } from './shipart.js';
 import { radarProfile } from './level.js';
 import { tuneName, TUNES } from './music.js';
 import { get as setting, DEFS, display } from './settings.js';
@@ -491,7 +492,10 @@ function drawBonus(ctx, game, x, y) {
 function drawFit(ctx, game, x, y) {
   const p = game.player;
   const W = 272;   // x + W must stay inside VIEW_W
+  // The airframe has a name, and it changes: the ship you launch on the
+  // next hull is a different ship, and the overview is where you are told.
   text(ctx, 'REFIT COMPLETE', x, y, COL.warmHi, FONT);
+  text(ctx, markName(game.levelIndex + 1), x + W, y, COL.coolHi, FONT, 'right');
   const refit = [
     ['SHIELD', String(p.shieldMax)],
     ['ACCEL', '+' + Math.round((p.accelMul - 1) * 100) + '%'],

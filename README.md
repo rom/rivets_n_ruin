@@ -82,6 +82,8 @@ backend down**; you lose the leaderboard, not the game.
 | The hull bonus, the refit and the mods fitted | The armourer between hulls |
 | ![Laser gate](docs/laser.png) | ![Deflector shields](docs/shields.png) |
 | A laser gate: shoot the emitter or go no further | Deflectors, from whole to nearly gone |
+| ![Mark I](docs/ship-1.png) | ![Mark VIII](docs/ship-8.png) |
+| The ship as issued | The same ship eight hulls and six mods later |
 
 ## The hulls
 
@@ -134,6 +136,51 @@ Dying out of ships ends the run wherever you are.
 
 The tune table above is per hull; each one also has its own theme, attacker
 roster, tower roster and laser gates.
+
+## Your ship
+
+![Mark I](docs/ship-1.png)
+![Mark IV](docs/ship-4.png)
+![Mark VIII](docs/ship-8.png)
+
+It used to be one sprite for the whole campaign. Eight refits, six mods,
+three kinds of ordnance and two gun lines all happened entirely in the
+numbers: the thing on screen at the end of AURUM was the thing that
+launched off ARGENTUM. The one object you look at for the entire run never
+changed.
+
+Everything is now read off the ship's actual state, every frame:
+
+| What changed | What you see |
+| --- | --- |
+| **A hull cleared** | The next **MARK**: a longer airframe, a wider wing, another engine bell, more structure — and gilding on the last two |
+| **GUNSPEED** | One more barrel on the nose, per level |
+| **GUNBLAZE** | One more angled pod pair, per level |
+| **Bombs** | A rack under the belly with ordnance on it |
+| **Grenades** | Canisters on the shoulder rail |
+| **Missiles** | A missile rail, loaded |
+| **LODESTONE** | A coil stack on the spine — one ring per tier, with a field haze |
+| **ABLATIVE PLATING** | The armour slabs on the flanks go from dark to bright |
+| **AUTOLOADER** | A feed drum on the spine, turning |
+| **SCAVENGER RIG** | A collector scoop under the nose, wider per tier |
+| **AFTERBURNER** | Larger bells and a gold plume instead of a blue one |
+| **RECLAIMER** | A salvage claw folded under the belly |
+
+| | | | |
+| --- | --- | --- | --- |
+| ![I](docs/ship-1.png) | ![II](docs/ship-2.png) | ![III](docs/ship-3.png) | ![IV](docs/ship-4.png) |
+| **MARK I** — as issued | **MARK II** — wings | **MARK III** — twin engines, bombs | **MARK IV** — coils, grenades |
+| ![V](docs/ship-5.png) | ![VI](docs/ship-6.png) | ![VII](docs/ship-7.png) | ![VIII](docs/ship-8.png) |
+| **MARK V** — three engines, plating | **MARK VI** — autoloader | **MARK VII** — afterburner, scoop | **MARK VIII** — gilded, everything fitted |
+
+The drawn ship stays honest about the box it collides with: `SHIP.hitW` is
+19 by `hitH` 9, and Mark VIII is 33×18 of airframe against Mark I's 26×14 —
+visibly a bigger machine without the sprite claiming space the hitbox does
+not occupy. Wings and fins reach past that, which is what wings do, and
+they are not what you collide with either.
+
+The airframe is named on the overview between hulls, so the change is
+announced rather than left to be noticed.
 
 ## Gun towers
 
@@ -198,6 +245,15 @@ Interceptors teach dodging and turrets teach prioritising. Four more types
 arrive hull by hull, each asking a different question:
 
 ![The attacker roster](docs/attackers.png)
+
+Each one is a vessel rather than the shape its behaviour is written in. The
+roster used to be a circle with spokes, a triangle and a ring with four
+dots on it — a diagram of an enemy rather than an enemy, and at 2x and up
+there is room for a great deal more than a diagram. They share a
+vocabulary so a hull reads as one fleet: a dark hull, one lit upper
+surface, panel lines and rivets, a canopy or a sensor eye so you can see
+which way it is looking, engine bells with a plume on their own clock, and
+one accent colour per kind carried on the trim and the running lights.
 
 | Attacker | From | Behaviour |
 | --- | --- | --- |
@@ -1020,6 +1076,8 @@ src/enemies.js    turret and interceptor behaviour
 src/miniboss.js   the four mid-hull minibosses
 src/bossart.js    eight boss bodies and their destructible sections
 src/gates.js      laser gates: the wall, the emitter, and what breaks it
+src/foeart.js     the ten attacker bodies
+src/shipart.js    the player's ship, as its marks, guns, load and mods make it
 src/score.js      difficulty multipliers, and the one way points are awarded
 src/game.js       state machine, collision pairs, run objective
 src/render.js     world drawing
@@ -1105,6 +1163,13 @@ Several exist because of bugs that shipped:
   at all — so the test has to go through `update()`, not through the helper.
 - **`test/radar.test.mjs`** asserts the three bands stack without
   overlapping and that no gun on any hull reaches into the radar's band.
+- **`test/art.test.mjs`** asserts every attacker kind has a body of its
+  own — a missing one silently falls back to a warder, so a leech would
+  just quietly be drawn as something else — and that each of the eight
+  marks is at least as much ship as the one before it on every axis, while
+  staying within sane bounds of the hitbox it is drawn around. It also
+  draws every mark against every gun level, load and mod combination,
+  because a throw in the renderer blacks the whole frame.
 - **`test/mods.test.mjs`** asserts no two shop rows share an id. The Tractor
   Coils upgrade and the Lodestone mod both used `magnet`, so anything that
   looked a row up by id got whichever came first.
@@ -1149,9 +1214,11 @@ below follows from that one fact.
   deaf is eight chances to be wrong.
 - **The graphics are unjudged.** Bloom strength, foreground density and the
   surface shading are tuned by eye against screenshots, not by playing.
-  Bloom in particular is easy to overdo. The eight boss bodies and the
-  radar strip were drawn against still frames; whether a boss reads at speed
-  with forty bullets on screen is a different question.
+  Bloom in particular is easy to overdo. The eight boss bodies, the ten
+  attackers, the eight ship marks and the radar strip were all drawn
+  against still frames; whether any of it reads at speed with forty bullets
+  on screen is a different question, and a fully fitted Mark VIII is
+  certainly busy.
 - **Coverage is partial and the report says so.** Rendering, audio and HUD
   modules are exercised only by the browser smoke test, so they contribute
   no line coverage. The smoke test asserts pixels, not that anything looks

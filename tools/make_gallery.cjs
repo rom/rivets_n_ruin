@@ -49,6 +49,24 @@ const OUT = path.join(__dirname, '..', 'docs');
 
   // Every scene below poses the world by hand, so nothing may be mid-banner,
   // mid-sequence or mid-menu when the shutter opens.
+  // Freeze what the game would otherwise add to a posed scene: no new
+  // attackers, no new interceptors, no loose pickups from something that
+  // died a moment ago.
+  const quiet = () => page.evaluate(async () => {
+    const pk = await import('./src/pickups.js');
+    const ar = await import('./src/armory.js');
+    const g = window.game;
+    g.spawnCd = 1e9;
+    g.foeCd = 1e9;
+    if (g.miniPlan) for (const slot of g.miniPlan) slot.spawned = true;
+    pk.resetPickups();
+    ar.resetOrdnance();
+  });
+
+  // Stop the simulation entirely for a posed roster, and start it again
+  // afterwards. Rendering carries on; only update() is held.
+  const freeze = (on) => page.evaluate((on) => { window.__freeze = on; }, on);
+
   const clear = () => page.evaluate(() => {
     const g = window.game;
     g.state = 'play';
@@ -64,11 +82,27 @@ const OUT = path.join(__dirname, '..', 'docs');
   // page screenshot — so every clip passed here had been quietly doing
   // nothing. Crops now go through the page, positioned from the element's
   // own box, and everything else takes the whole frame.
-  const shot = async (name) => {
+  // Wait for a painted frame before the shutter. Anything that changes the
+  // game's state can flip it out of the renderer's static mode, which
+  // resizes the canvas — and a canvas resize clears it. Shooting in that
+  // window produced a completely black attackers.png while every other
+  // image in the same run was fine.
+  const painted = () => page.evaluate(() => new Promise((r) => {
+    requestAnimationFrame(() => requestAnimationFrame(r));
+  }));
+  // `before` runs after the frame has painted and immediately before the
+  // shutter, which is the only way to shoot a posed roster: the simulation
+  // keeps running between the pose and the capture, so anything with a
+  // speed has already moved and anything with a spawn timer has already
+  // spawned.
+  const shot = async (name, before) => {
+    await painted();
+    if (before) await before();
     await el.screenshot({ path: path.join(OUT, name) });
     console.log('  ' + name);
   };
   const cropShot = async (name, top, height) => {
+    await painted();
     await page.screenshot({
       path: path.join(OUT, name),
       clip: { x: box.x, y: box.y + top, width: box.width, height },
@@ -102,32 +136,55 @@ const OUT = path.join(__dirname, '..', 'docs');
 
   // --- the attacker roster, posed on one screen
   console.log('attackers:');
-  await page.evaluate(async () => {
+  const poseFoes = (fresh) => page.evaluate(async (fresh) => {
     const { buildLevel } = await import('./src/level.js');
     const fo = await import('./src/foes.js');
     const en = await import('./src/enemies.js');
     const g = window.game;
-    g.levelIndex = 0;
-    g.level = buildLevel(g.specs[0]);
-    g.player.x = 600; g.player.y = 170; g.cam.x = 300; g.player.invuln = 1e9;
-    en.resetEnemies();
-    fo.resetFoes();
-    const kinds = ['mine', 'lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech'];
-    kinds.forEach((k, i) => {
-      const f = fo.spawnFoe(g, k);
-      if (!f) return;
-      f.x = 420 + (i % 4) * 150;
-      f.baseY = 70 + Math.floor(i / 4) * 130;
+    const kinds = ['mine', 'lancer', 'orbiter', 'warder', 'weaver',
+      'splitter', 'shard', 'bomber', 'leech'];
+    if (fresh) {
+      g.levelIndex = 0;
+      g.level = buildLevel(g.specs[0]);
+      g.boss = null;
+      en.resetEnemies();
+      fo.resetFoes();
+      g.cam.x = 3000;
+      // well clear of the roster, or a mine creeps over and detonates
+      g.player.x = g.cam.x + 600;
+      g.player.y = 300;
+      g.player.invuln = 1e9;
+      for (const k of kinds) fo.spawnFoe(g, k);
+      en.spawnInterceptor(g);
+    }
+    // They move, so this runs again immediately before the shutter.
+    for (let i = 0; i < fo.foes.count; i++) {
+      const f = fo.foes.items[i];
+      f.x = g.cam.x + 64 + (i % 5) * 128;
+      f.baseY = 70 + Math.floor(i / 5) * 110;
       f.y = f.baseY;
-      f.state = 0;
-      f.t = 0.35;          // mid-telegraph, so the lancer shows its aim line
+      f.t = 0.62;
       f.facing = -1;
-    });
-    en.spawnInterceptor(g);
-  });
+      f.shield = 0;
+      // a lancer mid-charge and a leech latched on, so both show their
+      // second state rather than their idle one
+      f.state = (f.kind === 'lancer' || f.kind === 'leech') ? 1 : 0;
+    }
+    for (let i = 0; i < en.interceptors.count; i++) {
+      const e = en.interceptors.items[i];
+      e.x = g.cam.x + 64 + 4 * 128;
+      e.baseY = 180; e.y = 180; e.dirX = -1; e.t = 0.4;
+    }
+  }, fresh);
+  // Freeze BEFORE posing, not after. Posed into a running simulation, four
+  // of the nine were dead before the shutter opened and the camera had
+  // drifted 300px off the frame they were posed into.
   await clear();
-  await page.waitForTimeout(120);
+  await quiet();
+  await freeze(true);
+  await poseFoes(true);
   await shot('attackers.png');
+  await freeze(false);
 
   // --- the miniboss roster, one of each posed on one screen
   console.log('minibosses:');
@@ -156,11 +213,11 @@ const OUT = path.join(__dirname, '..', 'docs');
     }
   }, fresh);
   await clear();
+  await quiet();
+  await freeze(true);
   await poseMinis(true);
-  await page.waitForTimeout(120);
-  await clear();
-  await poseMinis(false);
   await shot('minibosses.png');
+  await freeze(false);
 
   // --- the armory in flight
   console.log('armory:');
@@ -268,6 +325,52 @@ const OUT = path.join(__dirname, '..', 'docs');
   await page.waitForTimeout(150);
   await shot('treasure.png');
 
+  // --- the ship, as it actually changes across a campaign
+  console.log('ship:');
+  const poseShip = (fit) => page.evaluate(async (fit) => {
+    const { buildLevel } = await import('./src/level.js');
+    const fo = await import('./src/foes.js');
+    const en = await import('./src/enemies.js');
+    const sh = await import('./src/shop.js');
+    const g = window.game;
+    g.levelIndex = fit.lvl;
+    g.level = buildLevel(g.specs[0]);        // one backdrop for all eight
+    g.boss = null;
+    fo.resetFoes();
+    en.resetEnemies();
+    g.cam.x = 4200;
+    g.player.x = g.cam.x + 320;
+    g.player.y = 150;
+    g.player.vx = 0; g.player.vy = 0; g.player.facing = 1; g.player.flip = 0;
+    g.player.invuln = 1e9;
+    g.player.gunCap = 5;
+    g.player.gunSpeed = fit.gs;
+    g.player.gunBlaze = fit.gb;
+    g.player.ammo = Object.assign({ bomb: 0, grenade: 0, missile: 0 }, fit.ammo || {});
+    g.mods = fit.mods || {};
+    sh.applyMods(g);
+  }, fit);
+
+  const FITS = [
+    { lvl: 0, gs: 0, gb: 0 },
+    { lvl: 1, gs: 1, gb: 0 },
+    { lvl: 2, gs: 1, gb: 1, ammo: { bomb: 4 } },
+    { lvl: 3, gs: 2, gb: 2, ammo: { bomb: 4, grenade: 6 }, mods: { magnet: 1 } },
+    { lvl: 4, gs: 3, gb: 2, ammo: { bomb: 6, grenade: 6, missile: 3 }, mods: { magnet: 1, plating: 1 } },
+    { lvl: 5, gs: 3, gb: 3, ammo: { bomb: 6, grenade: 8, missile: 4 }, mods: { magnet: 2, plating: 1, autoloader: 1 } },
+    { lvl: 6, gs: 4, gb: 4, ammo: { bomb: 8, grenade: 9, missile: 5 }, mods: { magnet: 2, plating: 1, autoloader: 1, scavenger: 2, afterburner: 1 } },
+    { lvl: 7, gs: 5, gb: 5, ammo: { bomb: 9, grenade: 12, missile: 6 }, mods: { magnet: 3, plating: 1, autoloader: 1, scavenger: 3, afterburner: 1, reclaimer: 1 } },
+  ];
+  for (let i = 0; i < FITS.length; i++) {
+    await clear();
+    await quiet();
+    await freeze(true);
+    await poseShip(FITS[i]);
+    await cropShot(`ship-${i + 1}.png`, Math.round(box.height * (96 / 384)),
+      Math.round(box.height * (110 / 384)));
+    await freeze(false);
+  }
+
   // --- a laser gate, with the ship held against it
   console.log('laser:');
   await page.evaluate(async () => {
@@ -309,11 +412,12 @@ const OUT = path.join(__dirname, '..', 'docs');
       f.baseY = 120; f.y = 120; f.t = 0.6; f.state = 0; f.shieldFlash = 0;
     }
   });
-  await poseShields();
   await clear();
-  await page.waitForTimeout(150);
+  await quiet();
+  await freeze(true);
   await poseShields();
   await shot('shields.png');
+  await freeze(false);
 
   // --- the overview, with a bonus and mods on it
   console.log('overview:');

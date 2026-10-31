@@ -12,6 +12,8 @@ import { pickups, tint, isTreasure } from './pickups.js';
 
 import { drawBossBody, drawBossParts } from './bossart.js';
 import { drawGates } from './gates.js';
+import { drawFoeBody, drawInterceptorBody } from './foeart.js';
+import { drawShipBody, markOf } from './shipart.js';
 import { foes, SPEC as FOE_SPEC, SHIELD as FOE_SHIELD } from './foes.js';
 import { drawMinis } from './miniboss.js';
 import { drawOrdnance } from './armory.js';
@@ -132,7 +134,7 @@ export function drawWorld(ctx, game) {
   drawOrdnance(ctx);
   drawShots(ctx);
   drawPad(ctx, camX, camY);
-  if (game.player.alive) drawShip(ctx, game.player, game.seqTilt);
+  if (game.player.alive) drawShip(ctx, game.player, game.seqTilt, game);
   drawParticles(ctx);
 
   ctx.restore();
@@ -292,7 +294,7 @@ function drawBloom(ctx, game, camX, camY) {
   glowCtx.translate(-camX, camY);
   drawShots(glowCtx);
   drawParticles(glowCtx);
-  if (game.player.alive) drawEngineGlow(glowCtx, game.player);
+  if (game.player.alive) drawEngineGlow(glowCtx, game.player, game);
   glowCtx.restore();
 
   // two-tap blur
@@ -312,20 +314,27 @@ function drawBloom(ctx, game, camX, camY) {
   ctx.globalCompositeOperation = 'source-over';
 }
 
-function drawEngineGlow(g, p) {
+function drawEngineGlow(g, p, game) {
+  const m = markOf(game ? game.levelIndex : 0);
+  const n = m.engines;
+  const spread = m.half * 0.78;
   g.save();
   g.translate(Math.round(p.x), Math.round(p.y));
   g.globalCompositeOperation = 'lighter';
-  g.fillStyle = COL.cool;
-  g.fillRect(-p.facing * 18 - 3, -3, 6, 6);
-  g.fillStyle = COL.coolHi;
-  g.fillRect(-p.facing * 16 - 2, -2, 4, 4);
+  // One bloom source per bell, so a four-engine ship glows like one.
+  for (let i = 0; i < n; i++) {
+    const y = n === 1 ? 0 : -spread + (i * spread * 2) / (n - 1);
+    g.fillStyle = COL.cool;
+    g.fillRect(-p.facing * (-m.tail + 6) - 3, y - 3, 6, 6);
+    g.fillStyle = COL.coolHi;
+    g.fillRect(-p.facing * (-m.tail + 4) - 2, y - 2, 4, 4);
+  }
   g.restore();
 }
 
 // ----------------------------------------------------------------- entities
 
-function drawShip(ctx, p, seqTilt) {
+function drawShip(ctx, p, seqTilt, game) {
   // the flip: scaleX sweeps -facing -> +facing through zero
   let sx = p.facing;
   if (p.flip > 0) {
@@ -342,52 +351,7 @@ function drawShip(ctx, p, seqTilt) {
   ctx.scale(sx, 1);
 
   if (p.invuln > 0 && Math.floor(p.invuln * 18) % 2 === 0) ctx.globalAlpha = 0.4;
-
-  // engine glow
-  ctx.fillStyle = COL.cool;
-  ctx.globalAlpha *= 0.85;
-  ctx.fillRect(-15, -2, 4, 4);
-  ctx.globalAlpha = p.invuln > 0 && Math.floor(p.invuln * 18) % 2 === 0 ? 0.4 : 1;
-
-  // hull
-  ctx.beginPath();
-  ctx.moveTo(14, 0);
-  ctx.lineTo(3, -4);
-  ctx.lineTo(-6, -7);
-  ctx.lineTo(-12, -5);
-  ctx.lineTo(-11, 0);
-  ctx.lineTo(-12, 5);
-  ctx.lineTo(-6, 7);
-  ctx.lineTo(3, 4);
-  ctx.closePath();
-  ctx.fillStyle = '#6e7b8a';
-  ctx.fill();
-  ctx.strokeStyle = '#0b0e13';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-
-  // top-lit panel
-  ctx.beginPath();
-  ctx.moveTo(13, 0);
-  ctx.lineTo(3, -3);
-  ctx.lineTo(-6, -6);
-  ctx.lineTo(-11, -4);
-  ctx.lineTo(-10, -1);
-  ctx.closePath();
-  ctx.fillStyle = '#aab7c7';
-  ctx.fill();
-
-  // cockpit + accent stripe
-  ctx.fillStyle = COL.coolHi;
-  ctx.fillRect(1, -2, 4, 3);
-  ctx.fillStyle = COL.cool;
-  ctx.fillRect(-9, -1, 8, 2);
-
-  // cannon mounts
-  ctx.fillStyle = '#30363f';
-  ctx.fillRect(5, -6, 7, 2);
-  ctx.fillRect(5, 4, 7, 2);
-
+  drawShipBody(ctx, p, game);
   ctx.restore();
 }
 
@@ -397,25 +361,7 @@ function drawInterceptors(ctx, game) {
     ctx.save();
     ctx.translate(Math.round(e.x), Math.round(e.y));
     ctx.scale(e.dirX, 1);
-
-    ctx.beginPath();
-    ctx.moveTo(11, 0);
-    ctx.lineTo(-2, -6);
-    ctx.lineTo(-10, -4);
-    ctx.lineTo(-7, 0);
-    ctx.lineTo(-10, 4);
-    ctx.lineTo(-2, 6);
-    ctx.closePath();
-    ctx.fillStyle = '#4a4038';
-    ctx.fill();
-
-    ctx.fillStyle = COL.warm;
-    ctx.fillRect(-2, -2, 7, 4);
-    ctx.fillStyle = COL.warmHi;
-    ctx.fillRect(4, -1, 3, 2);
-    ctx.fillStyle = '#7d6a55';
-    ctx.fillRect(-9, -5, 4, 2);
-    ctx.fillRect(-9, 3, 4, 2);
+    drawInterceptorBody(ctx, e, e.t || (game.time + i));
     ctx.restore();
   }
 }
@@ -780,123 +726,29 @@ function drawFoes(ctx) {
   for (let i = 0; i < foes.count; i++) {
     const f = foes.items[i];
     const spec = FOE_SPEC[f.kind];
-    const lit = f.flash > 0;
     ctx.save();
     ctx.translate(Math.round(f.x), Math.round(f.y));
     if (f.shield > 0) drawDeflector(ctx, f, spec);
-
-    if (f.kind === 'mine') {
-      ctx.fillStyle = lit ? '#ffd24a' : '#3a3038';
-      ctx.beginPath(); ctx.arc(0, 0, spec.r, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = '#e8434f'; ctx.lineWidth = 1.5;
-      for (let k = 0; k < 8; k++) {
-        const a = f.t * 1.2 + (k / 8) * Math.PI * 2;
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(a) * spec.r, Math.sin(a) * spec.r);
-        ctx.lineTo(Math.cos(a) * (spec.r + 4), Math.sin(a) * (spec.r + 4));
-        ctx.stroke();
-      }
-      ctx.fillStyle = Math.sin(f.t * 9) > 0 ? '#e8434f' : '#5a2228';
-      ctx.fillRect(-2, -2, 4, 4);
-    } else if (f.kind === 'lancer') {
+    // Mines, orbiters and leeches have no front: they are drawn in their
+    // own rotation. Everything else is a ship and faces where it is going.
+    if (f.kind !== 'mine' && f.kind !== 'orbiter' && f.kind !== 'leech') {
       ctx.scale(f.facing, 1);
-      const charging = f.state === 1;
-      ctx.fillStyle = lit ? '#ffd24a' : charging ? '#c4502a' : '#3e3a44';
-      ctx.beginPath();
-      ctx.moveTo(-15, 0); ctx.lineTo(7, -7); ctx.lineTo(13, 0); ctx.lineTo(7, 7);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = charging ? '#ffd24a' : '#6e6a78';
-      ctx.fillRect(7, -1, 9, 2);
-      if (!charging) {   // telegraph: a lengthening aim line
-        ctx.globalAlpha = 0.35 + 0.3 * Math.sin(f.t * 14);
-        ctx.fillStyle = '#e8434f';
-        ctx.fillRect(-15 - f.t * 70, -1, f.t * 70, 1);
-        ctx.globalAlpha = 1;
-      }
-    } else if (f.kind === 'orbiter') {
-      ctx.rotate(f.t * 1.4);
-      ctx.strokeStyle = lit ? '#ffd24a' : '#4e6472';
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.arc(0, 0, spec.r, 0, Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = '#2a3a44';
-      ctx.beginPath(); ctx.arc(0, 0, spec.r - 4, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#4fd0e8';
-      for (let k = 0; k < 4; k++) {
-        const a = (k / 4) * Math.PI * 2;
-        ctx.fillRect(Math.cos(a) * spec.r - 1.5, Math.sin(a) * spec.r - 1.5, 3, 3);
-      }
-    } else if (f.kind === 'weaver') {
-      // a thin dart, banked into its own weave
-      ctx.scale(f.facing, 1);
-      ctx.rotate(Math.cos(f.t * FOE_SPEC.weaver.freq) * 0.5);
-      ctx.fillStyle = lit ? '#ffd24a' : '#4a3a52';
-      ctx.beginPath();
-      ctx.moveTo(-11, 0); ctx.lineTo(2, -6); ctx.lineTo(10, 0); ctx.lineTo(2, 6);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#b45ce0';
-      ctx.fillRect(-2, -1.5, 7, 3);
-      ctx.fillStyle = '#e8b4ff';
-      ctx.fillRect(6, -1, 3, 2);
-    } else if (f.kind === 'splitter' || f.kind === 'shard') {
-      // a shell with a visible seam it will break along
-      const big = f.kind === 'splitter';
-      const r = big ? 14 : 8;
-      ctx.scale(f.facing, 1);
-      ctx.fillStyle = lit ? '#ffd24a' : '#3b4450';
-      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = '#8e9aa9'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
-      if (big) {
-        ctx.strokeStyle = '#e8434f'; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(-r, 0); ctx.lineTo(r, 0); ctx.stroke();
-      }
-      ctx.fillStyle = '#ffd24a';
-      ctx.fillRect(-2, -2 - (big ? 5 : 3), 4, 4);
-      ctx.fillRect(-2, -2 + (big ? 5 : 3), 4, 4);
-    } else if (f.kind === 'bomber') {
-      // a heavy fuselage with a visible bay underneath
-      ctx.scale(f.facing, 1);
-      ctx.fillStyle = lit ? '#ffd24a' : '#45392c';
-      ctx.beginPath();
-      ctx.moveTo(-15, -4); ctx.lineTo(8, -8); ctx.lineTo(14, 0);
-      ctx.lineTo(8, 8); ctx.lineTo(-15, 4); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#6e5a3e';
-      ctx.fillRect(-11, 4, 16, 5);
-      ctx.fillStyle = '#e8434f';
-      for (let k = 0; k < 3; k++) ctx.fillRect(-9 + k * 6, 6, 3, 3);
-      ctx.fillStyle = '#d9a07a';
-      ctx.fillRect(-15, -4, 4, 8);
-    } else if (f.kind === 'leech') {
-      // organic, with grabbing arms; glows while attached
-      const on = f.state === 1;
-      ctx.fillStyle = lit ? '#ffd24a' : on ? '#5fe08a' : '#2f4a38';
-      ctx.beginPath(); ctx.arc(0, 0, 9, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = on ? '#9ad94e' : '#4a6a52';
-      ctx.lineWidth = 2;
-      for (let k = 0; k < 5; k++) {
-        const a = f.t * 2.4 + (k / 5) * Math.PI * 2;
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(a) * 8, Math.sin(a) * 8);
-        ctx.lineTo(Math.cos(a) * 15, Math.sin(a) * 15);
-        ctx.stroke();
-      }
-      ctx.fillStyle = on ? '#ffffff' : '#9ad94e';
-      ctx.fillRect(-2, -2, 4, 4);
-    } else {
-      ctx.scale(f.facing, 1);
-      ctx.fillStyle = lit ? '#ffd24a' : '#3f4a3a';
-      ctx.beginPath();
-      ctx.moveTo(-13, 0); ctx.lineTo(-4, -10); ctx.lineTo(9, -6);
-      ctx.lineTo(9, 6); ctx.lineTo(-4, 10); ctx.closePath(); ctx.fill();
-      // the plate, on the side shots bounce off
-      ctx.fillStyle = '#9fb0bd';
-      ctx.fillRect(10, -11, 4, 22);
-      ctx.fillStyle = '#d7e8ef';
-      ctx.fillRect(10, -11, 4, 2);
-      ctx.fillStyle = '#9ad94e';
-      ctx.fillRect(-2, -3, 6, 6);
     }
+    drawFoeBody(ctx, f, spec, f.flash > 0);
     ctx.restore();
+
+    // A lancer's telegraph is a line on the hull, not on the ship, so it
+    // is drawn outside the ship's own transform.
+    if (f.kind === 'lancer' && f.state !== 1) {
+      ctx.save();
+      ctx.globalAlpha = 0.3 + 0.3 * Math.sin(f.t * 14);
+      ctx.fillStyle = '#e8434f';
+      const len = Math.min(170, f.t * 70);
+      ctx.fillRect(Math.round(f.x) + f.facing * 16, Math.round(f.y) - 0.5,
+        f.facing * len, 1);
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
   }
 }
 

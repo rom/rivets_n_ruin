@@ -159,6 +159,12 @@ startLoop(
       sfxUi();
     }
     if (paused) { endFrame(); return; }
+    // A hold for the tooling. make gallery poses a roster of attackers and
+    // then screenshots it; with the simulation running, everything with a
+    // speed had moved and everything with a spawn timer had spawned by the
+    // time the shutter opened, so half the roster was missing from the
+    // sheet. Nothing in the game sets this.
+    if (window.__freeze) { endFrame(); return; }
     update(game, dt);
   },
   () => {
