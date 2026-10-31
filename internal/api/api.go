@@ -20,19 +20,27 @@ const MaxBodyBytes = 64 << 10
 type Config struct {
 	RateLimitPerSec float64 // sustained requests per second, per IP
 	RateBurst       float64 // requests allowed back-to-back, per IP
+	// RequireRuns rejects any score not tied to an opened run. Off by
+	// default so an existing client keeps working; on, it closes the
+	// simplest bypass, which is not opening a run at all.
+	RequireRuns bool
 }
 
 type Server struct {
-	store store.Store
-	log   *slog.Logger
-	rl    *rateLimiter
+	store       store.Store
+	log         *slog.Logger
+	rl          *rateLimiter
+	runs        *runStore
+	requireRuns bool
 }
 
 func New(s store.Store, log *slog.Logger, cfg Config) *Server {
 	return &Server{
-		store: s,
-		log:   log,
-		rl:    newRateLimiter(cfg.RateLimitPerSec, cfg.RateBurst),
+		store:       s,
+		log:         log,
+		rl:          newRateLimiter(cfg.RateLimitPerSec, cfg.RateBurst),
+		runs:        newRunStore(),
+		requireRuns: cfg.RequireRuns,
 	}
 }
 
@@ -44,6 +52,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/stats", s.stats)
 
 	mux.HandleFunc("POST /api/players", s.createPlayer)
+	mux.HandleFunc("POST /api/auth/register", s.register)
+	mux.HandleFunc("POST /api/auth/login", s.login)
+	mux.HandleFunc("POST /api/runs/start", s.startRun)
 	mux.HandleFunc("GET /api/players/{id}", s.getPlayer)
 	mux.HandleFunc("GET /api/me", s.getMe)
 

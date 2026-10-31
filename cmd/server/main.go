@@ -27,13 +27,15 @@ import (
 
 func main() {
 	var (
-		addr     = flag.String("addr", "127.0.0.1:8000", "address to listen on (use 0.0.0.0:8000 to expose on your network)")
-		dir      = flag.String("dir", ".", "directory of static game files")
-		data     = flag.String("data", "data/rnr.json", "path to the persistence snapshot")
-		saveTick = flag.Duration("save-interval", 30*time.Second, "how often to snapshot to disk")
-		verbose  = flag.Bool("v", false, "log every request, including static assets")
-		rlRate   = flag.Float64("rate-limit", 10, "sustained API requests per second, per IP")
-		rlBurst  = flag.Float64("rate-burst", 40, "API requests allowed back-to-back, per IP")
+		addr       = flag.String("addr", "127.0.0.1:8000", "address to listen on (use 0.0.0.0:8000 to expose on your network)")
+		dir        = flag.String("dir", ".", "directory of static game files")
+		data       = flag.String("data", "data/rnr.json", "path to the persistence snapshot")
+		saveTick   = flag.Duration("save-interval", 30*time.Second, "how often to snapshot to disk")
+		verbose    = flag.Bool("v", false, "log every request, including static assets")
+		rlRate     = flag.Float64("rate-limit", 10, "sustained API requests per second, per IP")
+		rlBurst    = flag.Float64("rate-burst", 40, "API requests allowed back-to-back, per IP")
+		strictRuns = flag.Bool("require-runs", false,
+			"reject scores not tied to an opened run session (see internal/api/runs.go)")
 	)
 	flag.Parse()
 
@@ -73,7 +75,7 @@ func main() {
 	}
 	log.Info("store loaded", "path", *data, "stats", st.Stats())
 
-	apiSrv := api.New(st, log, api.Config{RateLimitPerSec: *rlRate, RateBurst: *rlBurst})
+	apiSrv := api.New(st, log, api.Config{RateLimitPerSec: *rlRate, RateBurst: *rlBurst, RequireRuns: *strictRuns})
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiSrv.Routes())

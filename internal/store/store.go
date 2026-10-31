@@ -34,6 +34,9 @@ type Store interface {
 	PlayerByID(id string) (*model.Player, error)
 	PlayerByTokenHash(hash string) (*model.Player, error)
 	TouchPlayer(id string) error
+	PlayerByName(name string) (*model.Player, error)
+	SetPassword(id, passHash string) error
+	SetToken(id, tokenHash string) error
 
 	AddScore(s *model.Score) error
 	Top(q TopQuery) ([]model.Rank, error)

@@ -14,10 +14,12 @@ type Player struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	TokenHash string    `json:"-"` // never leaves the process
+	PassHash  string    `json:"-"` // likewise; empty for legacy token-only pilots
 	Created   time.Time `json:"created"`
 	LastSeen  time.Time `json:"lastSeen"`
 	Runs      int       `json:"runs"`
 	Best      int       `json:"best"`
+	HasPass   bool      `json:"hasPassword"`
 }
 
 // Score is one completed or failed run.

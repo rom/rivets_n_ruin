@@ -18,6 +18,7 @@ const S = {
   runs: [],       // best individual runs
   board: 'pilots',// which of the two the UI is showing
   best: 0,
+  run: null,      // { id, key } for the run in progress; see internal/api/runs.go
   flying: [],
   stats: null,
   rank: null,
@@ -116,6 +117,25 @@ export async function initNet() {
   return true;
 }
 
+// Registration and login. A pilot created before passwords existed can
+// adopt one by registering the same name while holding their token, which
+// keeps their scores.
+export async function signUp(name, password) {
+  const data = await call('/api/auth/register', { method: 'POST', auth: true, body: { name, password } });
+  if (!data) return null;
+  savePlayer({ id: data.id, name: data.name, token: data.token });
+  await Promise.all([refreshTop(), refreshRuns(), refreshStats()]);
+  return S.player;
+}
+
+export async function signIn(name, password) {
+  const data = await call('/api/auth/login', { method: 'POST', body: { name, password } });
+  if (!data) return null;
+  savePlayer({ id: data.id, name: data.name, token: data.token });
+  await Promise.all([refreshTop(), refreshRuns(), refreshStats()]);
+  return S.player;
+}
+
 export async function register(name) {
   const data = await call('/api/players', { method: 'POST', body: { name } });
   if (!data) return null;
@@ -169,12 +189,47 @@ export async function refreshStats() {
   return S.stats;
 }
 
+// Opens a run with the server before the first hull. The reply carries a
+// secret that signs the eventual submission, so a score cannot be posted
+// without having started a run through the game. See internal/api/runs.go
+// for what this does and does not actually prove.
+export async function startRun(modId = '') {
+  S.run = null;
+  if (!S.player) return null;
+  const data = await call('/api/runs/start', { method: 'POST', auth: true, body: { modId } });
+  if (!data) return null;
+  try {
+    const raw = Uint8Array.from(
+      atob(data.secret.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+    const key = await crypto.subtle.importKey(
+      'raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    S.run = { id: data.runId, key };
+  } catch {
+    S.run = null;          // no WebCrypto: play on, unsigned
+  }
+  return S.run;
+}
+
+const b64url = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)))
+  .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+// Must match sign() in internal/api/runs.go exactly, including the field
+// order and the two decimal places on the time.
+async function signRun(run, points, timeSec, levels) {
+  const msg = `${run.id}|${points}|${timeSec.toFixed(2)}|${levels}`;
+  const mac = await crypto.subtle.sign('HMAC', run.key, new TextEncoder().encode(msg));
+  return b64url(mac);
+}
+
 export async function submitRun({ modId = '', points, timeSec, turrets, deaths, completed, levels = 1 }) {
   if (!S.player) return null;
-  const data = await call('/api/scores', {
-    method: 'POST', auth: true,
-    body: { modId, points, timeSec, turrets, deaths, completed, levels },
-  });
+  const body = { modId, points, timeSec, turrets, deaths, completed, levels };
+  if (S.run) {
+    body.runId = S.run.id;
+    try { body.sig = await signRun(S.run, points, timeSec, levels); } catch { /* unsigned */ }
+  }
+  const data = await call('/api/scores', { method: 'POST', auth: true, body });
+  S.run = null;        // a run is good for one submission
   if (data) {
     S.rank = data.rank || null;
     if (data.score && data.score.points > S.best) S.best = data.score.points;
@@ -187,13 +242,16 @@ export async function submitRun({ modId = '', points, timeSec, turrets, deaths, 
 
 // Fire-and-forget, self-throttling. Called from the game loop, so it must
 // never block and never throw.
-export function heartbeat(modId, progress, score) {
+export function heartbeat(modId, progress, score, level = 0) {
   if (!S.player || !S.online) return;
   const now = Date.now();
   if (now - S.lastBeat < HEARTBEAT_MS) return;
   S.lastBeat = now;
-  call('/api/presence', { method: 'POST', auth: true, body: { modId, progress, score } })
-    .then(() => refreshPresence());
+  call('/api/presence', {
+    method: 'POST',
+    auth: true,
+    body: { modId, progress, score, runId: S.run ? S.run.id : '', level },
+  }).then(() => refreshPresence());
 }
 
 export async function listMods(limit = 20, sort = 'plays') {

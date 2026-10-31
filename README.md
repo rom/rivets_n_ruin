@@ -277,7 +277,23 @@ There are never enough coins for everything, which is the point — the
 interesting choice is what to go without. A run with Scavenger plays
 differently from one with Afterburner.
 
+## The splash, the launch, the landing
+
+A splash on load — name, logo, version — dismissed by any key. Each hull
+opens with a launch off the pad and ends with a landing on it: the ship is
+on rails and the controls are locked, so neither can be flown out of by
+accident, and both can be skipped with `ENTER` because the fiftieth launch
+should not cost what the first one did.
+
+Clearing the eighth hull plays out the landing in full, on the admiralty pad,
+and totals the run line by line while the ship cools.
+
 ## Coins and coffins
+
+Three tiers of loot, each with its own sound so you can hear what you picked
+up without looking: coins chain upward in pitch as you collect a run of them,
+a **gold bar** (250, and worth ten coins at the armourer) is three rising
+notes, and a **gold coffin** (2,500) gets a fanfare.
 
 Destroyed things scatter **coins** - small, numerous, worth 25 each, flying
 apart on impact then drifting like any other pickup. They are constant
@@ -530,7 +546,58 @@ survives a cleared `localStorage`. The browser keeps a cached copy purely so a
 number still shows when the backend is unreachable. On connect the two are
 reconciled and the higher wins.
 
-### Identity
+### Identity and accounts
+
+`POST /api/auth/register` and `/api/auth/login`. Passwords are hashed with
+**PBKDF2-HMAC-SHA256 at 240,000 iterations** from the standard library,
+salted per user, and the encoded form carries its own parameters so the cost
+can be raised later without invalidating existing hashes. Argon2id would be
+better and is what this should use if a dependency ever becomes acceptable;
+PBKDF2 is the strongest thing available without one.
+
+Login failures return one message and one status whatever went wrong, and a
+miss still spends the time a real verification would — so the endpoint
+cannot be used to find out which pilot names exist.
+
+The old token-only flow still works. A pilot created before passwords
+existed keeps their token and their scores, and adopts a password by
+registering the same name while holding that token.
+
+### Anti-cheat — what it does and does not do
+
+**You cannot verify a score from a client you do not control.** The only real
+verification is re-simulating the run server-side from an input trace, and
+this does not do that: the game is several thousand lines of JavaScript and
+the server is Go.
+
+What it does is make cheating cost something, removing the easy routes in
+roughly ascending order of effort to defeat:
+
+1. **A run must be opened before it can be submitted**, and each run can be
+   submitted once. Replaying a captured request stops working.
+2. **The server times the run itself.** A claimed 400-second campaign that
+   took eleven seconds of wall clock is rejected. This is the check the
+   physics bounds cannot make, because they only see the numbers the client
+   chose to send.
+3. **The submission is signed** with a secret issued at run start and never
+   present in the page source. Forging a request means reading it out of a
+   live session rather than reading the code.
+4. **Progress heartbeats are counted.** A long run that never once reported
+   being in flight did not happen the way it claims.
+
+Someone running a modified client can still defeat all four by playing
+slowly and lying at the end. That is inherent. The honest position is to say
+so rather than imply the leaderboard proves anything.
+
+`-require-runs` rejects any score not tied to an opened run, which closes the
+simplest bypass of all: not opening one. It is off by default so an older
+client keeps working.
+
+A rejected submission deliberately does **not** burn the run — a client bug
+or a mangled request would otherwise void a legitimate campaign, and without
+the secret an attacker gains nothing by retrying.
+
+### Legacy identity
 
 Registration mints a 256-bit bearer token and the server stores only its
 SHA-256. The client keeps the token in `localStorage`. There are no passwords
@@ -693,7 +760,7 @@ These are deliberate omissions from the vertical slice, not bugs:
   scale as crisply as the rest of the art.
 - The hull texture is one 12000×324 offscreen canvas (~15MB). Fine at this
   length; chunked lazy tiles if the level grows much past it.
-- **Score validation is not anti-cheat.** See the backend section above.
+- **Anti-cheat is defence in depth, not proof.** See the backend section.
 - **Pickup balance is unplayed.** Drop rates, the 40-point refill and the gun
   curves are first guesses; nobody has judged whether the run gets too strong
   too fast. They are all in `PICKUP` in `src/config.js`.

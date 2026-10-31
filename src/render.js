@@ -12,6 +12,7 @@ import { pickups, tint } from './pickups.js';
 import { livingParts, shellUp } from './boss.js';
 import { foes, SPEC as FOE_SPEC } from './foes.js';
 import { drawOrdnance } from './armory.js';
+import { drawPad } from './sequences.js';
 import { PICKUP } from './config.js';
 
 let scanlines = null;
@@ -125,7 +126,8 @@ export function drawWorld(ctx, game) {
   drawPickups(ctx);
   drawOrdnance(ctx);
   drawShots(ctx);
-  if (game.player.alive) drawShip(ctx, game.player);
+  drawPad(ctx, camX, camY);
+  if (game.player.alive) drawShip(ctx, game.player, game.seqTilt);
   drawParticles(ctx);
 
   ctx.restore();
@@ -313,7 +315,7 @@ function drawEngineGlow(g, p) {
 
 // ----------------------------------------------------------------- entities
 
-function drawShip(ctx, p) {
+function drawShip(ctx, p, seqTilt) {
   // the flip: scaleX sweeps -facing -> +facing through zero
   let sx = p.facing;
   if (p.flip > 0) {
@@ -326,7 +328,7 @@ function drawShip(ctx, p) {
   ctx.translate(Math.round(p.x), Math.round(p.y));
   // bank into vertical movement; the ship having a body makes the inertia
   // legible in a way a rigid sprite never does
-  ctx.rotate(clamp(p.vy / 230, -1, 1) * 0.26 * (sx < 0 ? -1 : 1));
+  ctx.rotate((seqTilt ?? clamp(p.vy / 230, -1, 1) * 0.26) * (sx < 0 ? -1 : 1));
   ctx.scale(sx, 1);
 
   if (p.invuln > 0 && Math.floor(p.invuln * 18) % 2 === 0) ctx.globalAlpha = 0.4;
@@ -528,6 +530,19 @@ function drawPickups(ctx) {
     switch (p.kind) {
       case 'coin':
         break;        // drawn above, before the casing
+      case 'goldbar': {  // an ingot, drawn with a little perspective
+        ctx.fillStyle = '#8a6a1e';
+        ctx.beginPath();
+        ctx.moveTo(-6, 2); ctx.lineTo(6, 2); ctx.lineTo(4, 5); ctx.lineTo(-4, 5);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = c;
+        ctx.beginPath();
+        ctx.moveTo(-5, -3); ctx.lineTo(5, -3); ctx.lineTo(6, 2); ctx.lineTo(-6, 2);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#fff3c4';
+        ctx.fillRect(-4, -2, 8, 1);
+        break;
+      }
       case 'coffin':  // a small casket: lid, body, clasp
         ctx.fillRect(-4, -5, 8, 2);
         ctx.fillRect(-3, -3, 6, 8);

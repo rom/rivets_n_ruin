@@ -91,6 +91,43 @@ func (m *Memory) PlayerByTokenHash(hash string) (*model.Player, error) {
 	return clonePlayer(m.players[id]), nil
 }
 
+func (m *Memory) PlayerByName(name string) (*model.Player, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	id, ok := m.byName[strings.ToLower(name)]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return clonePlayer(m.players[id]), nil
+}
+
+func (m *Memory) SetPassword(id, passHash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.players[id]
+	if !ok {
+		return ErrNotFound
+	}
+	p.PassHash = passHash
+	p.HasPass = passHash != ""
+	return nil
+}
+
+// Rotating the token invalidates the old one, which is what a fresh login
+// should do: signing in elsewhere signs you out here.
+func (m *Memory) SetToken(id, tokenHash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.players[id]
+	if !ok {
+		return ErrNotFound
+	}
+	delete(m.byToken, p.TokenHash)
+	p.TokenHash = tokenHash
+	m.byToken[tokenHash] = id
+	return nil
+}
+
 func (m *Memory) TouchPlayer(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -379,6 +416,7 @@ func (m *Memory) Stats() Stats {
 
 type snapshot struct {
 	Players []*model.Player   `json:"players"`
+	Pass    map[string]string `json:"pass"`
 	Tokens  map[string]string `json:"tokens"`
 	Scores  []*model.Score    `json:"scores"`
 	Mods    []*model.Mod      `json:"mods"`
@@ -388,10 +426,13 @@ type snapshot struct {
 // through cannot leave a half-written file where the data used to be.
 func (m *Memory) Snapshot(path string) error {
 	m.mu.RLock()
-	snap := snapshot{Tokens: map[string]string{}}
+	snap := snapshot{Tokens: map[string]string{}, Pass: map[string]string{}}
 	for _, p := range m.players {
 		snap.Players = append(snap.Players, p)
 		snap.Tokens[p.TokenHash] = p.ID
+		if p.PassHash != "" {
+			snap.Pass[p.ID] = p.PassHash
+		}
 	}
 	snap.Scores = append(snap.Scores, m.scores...)
 	for _, mod := range m.mods {
@@ -444,6 +485,12 @@ func (m *Memory) Load(path string) error {
 	for _, p := range snap.Players {
 		m.players[p.ID] = p
 		m.byName[strings.ToLower(p.Name)] = p.ID
+	}
+	for id, hash := range snap.Pass {
+		if p, ok := m.players[id]; ok {
+			p.PassHash = hash
+			p.HasPass = true
+		}
 	}
 	for hash, id := range snap.Tokens {
 		m.byToken[hash] = id
