@@ -64,7 +64,7 @@ function check(name, ok, detail) {
     playerX: window.game.player.x,
     playerFinite: Number.isFinite(window.game.player.x),
     state: window.game.state,
-    bgW: window.game.level.bg.width,
+    hullChunks: window.game.level.chunks.size,
   }));
 
   // How much of the playfield is actually painted?
@@ -94,7 +94,7 @@ function check(name, ok, detail) {
   check('world scrolls', after.camX - camBefore >= MIN_SCROLL_PX,
     `camera moved ${Math.round(after.camX - camBefore)}px (need ${MIN_SCROLL_PX})`);
   check('hull is drawn', ink >= MIN_INK_PCT, `${ink}% of the playfield inked (need ${MIN_INK_PCT}%)`);
-  check('hull bitmap built', after.bgW > 1000, `${after.bgW}px wide`);
+  check('hull chunks cached', after.hullChunks > 0, `${after.hullChunks} chunk(s)`);
   check('still playing', after.state === 'play', after.state);
   check('holds frame rate', fps >= 30, `${fps} fps`);
   check('no console errors', errors.length === 0, errors.join(' | ') || 'none');

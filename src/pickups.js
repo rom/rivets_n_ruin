@@ -10,7 +10,7 @@ import { makePool } from './pool.js';
 import { pointBlocked } from './level.js';
 import { sparks } from './particles.js';
 
-export const KINDS = ['shield', 'life', 'healthbar', 'gunspeed', 'gunblaze'];
+export const KINDS = ['shield', 'life', 'healthbar', 'gunspeed', 'gunblaze', 'coin', 'coffin'];
 
 // Weighted drop table. Shield refills are the backbone; an extra ship is the
 // rare one, because handing them out freely removes the run's whole tension.
@@ -32,8 +32,9 @@ function rollKind() {
   return 'shield';
 }
 
-export const pickups = makePool(28, () => ({
-  x: 0, y: 0, baseY: 0, vx: 0, kind: 'shield', life: 0, t: 0,
+// Sized for a boss death scattering coins from several kills at once.
+export const pickups = makePool(160, () => ({
+  x: 0, y: 0, baseY: 0, vx: 0, vy: 0, kind: 'shield', life: 0, maxLife: 1, t: 0,
 }));
 
 // Nudge a drop out of solid hull, so a pickup is never unreachable inside a
@@ -56,13 +57,46 @@ export function spawnPickup(game, x, y, kind = rollKind()) {
   p.baseY = sy;
   p.y = sy;
   p.vx = (Math.random() - 0.5) * PICKUP.drift;
+  p.vy = 0;
   p.kind = kind;
-  p.life = PICKUP.life;
+  p.life = kind === 'coin' ? PICKUP.coinLife
+    : kind === 'coffin' ? PICKUP.coffinLife
+      : PICKUP.life;
+  p.maxLife = p.life;
   p.t = Math.random() * 6;
   return p;
 }
 
 // Called when something is destroyed. Turrets are worth stopping for.
+// Scatters coins outward from a kill. They fly apart, slow down, and then
+// behave like any other pickup — so a good kill leaves a payday on screen
+// rather than a number ticking up somewhere.
+export function scatterCoins(game, x, y, count) {
+  for (let i = 0; i < count; i++) {
+    const p = spawnPickup(game, x, y, 'coin');
+    if (!p) return;
+    const a = Math.random() * Math.PI * 2;
+    const s = PICKUP.coinScatter * (0.35 + Math.random() * 0.8);
+    p.vx = Math.cos(a) * s;
+    p.vy = Math.sin(a) * s;
+  }
+}
+
+// Called wherever something is destroyed: coins always, a coffin rarely,
+// and the existing upgrade drops on their own roll.
+export function spoils(game, x, y, source) {
+  const [lo, hi] = PICKUP.coinsPerKill;
+  let n = lo + Math.floor(Math.random() * (hi - lo + 1));
+  if (source === 'turret') n += 2;
+  if (source === 'boss') n += 14;
+  scatterCoins(game, x, y, n);
+
+  if (Math.random() < PICKUP.coffinChance * (source === 'boss' ? 8 : 1)) {
+    spawnPickup(game, x + (Math.random() - 0.5) * 24, y, 'coffin');
+  }
+  return maybeDrop(game, x, y, source);
+}
+
 export function maybeDrop(game, x, y, source) {
   const chance = source === 'turret' ? PICKUP.dropFromTurret : PICKUP.dropFromInterceptor;
   if (Math.random() > chance) return null;
@@ -78,8 +112,17 @@ export function updatePickups(game, dt) {
 
     p.t += dt;
     p.x += p.vx * dt;
+    if (p.vy) {
+      // scattered coins fly apart and settle
+      p.baseY += p.vy * dt;
+      const d = Math.exp(-PICKUP.coinDrag * dt);
+      p.vx *= d;
+      p.vy *= d;
+      if (Math.abs(p.vy) < 2) p.vy = 0;
+    }
     p.baseY = clamp(p.baseY, FIELD_TOP + 8, FIELD_BOT - 8);
-    p.y = p.baseY + Math.sin(p.t * 2.2) * PICKUP.bob;
+    const bob = p.kind === 'coin' ? 4 : PICKUP.bob;
+    p.y = p.baseY + Math.sin(p.t * 2.2) * bob;
 
     // despawn well off-screen rather than hoarding pool slots
     if (p.x < game.cam.x - 140 || p.x > game.cam.x + VIEW_W + 140) {
@@ -112,10 +155,21 @@ export function updatePickups(game, dt) {
 // pickup tells you what it did.
 function collect(game, p) {
   const pl = game.player;
-  game.score += PICKUP.score;
   let label = '';
+  // Coins and coffins carry their own value; everything else pays the flat
+  // pickup score on top of its effect.
+  if (p.kind !== 'coin' && p.kind !== 'coffin') game.score += PICKUP.score;
 
   switch (p.kind) {
+    case 'coin':
+      game.score += PICKUP.coinValue;
+      game.coins = (game.coins || 0) + 1;
+      return;                       // no toast: coins are constant background
+    case 'coffin':
+      game.score += PICKUP.coffinValue;
+      game.coffins = (game.coffins || 0) + 1;
+      label = 'GOLD COFFIN  +' + PICKUP.coffinValue;
+      break;
     case 'shield':
       pl.shield = Math.min(pl.shieldMax, pl.shield + PICKUP.shieldRefill);
       label = 'SHIELDS REFILLED';
@@ -169,6 +223,8 @@ function collect(game, p) {
 
 export function tint(kind) {
   switch (kind) {
+    case 'coin': return '#ffd24a';
+    case 'coffin': return '#ffe88a';
     case 'shield': return '#4fd0e8';
     case 'life': return '#b4f4ff';
     case 'healthbar': return '#5fe08a';

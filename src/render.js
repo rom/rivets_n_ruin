@@ -5,13 +5,17 @@ import { interceptors } from './enemies.js';
 import { playerShots, enemyShots } from './projectiles.js';
 import { particles, lights } from './particles.js';
 import { hash2 } from './rng.js';
+import { hullChunk, warmChunks, CHUNK_W } from './level.js';
+import { renderScale, scaleGeneration } from './display.js';
 import { pickups, tint } from './pickups.js';
 import { livingParts, shellUp } from './boss.js';
+import { foes, SPEC as FOE_SPEC } from './foes.js';
 import { PICKUP } from './config.js';
 
 let scanlines = null;
 let vignette = null;
-let depth = null;          // vertical shading over the hull
+let crt = null;            // vignette + scanlines, combined, device-res
+let crtGen = -1;
 let glow = null;           // half-res bright pass
 let glowCtx = null;
 let blur = null;           // quarter-res, for the blur bounce
@@ -41,24 +45,6 @@ function buildOverlays() {
   vg.fillRect(0, 0, VIEW_W, FIELD_H);
   vignette = v;
 
-  // A vertical gradient over the hull: brighter through the middle, falling
-  // off toward the girders. Flat lighting is what made the old hull read as
-  // wallpaper rather than a surface.
-  const d = document.createElement('canvas');
-  d.width = 1; d.height = FIELD_H;
-  const dg = d.getContext('2d');
-  const dgrad = dg.createLinearGradient(0, 0, 0, FIELD_H);
-  dgrad.addColorStop(0, 'rgba(0,0,0,0.20)');
-  dgrad.addColorStop(0.055, 'rgba(0,0,0,0.42)');
-  dgrad.addColorStop(0.22, 'rgba(0,0,0,0.10)');
-  dgrad.addColorStop(0.5, 'rgba(96,126,156,0.06)');
-  dgrad.addColorStop(0.78, 'rgba(0,0,0,0.10)');
-  dgrad.addColorStop(0.945, 'rgba(0,0,0,0.42)');
-  dgrad.addColorStop(1, 'rgba(0,0,0,0.20)');
-  dg.fillStyle = dgrad;
-  dg.fillRect(0, 0, 1, FIELD_H);
-  depth = d;
-
   glow = document.createElement('canvas');
   glow.width = Math.round(VIEW_W * GLOW_SCALE);
   glow.height = Math.round(FIELD_H * GLOW_SCALE);
@@ -70,6 +56,38 @@ function buildOverlays() {
   blurCtx = blur.getContext('2d');
   blurCtx.imageSmoothingEnabled = true;
   glowCtx.imageSmoothingEnabled = true;
+}
+
+// Vignette and scanlines, rendered once per scale into a single bitmap sized
+// to the backing store. Scanline pitch follows the scale so the effect keeps
+// its apparent thickness instead of vanishing at high resolution.
+function crtOverlay() {
+  const scale = renderScale();
+  const gen = scaleGeneration();
+  if (crt && crtGen === gen) return crt;
+
+  const w = Math.round(VIEW_W * scale);
+  const h = Math.round(FIELD_H * scale);
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+
+  const grad = g.createRadialGradient(
+    w / 2, h / 2, Math.min(w, h) * 0.34,
+    w / 2, h / 2, Math.max(w, h) * 0.72,
+  );
+  grad.addColorStop(0, 'rgba(0,0,0,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.55)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, w, h);
+
+  const pitch = Math.max(2, Math.round(2 * scale));
+  g.fillStyle = 'rgba(0,0,0,0.18)';
+  for (let y = 1; y < h; y += pitch) g.fillRect(0, y, w, Math.max(1, pitch >> 1));
+
+  crt = c;
+  crtGen = gen;
+  return crt;
 }
 
 export function drawWorld(ctx, game) {
@@ -89,11 +107,10 @@ export function drawWorld(ctx, game) {
   ctx.fillStyle = COL.space;
   ctx.fillRect(0, 0, VIEW_W, FIELD_H);
 
-  // the hull itself: one blit from the pre-rendered strip
-  ctx.drawImage(game.level.bg, camX, 0, VIEW_W, FIELD_H, 0, camY, VIEW_W, FIELD_H);
+  // the hull: however many cached chunks cover the view
+  drawHull(ctx, game.level, camX, camY);
 
   // lighting on the surface, under everything that sits on it
-  drawDepth(ctx, camY);
   drawLights(ctx, camX, camY);
   drawBeacons(ctx, camX, camY);
 
@@ -101,6 +118,7 @@ export function drawWorld(ctx, game) {
 
   drawTurrets(ctx, game, camX);
   drawInterceptors(ctx, game);
+  drawFoes(ctx);
   if (game.boss) drawBoss(ctx, game.boss);
   drawPickups(ctx);
   drawShots(ctx);
@@ -115,10 +133,13 @@ export function drawWorld(ctx, game) {
   // bloom: re-draw only the bright things small, blur, add back
   drawBloom(ctx, game, camX, camY);
 
-  // CRT dressing
-  ctx.drawImage(vignette, 0, 0);
-  ctx.fillStyle = scanlines;
-  ctx.fillRect(0, 0, VIEW_W, FIELD_H);
+  // CRT dressing: vignette and scanlines are pre-combined into one bitmap at
+  // device resolution, so this is a single 1:1 blit rather than two
+  // full-screen passes resampled every frame.
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(crtOverlay(), 0, 0);
+  ctx.restore();
 
   if (game.flash > 0) {
     ctx.globalAlpha = Math.min(0.6, game.flash);
@@ -128,9 +149,28 @@ export function drawWorld(ctx, game) {
   }
 }
 
-function drawDepth(ctx, camY) {
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.drawImage(depth, 0, 0, 1, FIELD_H, 0, camY, VIEW_W, FIELD_H);
+// Chunks are rendered at the display scale, so the hull is as sharp as
+// everything else. Drawn with the transform temporarily reset to device
+// pixels so a chunk lands exactly on the pixel grid and tiles seamlessly —
+// at fractional scales, drawing them in logical units leaves hairline gaps.
+function drawHull(ctx, level, camX, camY) {
+  const scale = renderScale();
+  const gen = scaleGeneration();
+  const first = Math.floor(camX / CHUNK_W);
+  const last = Math.floor((camX + VIEW_W - 1) / CHUNK_W);
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  for (let i = first; i <= last; i++) {
+    if (i < 0 || i * CHUNK_W >= level.length) continue;
+    const canvas = hullChunk(level, i, scale, gen);
+    const dx = Math.round((i * CHUNK_W - camX) * scale);
+    const dy = Math.round(camY * scale);
+    ctx.drawImage(canvas, dx, dy);
+  }
+  ctx.restore();
+
+  warmChunks(level, camX, VIEW_W, scale, gen);
 }
 
 // Explosions and muzzle flashes light the plating around them.
@@ -414,13 +454,26 @@ function drawPickups(ctx) {
   for (let i = 0; i < pickups.count; i++) {
     const p = pickups.items[i];
     // flash out the last few seconds so an expiring pickup is obvious
-    if (p.life < PICKUP.blinkAt && Math.floor(p.life * 7) % 2 === 0) continue;
+    if (p.life < Math.min(PICKUP.blinkAt, p.maxLife * 0.3) && Math.floor(p.life * 7) % 2 === 0) continue;
 
     const c = tint(p.kind);
     const x = Math.round(p.x);
     const y = Math.round(p.y);
-    const h = PICKUP.size / 2;
 
+    // Coins are small, numerous and must not read as upgrades, so they skip
+    // the cased look entirely: a spinning disc, nothing more.
+    if (p.kind === 'coin') {
+      const w = 1 + Math.abs(Math.cos(p.t * 5)) * 3;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = c;
+      ctx.fillRect(x - w, y - 3, w * 2, 6);
+      ctx.fillStyle = '#fff6cf';
+      ctx.fillRect(x - w * 0.4, y - 2, Math.max(1, w * 0.8), 4);
+      ctx.globalCompositeOperation = 'source-over';
+      continue;
+    }
+
+    const h = PICKUP.size / 2;
     ctx.save();
     ctx.translate(x, y);
 
@@ -441,6 +494,14 @@ function drawPickups(ctx) {
 
     ctx.fillStyle = c;
     switch (p.kind) {
+      case 'coin':
+        break;        // drawn above, before the casing
+      case 'coffin':  // a small casket: lid, body, clasp
+        ctx.fillRect(-4, -5, 8, 2);
+        ctx.fillRect(-3, -3, 6, 8);
+        ctx.fillStyle = '#8a6a1e';
+        ctx.fillRect(-1, -1, 2, 4);
+        break;
       case 'shield':      // a shield outline
         ctx.fillRect(-3, -4, 6, 1);
         ctx.fillRect(-3, -4, 1, 4);
@@ -568,6 +629,75 @@ function drawBoss(ctx, b) {
 
   ctx.globalAlpha = 1;
   ctx.restore();
+}
+
+// Each attacker type has a silhouette you can name at a glance: a mine is
+// round and spiked, a lancer is a dart, an orbiter is a ring, a warder
+// carries a visible plate on the side you cannot hurt it from.
+function drawFoes(ctx) {
+  for (let i = 0; i < foes.count; i++) {
+    const f = foes.items[i];
+    const spec = FOE_SPEC[f.kind];
+    const lit = f.flash > 0;
+    ctx.save();
+    ctx.translate(Math.round(f.x), Math.round(f.y));
+
+    if (f.kind === 'mine') {
+      ctx.fillStyle = lit ? '#ffd24a' : '#3a3038';
+      ctx.beginPath(); ctx.arc(0, 0, spec.r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#e8434f'; ctx.lineWidth = 1.5;
+      for (let k = 0; k < 8; k++) {
+        const a = f.t * 1.2 + (k / 8) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * spec.r, Math.sin(a) * spec.r);
+        ctx.lineTo(Math.cos(a) * (spec.r + 4), Math.sin(a) * (spec.r + 4));
+        ctx.stroke();
+      }
+      ctx.fillStyle = Math.sin(f.t * 9) > 0 ? '#e8434f' : '#5a2228';
+      ctx.fillRect(-2, -2, 4, 4);
+    } else if (f.kind === 'lancer') {
+      ctx.scale(f.facing, 1);
+      const charging = f.state === 1;
+      ctx.fillStyle = lit ? '#ffd24a' : charging ? '#c4502a' : '#3e3a44';
+      ctx.beginPath();
+      ctx.moveTo(-15, 0); ctx.lineTo(7, -7); ctx.lineTo(13, 0); ctx.lineTo(7, 7);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = charging ? '#ffd24a' : '#6e6a78';
+      ctx.fillRect(7, -1, 9, 2);
+      if (!charging) {   // telegraph: a lengthening aim line
+        ctx.globalAlpha = 0.35 + 0.3 * Math.sin(f.t * 14);
+        ctx.fillStyle = '#e8434f';
+        ctx.fillRect(-15 - f.t * 70, -1, f.t * 70, 1);
+        ctx.globalAlpha = 1;
+      }
+    } else if (f.kind === 'orbiter') {
+      ctx.rotate(f.t * 1.4);
+      ctx.strokeStyle = lit ? '#ffd24a' : '#4e6472';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(0, 0, spec.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#2a3a44';
+      ctx.beginPath(); ctx.arc(0, 0, spec.r - 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#4fd0e8';
+      for (let k = 0; k < 4; k++) {
+        const a = (k / 4) * Math.PI * 2;
+        ctx.fillRect(Math.cos(a) * spec.r - 1.5, Math.sin(a) * spec.r - 1.5, 3, 3);
+      }
+    } else {
+      ctx.scale(f.facing, 1);
+      ctx.fillStyle = lit ? '#ffd24a' : '#3f4a3a';
+      ctx.beginPath();
+      ctx.moveTo(-13, 0); ctx.lineTo(-4, -10); ctx.lineTo(9, -6);
+      ctx.lineTo(9, 6); ctx.lineTo(-4, 10); ctx.closePath(); ctx.fill();
+      // the plate, on the side shots bounce off
+      ctx.fillStyle = '#9fb0bd';
+      ctx.fillRect(10, -11, 4, 22);
+      ctx.fillStyle = '#d7e8ef';
+      ctx.fillRect(10, -11, 4, 2);
+      ctx.fillStyle = '#9ad94e';
+      ctx.fillRect(-2, -3, 6, 6);
+    }
+    ctx.restore();
+  }
 }
 
 function drawShots(ctx) {

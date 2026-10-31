@@ -88,7 +88,7 @@ export function updatePlayer(p, game, dt) {
     const mx = p.x + p.facing * 14;
 
     for (const off of [-4, 4]) {
-      fire(playerShots, mx, p.y + off, p.facing * speed + inherit, 0, 1.7, 1, 2);
+      fire(playerShots, mx, p.y + off, p.facing * speed + inherit, 0, 1.35, 1, 2);
     }
     for (const a of PICKUP.blazeAngles[p.gunBlaze]) {
       for (const sign of [-1, 1]) {
