@@ -1,5 +1,5 @@
 import {
-  TURRET, INTERCEPTOR, VIEW_W, FIELD_TOP, FIELD_BOT, LEVEL_LEN, APRON, clamp,
+  TURRET, INTERCEPTOR, VIEW_W, FIELD_TOP, FIELD_BOT, APRON, clamp,
 } from './config.js';
 import { makePool } from './pool.js';
 import { enemyShots, fire } from './projectiles.js';
@@ -27,6 +27,7 @@ export function updateTurrets(game, dt) {
     if (t.dead) continue;
     const dx = p.x - t.x;
     if (Math.abs(dx) > TURRET.wake) continue;
+    const spec = game.level.spec;
 
     const dy = p.y - t.y;
     const dist = Math.hypot(dx, dy);
@@ -43,14 +44,14 @@ export function updateTurrets(game, dt) {
         t.burstTimer = TURRET.burstGap;
         t.burstLeft--;
         shootTurret(t, p);
-        if (t.burstLeft === 0) t.cd = TURRET.cooldown;
+        if (t.burstLeft === 0) t.cd = spec.turretCooldown;
       }
       continue;
     }
 
     t.cd -= dt;
     const aligned = Math.abs(((Math.atan2(dy, dx) - t.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < TURRET.aimTol;
-    if (t.cd <= 0 && inArc && dist < TURRET.range && aligned && game.state === 'play' && p.alive) {
+    if (t.cd <= 0 && inArc && dist < spec.turretRange && aligned && game.state === 'play' && p.alive) {
       t.burstLeft = TURRET.burst;
       t.burstTimer = 0;
     }
@@ -84,7 +85,7 @@ export function spawnInterceptor(game) {
   e.baseY = FIELD_TOP + 30 + Math.random() * (FIELD_BOT - FIELD_TOP - 60);
   e.y = e.baseY;
   e.t = Math.random() * 6;
-  e.hp = INTERCEPTOR.hp;
+  e.hp = game.level.spec.interceptorHp;
   e.fireCd = 0.35 + Math.random() * 0.6;
 }
 
@@ -94,16 +95,16 @@ export function updateInterceptors(game, dt) {
   if (game.state === 'play') {
     game.spawnCd -= dt;
     if (game.spawnCd <= 0) {
-      game.spawnCd = INTERCEPTOR.spawnEvery * (0.75 + Math.random() * 0.6);
+      game.spawnCd = game.level.spec.interceptorSpawn * (0.75 + Math.random() * 0.6);
       // quiet aprons at both ends of the hull
-      if (p.x > APRON * 0.6 && p.x < LEVEL_LEN - APRON * 0.6) spawnInterceptor(game);
+      if (p.x > APRON * 0.6 && p.x < game.level.length - APRON * 0.6) spawnInterceptor(game);
     }
   }
 
   for (let i = interceptors.count - 1; i >= 0; i--) {
     const e = interceptors.items[i];
     e.t += dt;
-    e.x += e.dirX * INTERCEPTOR.speed * dt;
+    e.x += e.dirX * game.level.spec.interceptorSpeed * dt;
 
     // drift the weave centreline toward the player
     const want = p.y;

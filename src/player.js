@@ -1,5 +1,5 @@
 import {
-  SHIP, PICKUP, FIELD_TOP, FIELD_BOT, LEVEL_LEN, clamp,
+  SHIP, PICKUP, FIELD_TOP, FIELD_BOT, clamp,
 } from './config.js';
 import { axisX, axisY, held } from './input.js';
 import { obstaclesNear, pointBlocked } from './level.js';
@@ -22,6 +22,13 @@ export function makePlayer() {
     lives: SHIP.lives,
     gunSpeed: 0,                 // gunspeed pickups: faster fire
     gunBlaze: 0,                 // gunblaze pickups: wider spread
+    gunCap: PICKUP.gunLevels,    // clearing a hull raises this
+    // Per-run enhancements live here rather than mutating the shared config
+    // objects, so starting a new run really does give you a stock ship.
+    accelMul: 1,
+    maxVXBonus: 0,
+    maxVYBonus: 0,
+    bulletBonus: 0,
     thrustT: 0,
     alive: true,
   };
@@ -39,9 +46,9 @@ export function updatePlayer(p, game, dt) {
   // --- horizontal: thrust along facing, hard brake into a flip when reversing
   if (ix !== 0) {
     if (ix === p.facing) {
-      p.vx += ix * SHIP.accelX * dt;
+      p.vx += ix * SHIP.accelX * p.accelMul * dt;
     } else {
-      p.vx += ix * SHIP.brakeX * dt;
+      p.vx += ix * SHIP.brakeX * p.accelMul * dt;
       if (p.vx * p.facing <= 0 && p.flip <= 0) {
         p.facing = ix;
         p.flip = SHIP.flipTime;
@@ -50,14 +57,16 @@ export function updatePlayer(p, game, dt) {
     }
   }
   p.vx *= Math.exp(-SHIP.dragX * dt);
-  p.vx = clamp(p.vx, -SHIP.maxVX, SHIP.maxVX);
+  const maxVX = SHIP.maxVX + p.maxVXBonus;
+  p.vx = clamp(p.vx, -maxVX, maxVX);
 
   // --- vertical: snappier, settles quickly
-  p.vy += iy * SHIP.accelY * dt;
+  p.vy += iy * SHIP.accelY * p.accelMul * dt;
   p.vy *= Math.exp(-SHIP.dragY * dt);
-  p.vy = clamp(p.vy, -SHIP.maxVY, SHIP.maxVY);
+  const maxVY = SHIP.maxVY + p.maxVYBonus;
+  p.vy = clamp(p.vy, -maxVY, maxVY);
 
-  p.x = clamp(p.x + p.vx * dt, 14, LEVEL_LEN - 14);
+  p.x = clamp(p.x + p.vx * dt, 14, game.level.length - 14);
   p.y += p.vy * dt;
 
   resolveHull(p, game);
@@ -73,7 +82,7 @@ export function updatePlayer(p, game, dt) {
     // gunspeed shortens the interval; gunblaze adds mirrored angled barrels
     p.fireCd = SHIP.fireRate * PICKUP.speedScale[p.gunSpeed];
 
-    const speed = SHIP.bulletSpeed;
+    const speed = SHIP.bulletSpeed + p.bulletBonus;
     const inherit = p.vx * 0.3;
     const mx = p.x + p.facing * 14;
 
@@ -159,7 +168,7 @@ export function respawn(p, game) {
   p.alive = true;
   const mid = (FIELD_TOP + FIELD_BOT) / 2;
   for (let back = 0; back < 1400; back += 40) {
-    const x = clamp(p.x - p.facing * back, 40, LEVEL_LEN - 40);
+    const x = clamp(p.x - p.facing * back, 40, game.level.length - 40);
     for (const y of [mid, mid - 60, mid + 60, mid - 110, mid + 110]) {
       if (!blockedBox(game.level, x, y)) { p.x = x; p.y = y; return; }
     }

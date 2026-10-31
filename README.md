@@ -12,14 +12,30 @@ back. The hull is solid. Hitting it costs you.
 ## Running it
 
 ```bash
-go run ./cmd/server
+make run
 ```
 
 Then open <http://localhost:8000>. One process serves both the game and the
 backend API, so there is one thing to run and no CORS to think about.
 
-Flags: `-addr` (pass `0.0.0.0:8000` to reach it from another device), `-dir`,
-`-data` (snapshot path), `-save-interval`, `-rate-limit`, `-rate-burst`, `-v`.
+`make` on its own lists every target. The useful ones:
+
+| Target | Does |
+| --- | --- |
+| `make run` | Game + backend. `ADDR=0.0.0.0:8000 make run` to expose it |
+| `make check` | Everything CI would: gofmt, vet, race tests, JS syntax |
+| `make test` / `test-race` | Go tests |
+| `make build` / `dist` | Binary / self-contained release tree |
+| `make icons` | Regenerate the favicon |
+
+Server flags: `-addr`, `-dir`, `-data`, `-save-interval`, `-rate-limit`,
+`-rate-burst`, `-v`.
+
+> **A note on `node --check`.** It reports success on a `.js` file containing ES
+> module syntax even when the file is genuinely unparseable — it only diagnoses
+> correctly when the extension is `.mjs`. Every client module here is ESM in a
+> `.js` file, so checking them directly is a gate that cannot fail. `make
+> js-check` copies to `.mjs` first. If you add your own check, do the same.
 
 The game has no build step and no client dependencies — plain ES modules and
 canvas. The server is Go stdlib only. **The game is fully playable with the
@@ -35,14 +51,43 @@ backend down**; you lose the leaderboard, not the game.
 | `Enter` | Launch / restart |
 | `P` / `Esc` | Pause |
 | `M` | Mute / unmute |
+| `T` | Next tune |
 | `N` | Rename your pilot (title screen) |
 | `R` | Restart mid-run |
 
 ## The run
 
-Fly to the far end of the hull, turn around, fly back to the dock. The HUD's
-progress bar flips from `OUTBOUND` to `RETURN RUN` at the turn. Completing both
-legs scores a time bonus; dying three times ends it.
+Three hulls, flown back to back. Each one is longer, denser and better defended
+than the last, and each is named for a metal — Uridium's stage-naming ritual.
+
+| Hull | Length | Turret HP | Interceptors | Tune |
+| --- | --- | --- | --- | --- |
+| **ARGENTUM** — patrol hull | 12,000px | 3 | 172px/s, every 1.5s | DROSS |
+| **OSMIUM** — line hull | 14,500px | 4 | 196px/s, every 1.2s | QUENCH |
+| **TANTALUM** — flagship hull | 17,000px | 5 | 220px/s, every 0.98s | OVERDRIVE |
+
+On each hull: fly to the far end, turn around, fly back to the dock. Both legs
+scores a time bonus. Dying out of ships ends the run wherever you are.
+
+### The refit
+
+Clearing a hull permanently upgrades the ship for the rest of the run, so the
+difficulty curve is met with a power curve rather than just better flying:
+
+| | Per hull cleared |
+| --- | --- |
+| Shield maximum | +45 |
+| Acceleration | ×1.09 |
+| Top speed | +24 horizontal, +18 vertical |
+| Muzzle velocity | +50 |
+| Gun mounts | +1 to the **cap** on both gunspeed and gunblaze |
+| Guns | +1 free level of each |
+| Hangar | +1 ship |
+
+By TANTALUM you are flying a markedly different craft from the one that
+launched: 190 shield, 19% more thrust, five gun mounts. Everything is held on
+the player object rather than mutating shared config, so a restart genuinely
+gives you a stock ship.
 
 ## What's in this slice
 
@@ -124,8 +169,26 @@ step falling inside the next 120ms against `ctx.currentTime`. Driving it from
 `requestAnimationFrame` instead would jitter audibly, because rAF is tied to the
 display and the audio clock is not.
 
+### Tunes
+
+Four of them. `T` cycles; each hull also selects its own, so the score tracks
+where you are in the campaign unless you override it.
+
+| Tune | Character |
+| --- | --- |
+| **DROSS** | D phrygian, 152 BPM — the default driver |
+| **QUENCH** | A aeolian, 126 BPM, half time — lower, heavier |
+| **OVERDRIVE** | E dorian, 174 BPM, double time — relentless |
+| **VACUUM** | D aeolian, 104 BPM — sparse, drifting |
+
+A tune is pure data in `TUNES` in `src/music.js`: tempo, root, mode, chord
+movement, drum masks and lead shape. Adding a fifth is adding an entry, not
+code. Switches land on the next bar line so a change never chops a phrase in
+half, but the UI reports your selection immediately rather than waiting.
+
 Audio cannot start before a user gesture (browsers forbid it), so the context is
-created on your first keypress. Mute is `M` and persists across reloads.
+created on your first keypress. Mute is `M`; both it and your tune choice
+persist across reloads.
 
 ## Backend
 
@@ -154,6 +217,13 @@ reports each pilot's progress along the hull.
 | `GET` | `/api/mods/{id}/top` | — | that mod's leaderboard |
 | `POST` | `/api/presence` | yes | heartbeat while flying |
 | `GET` | `/api/presence` | — | who is flying right now |
+
+### High scores persist against your pilot, not your browser
+
+The backend owns your best score, so it follows the pilot across machines and
+survives a cleared `localStorage`. The browser keeps a cached copy purely so a
+number still shows when the backend is unreachable. On connect the two are
+reconciled and the higher wins.
 
 ### Identity
 
@@ -195,6 +265,11 @@ per-window (day, week, all time).
 **73.9 seconds** — any faster "completed" run is rejected outright. Point totals
 are checked against a ceiling computed from the run's duration and the scoring
 rules.
+
+The campaign is modelled hull by hull, including the fact that the ship gets
+faster with each refit — a later hull can legitimately be flown quicker than the
+first, and a bound that ignored that would reject honest runs. Three hulls out
+and back cannot be done in under **249 seconds**.
 
 **These are plausibility bounds, not anti-cheat.** They stop someone curling a
 score of 10⁹ onto the board. They do not stop anyone who reads the rules and
@@ -241,6 +316,8 @@ src/net.js        backend client; degrades to offline play
 src/mods.js       mod loading and config overrides
 src/projectiles.js src/particles.js src/camera.js src/rng.js src/input.js
 
+Makefile          make, for the list of targets
+tools/make_icons.py  regenerates favicon.ico
 cmd/server/       the binary: static files + API
 internal/model/   shared types
 internal/store/   Store interface, in-memory implementation, snapshots
@@ -262,8 +339,10 @@ These are deliberate omissions from the vertical slice, not bugs:
   obvious next system — the single forward cannon is a placeholder for it.
 - **No boss, no landing sequence.** Uridium ends each level with a landing
   minigame; the dock here is just a position.
-- **One hull.** Stage names (ARGENTUM, OSMIUM, TANTALUM…) are the planned way to
-  carry Uridium's metal-naming ritual across a campaign.
+- **The refit curve is unplayed.** Three hulls and the per-hull upgrades are
+  first guesses; whether the ship outgrows the difficulty is exactly the thing
+  only playing will tell you. All of it is in `LEVELS` and `LEVEL_UP` in
+  `src/config.js`.
 - **HUD text uses the system monospace font**, not a bitmap font, so it doesn't
   scale as crisply as the rest of the art.
 - The hull texture is one 12000×324 offscreen canvas (~15MB). Fine at this

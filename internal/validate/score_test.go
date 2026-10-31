@@ -6,12 +6,50 @@ import (
 )
 
 func TestMinCompletionSec(t *testing.T) {
-	got := MinCompletionSec()
-	// ~22.9k px of travel at 310 px/s. Sanity-bound it so a tuning change
-	// that makes this absurd fails here rather than silently letting
-	// impossible runs onto the board.
-	if got < 60 || got > 120 {
-		t.Fatalf("minimum completion %.1fs is outside the plausible 60-120s band", got)
+	one := MinCompletionSec(1)
+	if one < 60 || one > 120 {
+		t.Fatalf("one-hull minimum %.1fs is outside the plausible 60-120s band", one)
+	}
+	// More hulls must take strictly longer, even though the ship speeds up.
+	prev := one
+	for n := 2; n <= NumLevels(); n++ {
+		got := MinCompletionSec(n)
+		if got <= prev {
+			t.Fatalf("minimum for %d hulls (%.1fs) is not greater than for %d (%.1fs)", n, got, n-1, prev)
+		}
+		prev = got
+	}
+	// Out-of-range inputs clamp rather than panic.
+	if MinCompletionSec(0) != one {
+		t.Fatal("levels=0 should be treated as 1")
+	}
+	if MinCompletionSec(99) != MinCompletionSec(NumLevels()) {
+		t.Fatal("levels beyond the campaign should clamp")
+	}
+}
+
+// A full campaign accumulates score across hulls while its clock keeps
+// running; the ceiling has to admit that or every finished run is rejected.
+func TestFullCampaignAccepted(t *testing.T) {
+	s := Submission{Points: 41892, TimeSec: 300, Turrets: 60, Completed: true, Levels: 3}
+	if err := Score(s); err != nil {
+		t.Fatalf("rejected a legitimate three-hull campaign: %v", err)
+	}
+}
+
+func TestCampaignCompletionBoundary(t *testing.T) {
+	min := MinCompletionSec(3)
+	if err := Score(Submission{Points: 40000, TimeSec: min - 1, Completed: true, Levels: 3}); err == nil {
+		t.Fatal("accepted a three-hull campaign faster than physically possible")
+	}
+	if err := Score(Submission{Points: 40000, TimeSec: min + 1, Completed: true, Levels: 3}); err != nil {
+		t.Fatalf("rejected a campaign just over the minimum: %v", err)
+	}
+}
+
+func TestTooManyLevelsRejected(t *testing.T) {
+	if err := Score(Submission{Points: 10, TimeSec: 100, Levels: 99}); err == nil {
+		t.Fatal("accepted more hulls than the campaign has")
 	}
 }
 
@@ -64,7 +102,7 @@ func TestScoreRejectsImpossibleRuns(t *testing.T) {
 // The boundary is the interesting part: one tick under the physical minimum
 // must fail, one tick over must pass.
 func TestCompletionBoundary(t *testing.T) {
-	min := MinCompletionSec()
+	min := MinCompletionSec(1)
 	if err := Score(Submission{Points: 9000, TimeSec: min - 0.1, Completed: true}); err == nil {
 		t.Fatal("accepted a completion just under the physical minimum")
 	}

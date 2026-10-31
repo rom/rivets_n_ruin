@@ -18,14 +18,15 @@ import (
 )
 
 // Mirrors of the client's src/config.js. If the game's tuning changes, these
-// move with it, and ScoreRules below goes stale in the player's favour.
+// move with it, and the bounds below go stale in the player's favour.
 const (
-	MaxVX        = 310.0
-	LevelLen     = 12000.0
-	Apron        = 560.0
-	TurnaroundAt = LevelLen - Apron*0.55
-	FinishAt     = Apron * 0.55
-	StartX       = 180.0
+	BaseMaxVX = 310.0
+	Apron     = 560.0
+	StartX    = 180.0
+
+	// LEVEL_UP.maxVXAdd: the ship gets faster with every hull cleared, so a
+	// later hull can legitimately be flown quicker than the first.
+	MaxVXPerLevel = 24.0
 
 	BonusTurnaround = 2500
 	BonusComplete   = 5000
@@ -34,11 +35,11 @@ const (
 	PointsTurret    = 150
 	PointsIntercept = 100
 
-	// Interceptors spawn on INTERCEPTOR.spawnEvery * (0.75..1.35).
-	FastestSpawnInterval = 1.5 * 0.75
+	// Interceptors spawn on spawnEvery * (0.75..1.35); TANTALUM is fastest.
+	FastestSpawnInterval = 0.98 * 0.75
 
-	// Generous allowance for turret count across seeds.
-	MaxTurretsPerHull = 40
+	// Generous allowance for turret count on any one hull.
+	MaxTurretsPerHull = 45
 
 	// Pickups. At most one drops per kill, and the richest outcome is a
 	// lifesaver collected at maximum lives: its own score plus the 500
@@ -48,13 +49,38 @@ const (
 	MaxPerPickup   = PointsPickup + MaxPickupBonus
 )
 
-// MinCompletionSec is the fastest a full out-and-back run can physically be
-// flown: the whole distance at maximum velocity, with no acceleration and no
-// dodging. Nothing legitimate beats it.
-func MinCompletionSec() float64 {
-	outbound := TurnaroundAt - StartX
-	inbound := TurnaroundAt - FinishAt
-	return (outbound + inbound) / MaxVX
+// HullLengths mirrors LEVELS[].length in src/config.js.
+var HullLengths = []float64{12000, 14500, 17000}
+
+// NumLevels is how many hulls a full campaign runs.
+func NumLevels() int { return len(HullLengths) }
+
+// minHullSec is the fastest hull n can be flown out and back, at the top
+// speed the ship has by the time it gets there.
+func minHullSec(n int) float64 {
+	length := HullLengths[n]
+	turnaround := length - Apron*0.55
+	finish := Apron * 0.55
+	outbound := turnaround - StartX
+	inbound := turnaround - finish
+	speed := BaseMaxVX + MaxVXPerLevel*float64(n)
+	return (outbound + inbound) / speed
+}
+
+// MinCompletionSec is the fastest a campaign of the given number of hulls can
+// physically be flown. Nothing legitimate beats it.
+func MinCompletionSec(levels int) float64 {
+	if levels < 1 {
+		levels = 1
+	}
+	if levels > len(HullLengths) {
+		levels = len(HullLengths)
+	}
+	total := 0.0
+	for i := 0; i < levels; i++ {
+		total += minHullSec(i)
+	}
+	return total
 }
 
 // Submission is the untrusted payload.
@@ -64,23 +90,44 @@ type Submission struct {
 	Turrets   int
 	Deaths    int
 	Completed bool
+	Levels    int // hulls reached this run; 0 is treated as 1
+}
+
+func (s Submission) levels() int {
+	if s.Levels < 1 {
+		return 1
+	}
+	if s.Levels > len(HullLengths) {
+		return len(HullLengths)
+	}
+	return s.Levels
 }
 
 // MaxPlausiblePoints is the ceiling for a run of the given shape, with slack.
 func MaxPlausiblePoints(s Submission) int {
+	n := s.levels()
 	total := 0
-	if s.TimeSec >= MinCompletionSec() {
-		total += BonusTurnaround
-	}
+
+	// Every hull cleared pays a turnaround bonus, and every hull after the
+	// first implies the one before it was finished.
+	total += BonusTurnaround * n
 	if s.Completed {
-		total += BonusComplete
-		if bonus := (TimeBonusGrace - s.TimeSec) * TimeBonusRate; bonus > 0 {
-			total += int(bonus)
+		total += BonusComplete * n
+		// The time bonus is awarded per hull against that hull's own clock,
+		// which is never longer than the whole run.
+		if bonus := (TimeBonusGrace - s.TimeSec/float64(n)) * TimeBonusRate; bonus > 0 {
+			total += int(bonus) * n
 		}
+	} else if n > 1 {
+		total += BonusComplete * (n - 1)
+		total += int(TimeBonusGrace*TimeBonusRate) * (n - 1)
 	}
-	kills := MaxTurretsPerHull + int(math.Ceil(s.TimeSec/FastestSpawnInterval)+4)
-	total += PointsTurret * MaxTurretsPerHull
-	total += PointsIntercept * (kills - MaxTurretsPerHull)
+
+	turrets := MaxTurretsPerHull * n
+	interceptors := int(math.Ceil(s.TimeSec/FastestSpawnInterval) + 4)
+	kills := turrets + interceptors
+	total += PointsTurret * turrets
+	total += PointsIntercept * interceptors
 	// One pickup per kill at most, each worth up to MaxPerPickup.
 	total += MaxPerPickup * kills
 	return total + 1000 // slack for tuning drift
@@ -98,16 +145,23 @@ func Score(s Submission) error {
 		return fmt.Errorf("time of %.0fs exceeds the six-hour ceiling", s.TimeSec)
 	case s.Turrets < 0:
 		return fmt.Errorf("turret count must not be negative")
-	case s.Turrets > MaxTurretsPerHull:
-		return fmt.Errorf("turret count %d exceeds %d, the most any hull carries", s.Turrets, MaxTurretsPerHull)
+	case s.Levels < 0:
+		return fmt.Errorf("level count must not be negative")
+	case s.Levels > len(HullLengths):
+		return fmt.Errorf("level count %d exceeds the %d hulls in the campaign", s.Levels, len(HullLengths))
+	case s.Turrets > MaxTurretsPerHull*len(HullLengths):
+		return fmt.Errorf("turret count %d exceeds %d, the most a full campaign carries",
+			s.Turrets, MaxTurretsPerHull*len(HullLengths))
 	case s.Deaths < 0:
 		return fmt.Errorf("death count must not be negative")
 	}
 
-	if s.Completed && s.TimeSec < MinCompletionSec() {
-		return fmt.Errorf(
-			"completed in %.1fs but the hull cannot be flown out and back in under %.1fs at full throttle",
-			s.TimeSec, MinCompletionSec())
+	if s.Completed {
+		if min := MinCompletionSec(s.levels()); s.TimeSec < min {
+			return fmt.Errorf(
+				"completed %d hull(s) in %.1fs, but they cannot be flown out and back in under %.1fs at full throttle",
+				s.levels(), s.TimeSec, min)
+		}
 	}
 	if max := MaxPlausiblePoints(s); s.Points > max {
 		return fmt.Errorf("score %d exceeds the maximum %d attainable in %.1fs", s.Points, max, s.TimeSec)

@@ -1,5 +1,5 @@
 import {
-  FIELD_TOP, FIELD_BOT, FIELD_H, LEVEL_LEN, RIM, APRON, COL,
+  FIELD_TOP, FIELD_BOT, FIELD_H, RIM, APRON, COL,
 } from './config.js';
 import { mulberry32, rr, ri, hash2 } from './rng.js';
 
@@ -12,13 +12,13 @@ const PLATE_H = 36;
 // Obstacle patterns, chosen by a seeded roll. Every pattern leaves a
 // navigable corridor; the x-gap that follows is always wide enough to
 // reposition vertically at cruise speed.
-function layout(r) {
+function layout(r, spec) {
   const obstacles = [];
   const turrets = [];
   let advance = 0;
 
   const roll = r();
-  if (roll < 0.13) {
+  if (roll < spec.clearChance) {
     // clear run — the breathing room that makes the dense parts read
   } else if (roll < 0.33) {
     const w = rr(r, 64, 132), h = rr(r, 52, 136);
@@ -64,22 +64,26 @@ function layout(r) {
   return { obstacles, turrets, advance };
 }
 
-export function buildLevel(seed) {
-  const r = mulberry32(seed);
+// Builds one hull from a level spec (see LEVELS in config.js). Everything
+// that varies between hulls — length, obstacle density, turret toughness —
+// comes from the spec, so the difficulty curve is data, not branches.
+export function buildLevel(spec) {
+  const r = mulberry32(spec.seed);
+  const LEN = spec.length;
   const obstacles = [];
   const turretSpots = [];
 
   let x = APRON;
-  while (x < LEVEL_LEN - APRON - 340) {
-    const { obstacles: obs, turrets: tur, advance } = layout(r);
+  while (x < LEN - APRON - 340) {
+    const { obstacles: obs, turrets: tur, advance } = layout(r, spec);
     for (const o of obs) obstacles.push({ ...o, x: o.x + x });
     for (const t of tur) turretSpots.push({ ...t, x: t.x + x });
-    x += advance + rr(r, 155, 330);
+    x += advance + rr(r, 155, 330) * spec.gapScale;
   }
 
   // Rim-mounted turrets, sprinkled along the girders.
   let tx = rr(r, 900, 1500);
-  while (tx < LEVEL_LEN - APRON) {
+  while (tx < LEN - APRON) {
     const onTop = r() < 0.5;
     turretSpots.push({ x: tx, y: onTop ? FIELD_TOP : FIELD_BOT, dir: onTop ? 1 : -1 });
     tx += rr(r, 620, 1250);
@@ -93,7 +97,7 @@ export function buildLevel(seed) {
     .map((t) => ({
       x: t.x, y: t.y, dir: t.dir,
       angle: t.dir * Math.PI / 2,
-      hp: 3, dead: false,
+      hp: spec.turretHp, dead: false,
       cd: Math.random() * 0.8,
       burstLeft: 0, burstTimer: 0,
     }));
@@ -111,7 +115,12 @@ export function buildLevel(seed) {
     }
   }
 
-  return { obstacles, turrets, buckets, bg: renderHull(obstacles), length: LEVEL_LEN };
+  return {
+    obstacles, turrets, buckets,
+    bg: renderHull(obstacles, LEN),
+    length: LEN,
+    spec,
+  };
 }
 
 export function obstaclesNear(level, x0, x1) {
@@ -138,20 +147,20 @@ export function pointBlocked(level, x, y) {
 // The whole hull is drawn once into an offscreen canvas and then blitted
 // per frame. 12000x324 is ~15MB and ~25k fill ops, a one-time ~200ms cost;
 // chunked lazy tiles are the move if the level grows much past this.
-function renderHull(obstacles) {
+function renderHull(obstacles, LEN) {
   const c = document.createElement('canvas');
-  c.width = LEVEL_LEN;
+  c.width = LEN;
   c.height = FIELD_H;
   const g = c.getContext('2d');
 
   const tones = ['#1d2128', '#21262d', '#252a32', '#282e36', '#1f242b', '#262b33'];
 
   g.fillStyle = COL.hullBase;
-  g.fillRect(0, 0, LEVEL_LEN, FIELD_H);
+  g.fillRect(0, 0, LEN, FIELD_H);
 
   // Plating: one quad per plate, seam on two sides, rivets at the corners.
   for (let py = 0; py < FIELD_H; py += PLATE_H) {
-    for (let px = 0; px < LEVEL_LEN; px += PLATE_W) {
+    for (let px = 0; px < LEN; px += PLATE_W) {
       const gx = (px / PLATE_W) | 0;
       const gy = (py / PLATE_H) | 0;
       const n = hash2(gx, gy);
@@ -208,10 +217,10 @@ function renderHull(obstacles) {
   for (const [cy, th] of [[FIELD_TOP + 46, 3], [FIELD_H / 2 - 1, 4], [FIELD_BOT - 50, 3]]) {
     g.fillStyle = COL.edgeLo;
     g.globalAlpha = 0.5;
-    g.fillRect(0, cy, LEVEL_LEN, th);
+    g.fillRect(0, cy, LEN, th);
     g.globalAlpha = 0.18;
     g.fillStyle = COL.hullHi;
-    g.fillRect(0, cy, LEVEL_LEN, 1);
+    g.fillRect(0, cy, LEN, 1);
     g.globalAlpha = 1;
   }
 
@@ -219,16 +228,16 @@ function renderHull(obstacles) {
   for (const top of [true, false]) {
     const y = top ? 0 : FIELD_BOT;
     g.fillStyle = '#191d24';
-    g.fillRect(0, y, LEVEL_LEN, RIM);
+    g.fillRect(0, y, LEN, RIM);
     g.fillStyle = COL.hullMid;
-    g.fillRect(0, top ? y + 3 : y + 3, LEVEL_LEN, RIM - 7);
+    g.fillRect(0, top ? y + 3 : y + 3, LEN, RIM - 7);
     // inner lip — bright, so the edge of the playfield is unmistakable
     g.fillStyle = COL.edgeHi;
     g.globalAlpha = 0.5;
-    g.fillRect(0, top ? y + RIM - 1 : y, LEVEL_LEN, 1);
+    g.fillRect(0, top ? y + RIM - 1 : y, LEN, 1);
     g.globalAlpha = 1;
     g.fillStyle = COL.rivet;
-    for (let rx = 6; rx < LEVEL_LEN; rx += 16) {
+    for (let rx = 6; rx < LEN; rx += 16) {
       g.globalAlpha = 0.35 + hash2(rx, top ? 1 : 2) * 0.35;
       g.fillRect(rx, top ? y + 6 : y + 7, 3, 3);
     }
