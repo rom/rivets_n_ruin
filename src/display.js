@@ -12,7 +12,18 @@
 
 import { VIEW_W, VIEW_H } from './config.js';
 
-export const MAX_SCALE = 3;
+// Raised past 3 because 3 still leaves a 4K window upscaling ~2x. The cost
+// is bounded by the adaptive scaler, which only climbs this far on hardware
+// that demonstrably keeps up, and by HULL_MAX_SCALE below, which stops the
+// hull texture cache from scaling with the square of this number.
+export const MAX_SCALE = 4;
+
+// The hull is texture rather than line art, so rasterising it beyond 2x buys
+// very little and costs a great deal: chunk memory grows with the square of
+// the scale. It is rendered at this cap and smoothly upscaled; text, sprites
+// and the HUD still get the full scale, which is where blockiness shows.
+export const HULL_MAX_SCALE = 2;
+export const hullScale = () => Math.min(S.scale, HULL_MAX_SCALE);
 
 const S = {
   scale: 1, cssW: VIEW_W, cssH: VIEW_H, generation: 0,
@@ -32,9 +43,10 @@ export const scaleGeneration = () => S.generation;
 // Chooses the backing-store scale for the space available.
 export function computeScale(cssW, cssH, dpr = window.devicePixelRatio || 1) {
   const fit = Math.min(cssW / VIEW_W, cssH / VIEW_H);
-  // Round to halves: enough steps to track a window smoothly without
-  // thrashing the hull cache on every pixel of a drag-resize.
-  const want = Math.round(fit * dpr * 2) / 2;
+  // Round UP to the next half. Rounding to nearest leaves the backing store
+  // smaller than the CSS box, so the browser upscales what we just took care
+  // to render sharply — at a 1400px window that was still a 1.08x blur.
+  const want = Math.ceil(fit * dpr * 2) / 2;
   return Math.max(1, Math.min(MAX_SCALE, want));
 }
 
