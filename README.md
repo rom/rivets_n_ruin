@@ -25,6 +25,9 @@ backend API, so there is one thing to run and no CORS to think about.
 | `make run` | Game + backend. `ADDR=0.0.0.0:8000 make run` to expose it |
 | `make check` | Everything CI would: gofmt, vet, race tests, JS syntax |
 | `make test` / `test-race` | Go tests |
+| `make test-js` | Client tests |
+| `make coverage` | Coverage, both sides |
+| `make smoke` | Launch the game and assert it renders and scrolls |
 | `make build` / `dist` | Binary / self-contained release tree |
 | `make icons` | Regenerate the favicon |
 
@@ -70,6 +73,20 @@ than the last, and each is named for a metal — Uridium's stage-naming ritual.
 On each hull: fly to the far end, **kill what is guarding it**, then run back to
 the dock. Dying out of ships ends the run wherever you are.
 
+## Attackers
+
+Interceptors teach dodging and turrets teach prioritising. Four more types
+arrive hull by hull, each asking a different question:
+
+| Attacker | From | Behaviour |
+| --- | --- | --- |
+| **Mine** | OSMIUM | Creeps toward you and detonates. Cheap to kill, expensive to ignore |
+| **Lancer** | TANTALUM | Telegraphs with a lengthening aim line, then charges flat out |
+| **Orbiter** | CUPRUM | Parks, circles, sprays radially. Forces you to close or leave |
+| **Warder** | PYRITE | Frontal plate: head-on shots bounce. Must be flanked |
+
+Which hull fields which is `LEVELS[].foes` in `src/config.js`.
+
 ## Bosses
 
 Each hull is guarded at its far end, and the boss is what opens the way home —
@@ -91,6 +108,24 @@ and widens the spread.
 above layered. Spirals while plated; once stripped it switches to aimed
 barrages and starts calling interceptors. Below a third it adds a dense radial
 on top of everything else.
+
+**COLDFORGE** - CUPRUM. Lays drifting mines between aimed volleys, so the
+arena fills up and the pressure becomes positional rather than reflexive.
+
+**SLAGHEART** - PYRITE. Two reactors firing alternately; killing one halves
+the rate, so there is a real choice between focusing and spreading damage.
+
+**NIGHTFALL** - WOLFRAM. Blinks instead of travelling, leaving a radial
+behind where it was. You cannot learn its path, only its tells.
+
+**THE SEXTON** - FERRUM. Five plates and a steady stream of escorts.
+
+**GILTHAMMER** - AURUM. Three phases that add rather than replace, so the
+final third is everything at once.
+
+The five later bosses are built from shared attack primitives - aimed
+spreads, radials, walls with a gap, mine lobs - rather than bespoke code, so
+"harder" is which patterns overlap and how fast.
 
 Destructible sections pay score and drop pickups when they go, and a kill
 showers the arena with them — so stripping a boss is worth doing carefully
@@ -138,6 +173,13 @@ gives you a stock ship.
   scanlines and vignette.
 - **Fully procedural audio** — see below.
 
+## Coins and coffins
+
+Destroyed things scatter **coins** - small, numerous, worth 25 each, flying
+apart on impact then drifting like any other pickup. They are constant
+background income and get no toast; the run's haul shows on the HUD. A **gold
+coffin** is the rare one, worth 2,500. Bosses shed both in quantity.
+
 ## Pickups
 
 Everything you destroy can drop one, so shooting pays beyond score and a long
@@ -183,8 +225,37 @@ title.
 
 ## Graphics
 
-Everything is drawn at 640×360 and upscaled by an integer factor, so the
-pixels stay square. On top of the plating and sprites:
+The game is written in a fixed 640×360 logical coordinate system, but it is
+no longer *rendered* at 640×360. The canvas backing store tracks the window
+and the device pixel ratio, and the context carries a matching transform, so
+sprites, strokes and above all text are rasterised at display resolution
+instead of being drawn small and blown up. A 10px label on a 4K window is now
+a 10px label, not a 40px block.
+
+**The hull renders in chunks**, on demand, at the current scale, with an LRU
+cache. One bitmap for the whole hull was fine at 12,000px and 1x; at 25,000px
+and 3x it would be a 190MB canvas, past what browsers will allocate. Chunking
+also made hull generation testable in node, since nothing touches a canvas
+until a chunk is actually drawn.
+
+**Resolution adapts to the machine.** Pixels are not free - a canvas without
+GPU acceleration can be four times slower at 2x than at 1x - so the game
+watches its own frame times and settles on the highest scale it can sustain.
+Two details matter, and both were got wrong first:
+
+- It judges against the *display's* refresh period, estimated from a low
+  percentile of observed intervals, not an absolute millisecond budget. On a
+  vsync-locked 60Hz display no frame can ever beat 16.7ms, so an absolute
+  "fast enough" threshold can only ever ratchet downwards.
+- That estimate is **monotonically non-increasing**. Allowed to rise, a slow
+  scale redefines its own bad frame time as normal, and the scaler climbs
+  into a hole and stays there.
+
+A scale that proves too slow is never retried in that session, so it cannot
+oscillate. `test/display.test.mjs` covers the decision table directly,
+including the 144Hz case and the single-slow-frame case.
+
+On top of the plating and sprites:
 
 **Bloom.** The bright elements — shots, particles, the engine — are re-drawn
 at half scale into their own buffer, bounced through a quarter-size canvas
@@ -409,6 +480,28 @@ exists because a camera signature change once left `cam.x` as `NaN`: every
 state assertion still passed — score rising, ship moving, 60fps, nothing
 thrown — while the screen rendered black. State tests cannot see that.
 
+### Tests
+
+`make check` runs everything: gofmt, vet, Go tests under `-race`, the client
+tests, a JS syntax gate, and the browser smoke test.
+
+Client tests live in `test/` on node's built-in runner. `_setup.mjs` provides
+deliberately inert `localStorage`, canvas and `AudioContext` stubs - anything
+depending on what was actually drawn or heard belongs in the smoke test.
+
+Three exist because of bugs that shipped:
+
+- **`test/parity.test.mjs`** reads `internal/validate/score.go` and compares
+  it against `src/config.js`. The Go validator mirrors hull lengths, top
+  speed and boss rewards to decide what is physically possible; drift makes
+  it reject honest runs with a 422, which has happened twice. Going from
+  three hulls to eight broke four of these at once and this caught all four.
+- **`test/camera.test.mjs`** asserts the camera survives a malformed `dt`.
+  A mis-ordered argument once made it `NaN`, which renders a black screen
+  while score, ship and frame rate all still look healthy.
+- **`test/level.test.mjs`** walks every hull asserting no vertical slice is
+  fully blocked. An unwinnable hull would otherwise only surface by playing.
+
 Run the Go tests with `go test ./...` (and `-race`, which the suite is clean
 under — it covers concurrent submission and concurrent store access).
 
@@ -423,6 +516,9 @@ These are deliberate omissions from the vertical slice, not bugs:
   obvious next system — the single forward cannon is a placeholder for it.
 - **No landing sequence.** Uridium ends each level with a landing minigame;
   the dock here is just a position.
+- **Coverage is partial and the report says so.** Rendering, audio and HUD
+  modules are exercised only by the browser smoke test, so they contribute
+  no line coverage.
 - **The graphics work is unjudged.** Bloom strength, foreground density and
   the surface shading are tuned by eye against screenshots, not by playing.
   Bloom in particular is easy to overdo.

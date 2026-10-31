@@ -5,7 +5,7 @@ import { makePool } from './pool.js';
 import { enemyShots, fire } from './projectiles.js';
 import { explode, sparks } from './particles.js';
 import { sfxTurretShot, sfxEnemyHit, sfxExplode } from './sfx.js';
-import { maybeDrop } from './pickups.js';
+import { spoils } from './pickups.js';
 
 export const interceptors = makePool(INTERCEPTOR.maxActive + 2, () => ({
   x: 0, y: 0, baseY: 0, dirX: -1, t: 0, hp: 0, fireCd: 0,
@@ -140,7 +140,7 @@ export function hitInterceptor(game, i, dmg) {
   }
   explode(e.x, e.y, 1);
   sfxExplode(1);
-  maybeDrop(game, e.x, e.y, 'interceptor');
+  spoils(game, e.x, e.y, 'interceptor');
   game.score += INTERCEPTOR.score;
   interceptors.kill(i);
   return true;
@@ -156,7 +156,7 @@ export function hitTurret(game, t, dmg) {
   t.dead = true;
   explode(t.x, t.y - t.dir * 5, 1.5);
   sfxExplode(1.5);
-  maybeDrop(game, t.x, t.y - t.dir * 14, 'turret');
+  spoils(game, t.x, t.y - t.dir * 14, 'turret');
   game.score += TURRET.score;
   game.turretsKilled++;
   return true;

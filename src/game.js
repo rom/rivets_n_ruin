@@ -12,6 +12,7 @@ import {
 import { playerShots, enemyShots, advance } from './projectiles.js';
 import { updateParticles, explode, sparks, particles } from './particles.js';
 import { updatePickups, resetPickups, pickups } from './pickups.js';
+import { updateFoes, resetFoes, foes, hitFoe, spawnFoeForLevel, SPEC as FOE_SPEC } from './foes.js';
 import { tapped, endFrame } from './input.js';
 import {
   sfxPickup, sfxPlayerHit, sfxHullAbsorb, sfxDeath, sfxRespawn,
@@ -39,8 +40,11 @@ export function makeGame(modSpec = null) {
     score: 0,
     turretsKilled: 0,
     deaths: 0,
+    coins: 0,
+    coffins: 0,
     submitted: false,
     spawnCd: 1.2,
+    foeCd: 3.0,
     flash: 0,
     time: 0,        // clock for the current hull, shown on the clear screen
     runTime: 0,     // clock for the whole campaign, which is what gets submitted
@@ -74,8 +78,11 @@ function reset(game) {
   game.score = 0;
   game.turretsKilled = 0;
   game.deaths = 0;
+  game.coins = 0;
+  game.coffins = 0;
   game.submitted = false;
   game.spawnCd = 1.2;
+  game.foeCd = 3.0;
   game.returning = false;
   game.boss = null;
   game.quitting = false;
@@ -85,7 +92,9 @@ function reset(game) {
   game.banner = null;
   game.toast = null;
   resetEnemies();
+  resetFoes();
   resetPickups();
+  resetFoes();
   playerShots.clear();
   enemyShots.clear();
   particles.clear();
@@ -104,7 +113,7 @@ function applyRefit(game) {
   p.maxVXBonus += LEVEL_UP.maxVXAdd;
   p.maxVYBonus += LEVEL_UP.maxVYAdd;
   p.bulletBonus += LEVEL_UP.bulletSpeedAdd;
-  p.gunCap = Math.min(PICKUP.speedScale.length - 1, p.gunCap + LEVEL_UP.gunCap);
+  p.gunCap = Math.min(PICKUP.gunCapMax, p.gunCap + LEVEL_UP.gunCap);
   p.gunSpeed = Math.min(p.gunCap, p.gunSpeed + LEVEL_UP.gunSpeed);
   p.gunBlaze = Math.min(p.gunCap, p.gunBlaze + LEVEL_UP.gunBlaze);
   p.lives = Math.min(PICKUP.maxLives, p.lives + LEVEL_UP.lives);
@@ -270,6 +279,7 @@ export function update(game, dt) {
   updatePlayer(p, game, dt);
   updateTurrets(game, dt);
   updateInterceptors(game, dt);
+  updateFoes(game, dt);
   updateBoss(game, dt);
   updatePickups(game, dt);
   advance(playerShots, dt);
@@ -318,6 +328,14 @@ export function update(game, dt) {
       recordBest(game);
       reportRun(game);
     }
+  }
+
+  // Extra attacker types, on their own slower cadence so they punctuate the
+  // interceptor stream rather than drowning it.
+  game.foeCd -= dt;
+  if (game.foeCd <= 0) {
+    game.foeCd = 2.6 + Math.random() * 2.2;
+    if (p.x > APRON && p.x < game.level.length - APRON) spawnFoeForLevel(game);
   }
 
   // Tell the backend we are out here. Self-throttling to one beat every 5s.
@@ -374,6 +392,12 @@ function collide(game) {
         hitInterceptor(game, j, s.dmg);
         gone = true;
       }
+    }
+
+    for (let j = foes.count - 1; j >= 0 && !gone; j--) {
+      const f = foes.items[j];
+      const r = FOE_SPEC[f.kind].r;
+      if (Math.abs(s.x - f.x) < r && Math.abs(s.y - f.y) < r) gone = hitFoe(game, j, s.x, s.y, s.dmg);
     }
 
     if (!gone && game.boss && hitBoss(game, game.boss, s.x, s.y, s.dmg)) gone = true;

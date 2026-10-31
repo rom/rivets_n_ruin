@@ -1,11 +1,9 @@
 import {
-  FIELD_TOP, FIELD_BOT, FIELD_H, RIM, APRON, COL,
+  FIELD_TOP, FIELD_BOT, FIELD_H, RIM, APRON, THEMES,
 } from './config.js';
 import { mulberry32, rr, ri, hash2 } from './rng.js';
 
 const BUCKET = 256;
-const PLATE_W = 48;
-const PLATE_H = 36;
 
 // ---------------------------------------------------------------- generation
 
@@ -69,6 +67,7 @@ function layout(r, spec) {
 // comes from the spec, so the difficulty curve is data, not branches.
 export function buildLevel(spec) {
   const r = mulberry32(spec.seed);
+  const theme = THEMES[spec.theme] || THEMES.steel;
   const LEN = spec.length;
   const obstacles = [];
   const turretSpots = [];
@@ -117,9 +116,12 @@ export function buildLevel(spec) {
 
   return {
     obstacles, turrets, buckets,
-    bg: renderHull(obstacles, LEN),
     length: LEN,
     spec,
+    // Hull texture is rendered per chunk, on demand, at the display scale.
+    chunks: new Map(),
+    chunkGen: -1,
+    tick: 0,
   };
 }
 
@@ -143,71 +145,117 @@ export function pointBlocked(level, x, y) {
 }
 
 // -------------------------------------------------------------- hull texture
+//
+// The hull is rendered in chunks, on demand, at the current display scale,
+// and cached with an LRU. One big bitmap was fine at 12,000px and 1x; it is
+// not fine at 17,000px rendered at 3x, which would be a 150MB canvas and
+// past what browsers will allocate. Chunks also mean a scale change costs a
+// cache clear rather than a full re-render of the ship.
 
-// The whole hull is drawn once into an offscreen canvas and then blitted
-// per frame. 12000x324 is ~15MB and ~25k fill ops, a one-time ~200ms cost;
-// chunked lazy tiles are the move if the level grows much past this.
-function renderHull(obstacles, LEN) {
+export const CHUNK_W = 512;
+const MAX_CACHED = 14;
+const PLATE_W = 48;
+const PLATE_H = 36;
+
+// Returns the canvas for chunk `i`, rendering it if needed.
+export function hullChunk(level, i, scale, generation) {
+  if (level.chunkGen !== generation) {
+    level.chunks.clear();
+    level.chunkGen = generation;
+  }
+  const hit = level.chunks.get(i);
+  if (hit) {
+    hit.used = ++level.tick;
+    return hit.canvas;
+  }
+  const canvas = renderChunk(level, i, scale);
+  level.chunks.set(i, { canvas, used: ++level.tick });
+
+  if (level.chunks.size > MAX_CACHED) {
+    let oldestKey = null;
+    let oldest = Infinity;
+    for (const [k, v] of level.chunks) {
+      if (v.used < oldest) { oldest = v.used; oldestKey = k; }
+    }
+    if (oldestKey !== null) level.chunks.delete(oldestKey);
+  }
+  return canvas;
+}
+
+// Warms one uncached chunk near the camera per call, so scrolling into fresh
+// hull does not hitch on a cold render mid-frame.
+export function warmChunks(level, camX, viewW, scale, generation) {
+  const first = Math.floor(camX / CHUNK_W) - 1;
+  const last = Math.floor((camX + viewW) / CHUNK_W) + 2;
+  for (let i = first; i <= last; i++) {
+    if (i < 0 || i * CHUNK_W >= level.length) continue;
+    if (level.chunkGen === generation && level.chunks.has(i)) continue;
+    hullChunk(level, i, scale, generation);
+    return;          // one per frame is enough to stay ahead
+  }
+}
+
+function renderChunk(level, index, scale) {
+  const t = THEMES[level.spec.theme] || THEMES.steel;
+  const x0 = index * CHUNK_W;
+  const w = Math.min(CHUNK_W, level.length - x0);
+
   const c = document.createElement('canvas');
-  c.width = LEN;
-  c.height = FIELD_H;
+  c.width = Math.max(1, Math.round(w * scale));
+  c.height = Math.round(FIELD_H * scale);
   const g = c.getContext('2d');
+  g.scale(scale, scale);
+  g.translate(-x0, 0);        // draw in world coordinates
 
-  const tones = ['#1d2128', '#21262d', '#252a32', '#282e36', '#1f242b', '#262b33'];
+  g.fillStyle = t.base;
+  g.fillRect(x0, 0, w, FIELD_H);
 
-  g.fillStyle = COL.hullBase;
-  g.fillRect(0, 0, LEN, FIELD_H);
-
-  // Plating: one quad per plate, seam on two sides, rivets at the corners.
+  // Plating. The grid is indexed on absolute position so chunks tile without
+  // a visible seam.
+  const px0 = Math.floor(x0 / PLATE_W) * PLATE_W;
   for (let py = 0; py < FIELD_H; py += PLATE_H) {
-    for (let px = 0; px < LEN; px += PLATE_W) {
+    for (let px = px0; px < x0 + w; px += PLATE_W) {
       const gx = (px / PLATE_W) | 0;
       const gy = (py / PLATE_H) | 0;
       const n = hash2(gx, gy);
 
-      g.fillStyle = tones[(n * tones.length) | 0];
+      g.fillStyle = t.tones[(n * t.tones.length) | 0];
       g.fillRect(px, py, PLATE_W, PLATE_H);
 
-      // seams
-      g.fillStyle = COL.edgeLo;
+      g.fillStyle = t.seam;
       g.globalAlpha = 0.55;
       g.fillRect(px + PLATE_W - 1, py, 1, PLATE_H);
       g.fillRect(px, py + PLATE_H - 1, PLATE_W, 1);
-      g.globalAlpha = 1;
-
-      // a faint top-left catchlight, so plates read as raised
-      g.fillStyle = COL.hullHi;
       g.globalAlpha = 0.12;
+      g.fillStyle = t.hi;
       g.fillRect(px, py, PLATE_W - 1, 1);
       g.globalAlpha = 1;
 
       // rivets — the namesake
-      g.fillStyle = COL.rivet;
+      g.fillStyle = t.rivet;
       g.globalAlpha = 0.42 + n * 0.22;
       for (const [rx, ry] of [[4, 4], [PLATE_W - 6, 4], [4, PLATE_H - 6], [PLATE_W - 6, PLATE_H - 6]]) {
         g.fillRect(px + rx, py + ry, 2, 2);
       }
       g.globalAlpha = 1;
 
-      // sparse surface detail: hatches, vents, hazard panels
       if (n > 0.93) {
-        g.fillStyle = COL.edgeLo;
+        g.fillStyle = t.seam;
         g.globalAlpha = 0.6;
         g.fillRect(px + 10, py + 9, PLATE_W - 22, PLATE_H - 20);
-        g.globalAlpha = 1;
-        g.fillStyle = COL.hullHi;
         g.globalAlpha = 0.25;
+        g.fillStyle = t.hi;
         g.fillRect(px + 10, py + 9, PLATE_W - 22, 1);
         g.globalAlpha = 1;
       } else if (n < 0.045) {
-        g.fillStyle = COL.hazard;
+        g.fillStyle = t.hazard;
         g.globalAlpha = 0.5;
-        for (let s = 0; s < PLATE_W - 12; s += 6) g.fillRect(px + 6 + s, py + 14, 3, 7);
+        for (let sx = 0; sx < PLATE_W - 12; sx += 6) g.fillRect(px + 6 + sx, py + 14, 3, 7);
         g.globalAlpha = 1;
       } else if (n > 0.86 && n < 0.9) {
-        g.fillStyle = COL.edgeLo;
+        g.fillStyle = t.seam;
         g.globalAlpha = 0.45;
-        for (let s = 0; s < 4; s++) g.fillRect(px + 8, py + 10 + s * 5, PLATE_W - 18, 2);
+        for (let k = 0; k < 4; k++) g.fillRect(px + 8, py + 10 + k * 5, PLATE_W - 18, 2);
         g.globalAlpha = 1;
       }
     }
@@ -215,40 +263,59 @@ function renderHull(obstacles, LEN) {
 
   // Longitudinal conduits running the length of the ship.
   for (const [cy, th] of [[FIELD_TOP + 46, 3], [FIELD_H / 2 - 1, 4], [FIELD_BOT - 50, 3]]) {
-    g.fillStyle = COL.edgeLo;
+    g.fillStyle = t.seam;
     g.globalAlpha = 0.5;
-    g.fillRect(0, cy, LEN, th);
+    g.fillRect(x0, cy, w, th);
     g.globalAlpha = 0.18;
-    g.fillStyle = COL.hullHi;
-    g.fillRect(0, cy, LEN, 1);
+    g.fillStyle = t.hi;
+    g.fillRect(x0, cy, w, 1);
     g.globalAlpha = 1;
   }
 
   // Rim girders: the hard boundary, heavily riveted so it reads as solid.
   for (const top of [true, false]) {
     const y = top ? 0 : FIELD_BOT;
-    g.fillStyle = '#191d24';
-    g.fillRect(0, y, LEN, RIM);
-    g.fillStyle = COL.hullMid;
-    g.fillRect(0, top ? y + 3 : y + 3, LEN, RIM - 7);
-    // inner lip — bright, so the edge of the playfield is unmistakable
-    g.fillStyle = COL.edgeHi;
+    g.fillStyle = t.rimDark;
+    g.fillRect(x0, y, w, RIM);
+    g.fillStyle = t.mid;
+    g.fillRect(x0, y + 3, w, RIM - 7);
+    g.fillStyle = t.edgeHi;
     g.globalAlpha = 0.5;
-    g.fillRect(0, top ? y + RIM - 1 : y, LEN, 1);
+    g.fillRect(x0, top ? y + RIM - 1 : y, w, 1);
     g.globalAlpha = 1;
-    g.fillStyle = COL.rivet;
-    for (let rx = 6; rx < LEN; rx += 16) {
+    g.fillStyle = t.rivet;
+    const rx0 = Math.floor(x0 / 16) * 16 + 6;
+    for (let rx = rx0; rx < x0 + w; rx += 16) {
       g.globalAlpha = 0.35 + hash2(rx, top ? 1 : 2) * 0.35;
       g.fillRect(rx, top ? y + 6 : y + 7, 3, 3);
     }
     g.globalAlpha = 1;
   }
 
-  for (const o of obstacles) drawBlock(g, o);
+  // Surface shading, baked in rather than composited every frame: it never
+  // changes, so a full-screen pass per frame was buying nothing.
+  const grad = g.createLinearGradient(0, 0, 0, FIELD_H);
+  grad.addColorStop(0, 'rgba(0,0,0,0.20)');
+  grad.addColorStop(0.055, 'rgba(0,0,0,0.42)');
+  grad.addColorStop(0.22, 'rgba(0,0,0,0.10)');
+  grad.addColorStop(0.5, 'rgba(96,126,156,0.06)');
+  grad.addColorStop(0.78, 'rgba(0,0,0,0.10)');
+  grad.addColorStop(0.945, 'rgba(0,0,0,0.42)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.20)');
+  g.fillStyle = grad;
+  g.fillRect(x0, 0, w, FIELD_H);
+
+  // Obstacles overlapping this chunk, including the ones whose shadow spills
+  // into it from the left.
+  for (const o of level.obstacles) {
+    if (o.x + o.w + 10 < x0 || o.x > x0 + w) continue;
+    drawBlock(g, o, t);
+  }
+
   return c;
 }
 
-function drawBlock(g, o) {
+function drawBlock(g, o, t) {
   // Obstacles are the thing that kills you, so they get the strongest value
   // separation in the scene: a deep cast shadow, a body clearly lighter than
   // the surrounding plating, a hard dark outline, and a lit top-left bevel.
@@ -259,21 +326,18 @@ function drawBlock(g, o) {
   g.fillRect(o.x + 3, o.y + 3, o.w + 6, o.h + 6);
   g.globalAlpha = 1;
 
-  // hard outline — stops the block blending into the plating behind it
-  g.fillStyle = '#0d1016';
+  g.fillStyle = t.blockEdge;
   g.fillRect(o.x - 1, o.y - 1, o.w + 2, o.h + 2);
 
-  // body, a full step lighter than the hull
-  g.fillStyle = '#4e5765';
+  g.fillStyle = t.block;
   g.fillRect(o.x, o.y, o.w, o.h);
 
-  // plating on the raised face
   for (let py = o.y; py < o.y + o.h; py += 18) {
     for (let px = o.x; px < o.x + o.w; px += 22) {
       const n = hash2(px * 3, py * 7);
-      g.fillStyle = n > 0.66 ? '#5a6472' : n > 0.33 ? '#4a5260' : '#434b58';
+      g.fillStyle = n > 0.66 ? t.blockHi : n > 0.33 ? t.block : t.blockLo;
       g.fillRect(px, py, Math.min(21, o.x + o.w - px), Math.min(17, o.y + o.h - py));
-      g.fillStyle = '#2b313b';
+      g.fillStyle = t.seam;
       g.globalAlpha = 0.5;
       g.fillRect(px, py + Math.min(17, o.y + o.h - py) - 1, Math.min(21, o.x + o.w - px), 1);
       g.fillRect(px + Math.min(21, o.x + o.w - px) - 1, py, 1, Math.min(17, o.y + o.h - py));
@@ -281,16 +345,14 @@ function drawBlock(g, o) {
     }
   }
 
-  // bevel: lit from the top-left
-  g.fillStyle = '#9fadbd';
+  g.fillStyle = t.edgeHi;
   g.fillRect(o.x, o.y, o.w, 2);
   g.fillRect(o.x, o.y, 2, o.h);
-  g.fillStyle = '#20262e';
+  g.fillStyle = t.blockEdge;
   g.fillRect(o.x, o.y + o.h - 2, o.w, 2);
   g.fillRect(o.x + o.w - 2, o.y, 2, o.h);
 
-  // rivets around the perimeter
-  g.fillStyle = '#b4c0ce';
+  g.fillStyle = t.rivetHi;
   g.globalAlpha = 0.8;
   for (let rx = o.x + 5; rx < o.x + o.w - 5; rx += 11) {
     g.fillRect(rx, o.y + 4, 2, 2);
@@ -304,8 +366,8 @@ function drawBlock(g, o) {
 
   // hazard chevrons on the face that points into the playfield
   const fy = o.face === 1 ? o.y + o.h - 5 : o.y + 2;
-  for (let s2 = 0; s2 < o.w - 4; s2 += 8) {
-    g.fillStyle = (s2 / 8) % 2 ? '#15181e' : '#d9a62e';
-    g.fillRect(o.x + 2 + s2, fy, 4, 3);
+  for (let sx = 0; sx < o.w - 4; sx += 8) {
+    g.fillStyle = (sx / 8) % 2 ? '#15181e' : t.chevron;
+    g.fillRect(o.x + 2 + sx, fy, 4, 3);
   }
 }
