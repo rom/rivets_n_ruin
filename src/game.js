@@ -10,6 +10,11 @@ import {
 import { playerShots, enemyShots, advance } from './projectiles.js';
 import { updateParticles, explode, sparks, particles } from './particles.js';
 import { tapped, endFrame } from './input.js';
+import {
+  sfxPlayerHit, sfxHullAbsorb, sfxDeath, sfxRespawn,
+  sfxTurnaround, sfxComplete, sfxGameOver, sfxUi,
+} from './sfx.js';
+import { setIntensity } from './music.js';
 
 export function makeGame() {
   const level = buildLevel(LEVEL_SEED);
@@ -59,8 +64,18 @@ function banner(game, text, sub = '', life = 2.4) {
   game.banner = { text, sub, t: life, max: life };
 }
 
+// Drive the score from what is actually happening: sparse on the title,
+// full kit in flight, an extra layer for the return run and for a shield
+// about to give out.
+function scoreIntensity(game) {
+  if (game.state !== 'play' && game.state !== 'dying') return 0;
+  if (game.returning || game.player.shield < 30) return 3;
+  return 2;
+}
+
 export function update(game, dt) {
   game.stateT += dt;
+  setIntensity(scoreIntensity(game));
   if (game.flash > 0) game.flash = Math.max(0, game.flash - dt * 2.6);
   if (game.banner) {
     game.banner.t -= dt;
@@ -69,6 +84,7 @@ export function update(game, dt) {
 
   if (game.state === 'title' || game.state === 'gameover' || game.state === 'complete') {
     if (tapped('start') || tapped('fire')) {
+      sfxUi();
       reset(game);
       game.state = 'play';
       game.stateT = 0;
@@ -90,12 +106,14 @@ export function update(game, dt) {
       if (game.player.lives <= 0) {
         game.state = 'gameover';
         game.stateT = 0;
+        sfxGameOver();
         if (game.score > game.best) {
           game.best = game.score;
           localStorage.setItem('rnr.best', String(game.score));
         }
       } else {
         respawn(game.player, game);
+        sfxRespawn();
         game.state = 'play';
         game.stateT = 0;
       }
@@ -122,9 +140,11 @@ export function update(game, dt) {
     game.returning = true;
     banner(game, 'TURN AND BURN', 'RUN THE HULL BACK TO THE DOCK', 2.8);
     game.score += 2500;
+    sfxTurnaround();
   } else if (game.returning && p.x < APRON * 0.55) {
     game.state = 'complete';
     game.stateT = 0;
+    sfxComplete();
     game.score += 5000 + Math.max(0, Math.round((260 - game.time) * 25));
     if (game.score > game.best) {
       game.best = game.score;
@@ -142,6 +162,7 @@ function die(game) {
   p.lives--;
   explode(p.x, p.y, 2.4, '#b4f4ff', '#4fd0e8');
   explode(p.x, p.y, 1.6);
+  sfxDeath();
   kick(game.cam, 14);
   game.flash = 0.75;
   game.state = 'dying';
@@ -180,6 +201,7 @@ function collide(game) {
       for (const o of obstaclesNear(game.level, s.x, s.x)) {
         if (s.x > o.x && s.x < o.x + o.w && s.y > o.y && s.y < o.y + o.h) {
           sparks(s.x, s.y, -Math.sign(s.vx), 0, 4, '#8e9aa9');
+          sfxHullAbsorb();
           gone = true;
           break;
         }
@@ -204,6 +226,7 @@ function collide(game) {
         game.flash = Math.max(game.flash, 0.3);
         kick(game.cam, 3.5);
         sparks(s.x, s.y, -Math.sign(s.vx), 0, 6, '#e8434f');
+        sfxPlayerHit();
       }
       continue;
     }
@@ -226,6 +249,7 @@ function collide(game) {
         p.shield -= INTERCEPTOR.ramDamage;
         game.flash = Math.max(game.flash, 0.45);
         kick(game.cam, 7);
+        sfxPlayerHit();
       }
     }
   }

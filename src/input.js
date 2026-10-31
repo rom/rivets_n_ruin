@@ -10,6 +10,7 @@ const MAP = {
   Enter: 'start', NumpadEnter: 'start',
   KeyP: 'pause', Escape: 'pause',
   KeyR: 'restart',
+  KeyM: 'mute',
 };
 
 export function initInput(target = window) {

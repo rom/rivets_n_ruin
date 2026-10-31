@@ -6,6 +6,7 @@ import { obstaclesNear, pointBlocked } from './level.js';
 import { playerShots, fire } from './projectiles.js';
 import { sparks, thrust } from './particles.js';
 import { kick } from './camera.js';
+import { sfxShoot, sfxScrape, sfxFlip } from './sfx.js';
 
 export function makePlayer() {
   return {
@@ -41,6 +42,7 @@ export function updatePlayer(p, game, dt) {
       if (p.vx * p.facing <= 0 && p.flip <= 0) {
         p.facing = ix;
         p.flip = SHIP.flipTime;
+        sfxFlip();
       }
     }
   }
@@ -71,6 +73,7 @@ export function updatePlayer(p, game, dt) {
       fire(playerShots, p.x + p.facing * 14, p.y + off, vx, 0, 1.7, 1, 2);
     }
     sparks(p.x + p.facing * 15, p.y, p.facing, 0, 2, '#b4f4ff');
+    sfxShoot();
   }
 }
 
@@ -118,6 +121,7 @@ function resolveHull(p, game) {
 // rate-limited so grinding along a wall drains instead of instantly killing.
 function impact(p, game, speed, hx, hy, nx, ny) {
   sparks(hx, hy, nx, ny, 5, '#ffd24a');
+  sfxScrape(speed);
   if (p.scrapeCd > 0 || p.invuln > 0) return;
   p.scrapeCd = SHIP.scrapeCd;
   const dmg = SHIP.grindDamage + speed * SHIP.impactDamage;
