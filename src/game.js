@@ -62,6 +62,7 @@ export function makeGame(modSpec = null) {
     coffins: 0,
     bars: 0,
     treasures: 0,
+    startAt: 0,            // the hull this run began on; see reportRun
     haul: freshHaul(),       // the whole run
     hullHaul: freshHaul(),   // this hull only, for the end-of-hull bonus
     bonus: null,             // last hull's bonus breakdown, for the overview
@@ -136,6 +137,11 @@ function recordUnlock(game) {
 // it would be a joke.
 function reset(game) {
   const at = clamp(game.startHull, 0, game.specs.length - 1);
+  // Which hull this run began on. A run that starts at AURUM reaches hull
+  // eight having flown one, and the two numbers mean different things to
+  // the leaderboard and to the validator: the first is how far you got,
+  // the second is how long it could possibly have taken.
+  game.startAt = at;
   if (game.levelIndex !== at) {
     game.levelIndex = at;
     game.level = buildLevel(game.specs[at]);
@@ -268,6 +274,17 @@ function banner(game, text, sub = '', life = 2.4) {
   game.banner = { text, sub, t: life, max: life };
 }
 
+// How many hulls this run actually covered, as opposed to how far it got.
+// Two different numbers, and conflating them is what made the server throw
+// away a real 4.65-million run: it read "reached hull eight" as "flew eight
+// hulls" and decided 256 seconds was impossibly fast for them.
+//
+// Exported because it is the arithmetic, not the submission, that was
+// wrong, and arithmetic is what a test can hold still.
+export function hullsFlown(game) {
+  return Math.max(1, (game.levelIndex || 0) - (game.startAt || 0) + 1);
+}
+
 // Report a finished run to the backend. Fire-and-forget: submitRun never
 // throws and never blocks, so a dead backend cannot stall the end screen.
 function reportRun(game) {
@@ -278,6 +295,7 @@ function reportRun(game) {
     points: game.score,
     timeSec: Number(game.runTime.toFixed(2)),
     levels: game.levelIndex + 1,
+    hullsFlown: hullsFlown(game),
     turrets: game.turretsKilled,
     deaths: game.deaths,
     completed: game.state === 'victory',   // only a full campaign counts as completed

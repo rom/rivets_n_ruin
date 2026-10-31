@@ -750,40 +750,107 @@ export function drawScreen(ctx, game) {
     text(ctx, 'EVERY HULL, END TO END', cx, 60, COL.cool, FONT, 'center');
   }
 
-  const infoY = game.state === 'victory' ? 80 : 68;
-  text(ctx, 'SCORE ' + String(game.score).padStart(8, '0'), cx, infoY, COL.hudBright, FONT, 'center');
+  const L = endLayout(game.state, rankLine(netState()));
+  text(ctx, 'SCORE ' + String(game.score).padStart(8, '0'), cx, L.score, COL.hudBright, FONT, 'center');
   text(ctx, 'TIME ' + game.time.toFixed(1) + 'S    GUNS BROKEN ' + game.turretsKilled
-    + '    LOSSES ' + game.deaths, cx, infoY + 14, COL.hudText, FONT, 'center');
+    + '    LOSSES ' + game.deaths, cx, L.stats, COL.hudText, FONT, 'center');
   if (game.coins || game.coffins) {
     text(ctx, 'COINS ' + (game.coins || 0)
       + (game.coffins ? '    GOLD COFFINS ' + game.coffins : ''),
-      cx, infoY + 28, '#ffd24a', FONT, 'center');
+      cx, L.coins, '#ffd24a', FONT, 'center');
   }
-  drawRankLine(ctx, cx, infoY + 44);
+  drawRankLine(ctx, cx, L.rank);
 
   ctx.globalAlpha = pulse;
   text(ctx, game.state === 'victory' ? 'ENTER TO RUN IT AGAIN' : 'ENTER TO FLY AGAIN',
-    cx, infoY + 62, COL.warmHi, FONT, 'center');
+    cx, L.prompt, COL.warmHi, FONT, 'center');
   ctx.globalAlpha = 1;
 
-  drawBoard(ctx, BOARD_X, infoY + 84, 10);
+  drawBoard(ctx, BOARD_X, L.board, 10);
+}
+
+// How much of the backend's reason fits on one centred line. Sized from
+// the screen rather than guessed: the guess was 64 characters, and the
+// longest message the validator actually sends is 68, so the one thing a
+// player would want to quote was cut off mid-number.
+export const REASON_CHARS = Math.floor((VIEW_W - 16) / 6);
+
+// The end screen, as measurable geometry rather than a column of literal
+// offsets. The rank line is one row when the run placed and two when it
+// was refused — the refusal needs to say why — and with the offsets baked
+// in, that second row landed on top of ENTER TO FLY AGAIN. Everything
+// below the rank line is therefore placed relative to its real height.
+export const END_LAYOUT = {
+  top: { gameover: 68, victory: 80 },
+  statsGap: 14,
+  coinsGap: 28,
+  rankGap: 44,
+  subGap: 12,      // the second row of a two-row rank line
+  promptGap: 18,   // below the bottom of the rank block
+  boardGap: 40,
+  pitch: 12,       // one row of FONT
+};
+
+// Where each piece of the end screen goes, given the state and what the
+// rank line turned out to be. Pure arithmetic, so screens.test.mjs can
+// assert that no two pieces land on each other.
+export function endLayout(state, line) {
+  const top = END_LAYOUT.top[state === 'victory' ? 'victory' : 'gameover'];
+  const rank = top + END_LAYOUT.rankGap;
+  const rankBottom = rank + (line && line.sub ? END_LAYOUT.subGap : 0);
+  const prompt = rankBottom + END_LAYOUT.promptGap;
+  return {
+    score: top,
+    stats: top + END_LAYOUT.statsGap,
+    coins: top + END_LAYOUT.coinsGap,
+    rank,
+    rankBottom,
+    prompt,
+    board: prompt + END_LAYOUT.boardGap,
+  };
 }
 
 // Where that run put you. Blank until the backend answers.
-function drawRankLine(ctx, cx, y) {
-  const net = netState();
+// What the end screen says about where the run went. Separated from the
+// drawing so a test can read it: the bug worth a regression test here is
+// not a misplaced pixel but a run that was thrown away silently, and a
+// test cannot see 'SENDING RUN...' on a canvas.
+//
+// Every branch must end somewhere a player can act on. 'SENDING RUN...' is
+// the only one that means "wait", and it must not be reachable once the
+// answer is in.
+export function rankLine(net) {
   if (!net.online) {
-    text(ctx, 'RUN NOT RECORDED — BACKEND UNREACHABLE', cx, y, COL.danger, FONT, 'center');
-    return;
+    return { head: 'RUN NOT RECORDED — BACKEND UNREACHABLE', colour: COL.danger, settled: true };
   }
   if (net.rank && net.rank.position) {
     // Total comes from /api/stats, not the visible rows — the board is capped
     // at six, so counting rows would report "3 OF 6" out of fifty players.
     const total = net.stats ? Math.max(net.stats.players, net.rank.position) : net.rank.position;
-    text(ctx, 'YOU PLACE ' + net.rank.position + ' OF ' + total, cx, y, COL.warmHi, FONT, 'center');
-  } else {
-    text(ctx, 'SENDING RUN...', cx, y, COL.hudLine, FONT, 'center');
+    return { head: `YOU PLACE ${net.rank.position} OF ${total}`, colour: COL.warmHi, settled: true };
   }
+  if (net.submitState === 'refused') {
+    // Say so. A refused run looked exactly like a slow network, which is
+    // how a real 4.6-million run came to vanish without a word.
+    return {
+      head: 'RUN NOT RECORDED',
+      sub: (net.submitError || 'the backend refused it').toUpperCase().slice(0, REASON_CHARS),
+      colour: COL.danger,
+      settled: true,
+    };
+  }
+  if (net.submitState === 'recorded') {
+    // Recorded, but the rank has not come back yet (or there is no board
+    // for this mod). Still an answer, so still not 'sending'.
+    return { head: 'RUN RECORDED', colour: COL.hudLine, settled: true };
+  }
+  return { head: 'SENDING RUN...', colour: COL.hudLine, settled: false };
+}
+
+function drawRankLine(ctx, cx, y) {
+  const line = rankLine(netState());
+  text(ctx, line.head, cx, y, line.colour, FONT, 'center');
+  if (line.sub) text(ctx, line.sub, cx, y + 12, COL.hudLine, FONT, 'center');
 }
 
 // Quit confirmation. Deliberately unmissable, and deliberately not defaulted

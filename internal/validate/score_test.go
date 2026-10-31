@@ -66,9 +66,13 @@ func TestBossScoresFitTheCeiling(t *testing.T) {
 	if err := Score(s); err != nil {
 		t.Fatalf("rejected a campaign that killed all three bosses: %v", err)
 	}
-	// and it must still be a ceiling, not a blank cheque
-	if err := Score(Submission{Points: 50_000_000, TimeSec: 400, Completed: true, Levels: 3}); err == nil {
-		t.Fatal("ceiling no longer rejects an absurd score")
+	// and it must still be a ceiling, not a blank cheque. The bound moved
+	// a long way out when the loot economy was finally modelled — a real
+	// single-hull run scores 4.6 million — so the absurd figure it has to
+	// reject moved with it.
+	ceiling := MaxPlausiblePoints(s)
+	if err := Score(Submission{Points: ceiling * 4, TimeSec: 400, Completed: true, Levels: 3}); err == nil {
+		t.Fatalf("ceiling of %d no longer rejects four times itself", ceiling)
 	}
 }
 
@@ -108,7 +112,7 @@ func TestScoreRejectsImpossibleRuns(t *testing.T) {
 		{"negative time", Submission{TimeSec: -5}, "negative"},
 		{"absurd score", Submission{Points: 1 << 30, TimeSec: 90, Completed: true}, "exceeds"},
 		{"too many turrets", Submission{Turrets: 5000}, "exceeds"},
-		{"completed faster than physics allows", Submission{Points: 9000, TimeSec: 3, Completed: true}, "cannot be flown"},
+		{"completed faster than physics allows", Submission{Points: 9000, TimeSec: 3, Completed: true}, "full throttle"},
 		{"negative deaths", Submission{Deaths: -2}, "negative"},
 	}
 	for _, c := range cases {
@@ -144,7 +148,14 @@ func TestPickupsRaiseTheCeiling(t *testing.T) {
 	if ceiling < 50000 {
 		t.Fatalf("ceiling %d looks too low to admit a pickup-heavy run", ceiling)
 	}
-	if ceiling > 5_000_000 {
+	// The band is wide because the economy is: a real two-minute hull has
+	// scored 4.6 million, so a ceiling under about ten million would be
+	// rejecting people who actually played. Above about forty million it
+	// stops bounding anything worth bounding.
+	if ceiling < 10_000_000 {
+		t.Fatalf("ceiling %d would reject a real 4.6-million single-hull run", ceiling)
+	}
+	if ceiling > 40_000_000 {
 		t.Fatalf("ceiling %d is so loose it validates nothing", ceiling)
 	}
 	if err := Score(Submission{Points: ceiling - 1, TimeSec: 120, Completed: true}); err != nil {
@@ -171,5 +182,102 @@ func TestPlayerName(t *testing.T) {
 	got, err := PlayerName("  spaced  ")
 	if err != nil || got != "spaced" {
 		t.Errorf("PlayerName did not trim: got %q err %v", got, err)
+	}
+}
+
+// The run that found all of this. A player restarted on AURUM (the eighth
+// hull), flew that one hull, finished it in 256.8s and scored 4,650,367 —
+// and the validator threw it away twice over: it read "levels: 8" as eight
+// hulls flown and demanded 370s for them, and its points ceiling was a
+// third of what the hull can actually pay out. The end screen then showed
+// SENDING RUN... forever, so the rejection was invisible.
+//
+// Every number here is from that submission. If this test ever fails, a
+// real player's best run is being refused again.
+func TestTheRunThatWasWronglyRefused(t *testing.T) {
+	real := Submission{
+		Points: 4650367, TimeSec: 256.8, Turrets: 314, Deaths: 1,
+		Completed: true, Levels: 8, HullsFlown: 1,
+	}
+	if err := Score(real); err != nil {
+		t.Fatalf("refused a run that was really flown: %v", err)
+	}
+
+	// Same run claiming it flew all eight hulls in that time: impossible,
+	// and still caught.
+	lying := real
+	lying.HullsFlown = 8
+	if err := Score(lying); err == nil {
+		t.Fatal("accepted eight hulls flown in 256.8s")
+	}
+
+	// A client that does not send hullsFlown at all is assumed to have
+	// flown everything it reached — the old, strict reading. That must
+	// stay available, or old clients start getting 422s.
+	old := real
+	old.HullsFlown = 0
+	if err := Score(old); err == nil {
+		t.Fatal("accepted eight implied hulls in 256.8s")
+	}
+}
+
+// hullsFlown is a claim by the client, so it has to be bounded: a run
+// cannot have flown more hulls than it reached, and a nonsense value must
+// fall back to the strict reading rather than widening the window.
+func TestHullsFlownIsBounded(t *testing.T) {
+	for _, n := range []int{-5, 0, 99, 1 << 20} {
+		s := Submission{Levels: 4, HullsFlown: n}
+		if got := s.hullsFlown(); got != 4 {
+			t.Errorf("HullsFlown %d: got %d hulls, want the strict 4", n, got)
+		}
+	}
+	if got := (Submission{Levels: 4, HullsFlown: 2}).hullsFlown(); got != 2 {
+		t.Errorf("an honest claim of 2 hulls read as %d", got)
+	}
+}
+
+// The floor must be a one-way trip. It once modelled a return leg that the
+// game no longer has, which was harmless over one hull and rejected honest
+// completions over twenty-five.
+//
+// The bound checked here does not restate the formula: whatever the model
+// says, no hull can take longer to cross than its full length at the
+// slowest the ship ever flies, because the ship is never slower than
+// BaseMaxVX and never has to cover more than the whole hull. A floor above
+// that line is refusing runs that physics allows.
+func TestMinRunSecIsAOneWayTrip(t *testing.T) {
+	for n := range HullLengths {
+		floor := minHullSec(n)
+		ceiling := HullLengths[n] / BaseMaxVX
+		if floor >= ceiling {
+			t.Errorf("hull %d: floor %.1fs is not under %.1fs, the whole hull at base speed",
+				n, floor, ceiling)
+		}
+	}
+}
+
+// A run over more hulls must take longer, and the window must only ever
+// cover the hulls actually flown.
+func TestMinRunSecCoversOnlyTheHullsFlown(t *testing.T) {
+	one := minRunSec(0, 0)
+	if one <= 0 {
+		t.Fatalf("one hull has no minimum time: %v", one)
+	}
+	all := minRunSec(0, len(HullLengths)-1)
+	if all <= one {
+		t.Fatalf("flying every hull (%.1fs) is not slower than one (%.1fs)", all, one)
+	}
+	// Starting late must cost less than starting at the beginning, or
+	// restarting on a later hull is punished for hulls it never flew.
+	late := minRunSec(len(HullLengths)-1, len(HullLengths)-1)
+	if late >= all {
+		t.Fatalf("one late hull (%.1fs) is not cheaper than the campaign (%.1fs)", late, all)
+	}
+	// Out-of-range ends clamp rather than panic or run away.
+	if got := minRunSec(-3, 0); got != one {
+		t.Errorf("minRunSec(-3, 0) = %.3f, want the clamped %.3f", got, one)
+	}
+	if got := minRunSec(0, 1<<20); got != all {
+		t.Errorf("minRunSec(0, huge) = %.3f, want the clamped %.3f", got, all)
 	}
 }

@@ -678,6 +678,39 @@ to `SHIELD 125` in green once your ceiling has moved.
 Guns cap at level 3 each, rising by one per hull cleared to a hard ceiling of
 5; collecting at max converts to points instead.
 
+### How often a crate holds a gun
+
+Weights, not probabilities — the roll is over their sum, so one can be moved
+without rebalancing the rest:
+
+| Crate holds | Weight | Notes |
+| --- | --- | --- |
+| shields-refill | 34 | the backbone |
+| healthbars | 16 | |
+| **gunspeed** | 14 | **× 0.45 per level already held** |
+| **gunblaze** | 12 | **× 0.45 per level already held** |
+| lifesavers | 8 | the rare one |
+
+The two gun upgrades used to be a flat 42 of 100 between them whatever you
+were already carrying. Hull one yields about a dozen crates and hull two about
+twenty-two, so both guns hit their ceiling by the third hull of twenty-five —
+and from there a capped upgrade went on eating 42% of the table to hand back a
+consolation 300 points.
+
+Now the odds fall away with every level held and a capped level is not rolled
+at all. The first upgrade still arrives in the opening minute, because the
+opening should feel generous; maxing both from drops alone takes about 55
+crates instead of 19. Pimping the guns out faster than that is what the
+armourer is for — a deliberate purchase rather than a thing that simply
+happens to you.
+
+| | end of hull 1 | 2 | 3 | 4 | 5 |
+| --- | --- | --- | --- | --- | --- |
+| before | 2.3 / 2.1 | 4.0 / 4.0 | 5.0 / 5.0 | 5.0 / 5.0 | 5.0 / 5.0 |
+| after | 1.4 / 1.2 | 3.0 / 2.9 | 4.3 / 4.2 | 4.9 / 4.9 | 5.0 / 5.0 |
+
+(gunspeed / gunblaze, averaged over 800 simulated runs, cap rising 3 → 5.)
+
 **Losing a ship costs every weapon addon picked up since the last refit** —
 both gun levels and the entire armory. What the refit built into the ship
 survives, because that is the ship rather than something you are carrying. So
@@ -1163,17 +1196,41 @@ per-window (day, week, all time).
 
 ### Score validation — read this before trusting a number
 
-`internal/validate` derives bounds from the game's own physics. The hull is
-12,000px, top speed is 310px/s, so a full out-and-back cannot be flown in under
-**73.9 seconds** — any faster "completed" run is rejected outright. Point totals
+`internal/validate` derives bounds from the game's own physics. The first hull
+is 12,000px and top speed is 310px/s, so hull one cannot be flown in under
+**32.9 seconds** — any faster "completed" run is rejected outright. Point totals
 are checked against a ceiling computed from the run's duration and the scoring
 rules.
 
 The campaign is modelled hull by hull, including the fact that the ship gets
-faster with each refit — a later hull can legitimately be flown quicker than the
-first, and a bound that ignored that would reject honest runs. Three hulls out
-and back cannot be done in under **249 seconds**, and the full eight-hull
-campaign not in under **738 seconds**.
+faster with each refit and that the afterburner mod exists — a later hull is
+longer but can legitimately be flown quicker than an earlier one, and a bound
+that ignored that would reject honest runs. The full twenty-five-hull campaign
+cannot be flown in under **1,104 seconds**.
+
+Crucially, the floor covers **the hulls actually flown, not the hull reached**.
+A run restarted on AURUM reaches hull eight having flown one, and the client
+sends both numbers (`levels` and `hullsFlown`) because they mean different
+things — the first to the board, the second to the validator.
+
+**Being wrong in the strict direction is the expensive failure.** A bound that
+is too loose lets a fabricated number onto the board; a bound that is too tight
+only ever fires on people who really played. Both halves of this have now
+happened in anger:
+
+- The floor modelled a run out **and back**, long after the return leg was
+  removed. Harmless over one hull with eight in the campaign; an outright
+  rejection of honest completions at twenty-five.
+- The points ceiling was built before coins, bars, coffins and treasure
+  existed, so it assumed at most one pickup per kill worth at most 550. A real
+  single-hull run scored **4,650,367** against a ceiling of **1,744,776** and
+  was thrown away — and because the end screen said `SENDING RUN...` whatever
+  the answer was, the rejection was invisible and looked like a slow network.
+
+All three are now bounded by tests built from that exact submission
+(`TestTheRunThatWasWronglyRefused`), the end screen states every outcome, and
+`test/parity.test.mjs` recomputes each mirrored economy constant from
+`src/config.js` so they cannot drift again.
 
 **These are plausibility bounds, not anti-cheat.** They stop someone curling a
 score of 10⁹ onto the board. They do not stop anyone who reads the rules and
@@ -1255,9 +1312,13 @@ Several exist because of bugs that shipped:
 
 - **`test/parity.test.mjs`** reads `internal/validate/score.go` and compares
   it against `src/config.js`. The Go validator mirrors hull lengths, top
-  speed and boss rewards to decide what is physically possible; drift makes
-  it reject honest runs with a 422, which has happened twice. Going from
-  three hulls to eight broke four of these at once and this caught all four.
+  speed, boss rewards and the whole pickup economy to decide what is
+  physically possible; drift makes it reject honest runs with a 422, which
+  has happened three times. Going from three hulls to eight broke four of
+  these at once and this caught all four. The pickup economy was not covered
+  and that is the drift that threw away a 4.65-million run; it is covered now,
+  down to the treasure rate, which climbs per hull and so is derived from the
+  hull count on both sides rather than written down on either.
 - **`test/camera.test.mjs`** asserts the camera survives a malformed `dt`.
   A mis-ordered argument once made it `NaN`, which renders a black screen
   while score, ship and frame rate all still look healthy.

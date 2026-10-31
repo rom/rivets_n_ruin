@@ -121,6 +121,11 @@ setInterval(() => {
 
 // Exposed for poking at the feel from the devtools console.
 window.game = game;
+// Exposed for the tooling only: the gallery and the end-screen probe need
+// to put the net client into a given state (refused, placed, offline) to
+// photograph what the player would actually see. Nothing in the game reads
+// this back.
+window.net = netState();
 
 // Renaming mints a fresh identity server-side; the old name keeps its scores.
 function promptRename() {

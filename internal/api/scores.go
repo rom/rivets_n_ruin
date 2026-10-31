@@ -16,8 +16,13 @@ type submitScoreReq struct {
 	Deaths    int     `json:"deaths"`
 	Completed bool    `json:"completed"`
 	Levels    int     `json:"levels"`
-	RunID     string  `json:"runId"`
-	Sig       string  `json:"sig"`
+	// How many hulls this run actually covered. A run may begin on any
+	// hull already reached, so reaching hull eight does not mean flying
+	// eight. Optional: clients that do not send it are assumed to have
+	// flown every hull they reached, which is what they used to claim.
+	HullsFlown int    `json:"hullsFlown"`
+	RunID      string `json:"runId"`
+	Sig        string `json:"sig"`
 }
 
 func (s *Server) submitScore(w http.ResponseWriter, r *http.Request) {
@@ -56,6 +61,7 @@ func (s *Server) submitScore(w http.ResponseWriter, r *http.Request) {
 	if err := validate.Score(validate.Submission{
 		Points: req.Points, TimeSec: req.TimeSec, Turrets: req.Turrets,
 		Deaths: req.Deaths, Completed: req.Completed, Levels: req.Levels,
+		HullsFlown: req.HullsFlown,
 	}); err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return

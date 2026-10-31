@@ -542,6 +542,31 @@ export const PICKUP = {
   // pool and stops being a game. Five is the top.
   gunCapMax: 5,
 
+  // What a crate holds. Weights, not probabilities: the roll is over their
+  // sum, so one can be raised without rebalancing the rest.
+  //
+  // The two gun upgrades used to be a flat 42 of 100 between them, which
+  // against a cap of three each and some seventy crates on a hull meant
+  // both were maxed before the first boss. A fully pimped gun by the
+  // quarter mark is not a reward, it is the end of a progression that was
+  // supposed to last twenty-five hulls.
+  dropWeights: {
+    shield: 34,
+    healthbar: 16,
+    gunspeed: 14,
+    gunblaze: 12,
+    life: 8,
+  },
+
+  // ...and the odds of a gun upgrade fall away with every level already
+  // held. The first is common enough to arrive early — the opening minute
+  // should still feel generous — the third is something you fly for, and a
+  // level already at its cap is never rolled at all.
+  //
+  //   held:   0      1      2      3      4
+  //   weight: 1.00   0.45   0.20   0.09   0.04
+  gunDropFalloff: 0.45,
+
   // Coins and coffins. Destroyed things scatter coins, which are small and
   // everywhere; a coffin is the rare one worth stopping for.
   coinValue: 25,

@@ -2,10 +2,11 @@ import './_setup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  HELP, HELP_LAYOUT, HELP_PAGES, SETTINGS_LAYOUT, drawHelp, drawSettings,
+  HELP, HELP_LAYOUT, HELP_PAGES, SETTINGS_LAYOUT, END_LAYOUT, endLayout,
+  rankLine, REASON_CHARS, drawHelp, drawSettings,
 } from '../src/hud.js';
 import { DEFS, get as setting, set as setSetting, nudge, reset, display } from '../src/settings.js';
-import { LEVELS, VIEW_W } from '../src/config.js';
+import { LEVELS, VIEW_W, FIELD_H } from '../src/config.js';
 import { TUNES } from '../src/music.js';
 
 const ctx = () => document.createElement('canvas').getContext('2d');
@@ -314,4 +315,105 @@ test('the attract badge fits both of its labels', async () => {
   assert.ok(left + right + 8 <= w,
     `the labels need ${left + right + 8}px and the badge is ${w}px`);
   drawDemoBadge(document.createElement('canvas').getContext('2d'), { stateT: 1 });
+});
+
+
+// --- the end screen
+//
+// The rank line is one row when the run placed and two when it was
+// refused, because a refusal has to say why. With the offsets below it
+// baked in as literals, that second row was drawn straight through ENTER
+// TO FLY AGAIN — the same overlap that put the mod list through ENTER TO
+// LAUNCH on the overview page. Measured here instead.
+
+const NET_STATES = [
+  ['sending', { online: true, submitState: 'sending' }],
+  ['refused', { online: true, submitState: 'refused', submitError: 'score 9 exceeds the maximum 8 attainable in 1.0s' }],
+  ['refused, no reason', { online: true, submitState: 'refused' }],
+  // The backend's messages are prose and can be long; the line is centred
+  // on a 640px screen and must not run off both ends of it.
+  ['refused, long reason', { online: true, submitState: 'refused',
+    submitError: 'flew 25 hull(s) in 30.0s, which cannot be done in under 1104.1s at full throttle' }],
+  ['recorded', { online: true, submitState: 'recorded' }],
+  ['placed', { online: true, submitState: 'recorded', rank: { position: 1 }, stats: { players: 37 } }],
+  ['offline', { online: false }],
+];
+
+test('nothing on the end screen is drawn on top of anything else', () => {
+  const ROW = END_LAYOUT.pitch;
+  for (const state of ['gameover', 'victory']) {
+    for (const [what, net] of NET_STATES) {
+      const line = rankLine(net);
+      const L = endLayout(state, line);
+      const rows = [
+        ['score', L.score], ['stats', L.stats], ['coins', L.coins],
+        ['rank', L.rank],
+      ];
+      if (line.sub) rows.push(['rank reason', L.rankBottom]);
+      rows.push(['prompt', L.prompt], ['board', L.board]);
+      for (let i = 1; i < rows.length; i++) {
+        const gap = rows[i][1] - rows[i - 1][1];
+        assert.ok(gap >= ROW,
+          `${state}/${what}: "${rows[i][0]}" is ${gap}px below "${rows[i - 1][0]}", `
+          + `and a row is ${ROW}px tall — they overlap`);
+      }
+    }
+  }
+});
+
+test('the end screen board still fits above the radar band', () => {
+  // The board draws its heading, then up to five rows at 12px, starting
+  // 16px below. Everything has to land inside the playfield.
+  const tallest = Math.max(...['gameover', 'victory'].flatMap((state) =>
+    NET_STATES.map(([, net]) => endLayout(state, rankLine(net)).board)));
+  const boardBottom = tallest + 16 + 5 * 12;
+  assert.ok(boardBottom <= FIELD_H,
+    `the board ends at y=${boardBottom}, past the playfield at ${FIELD_H}`);
+});
+
+test('a refused run is given room its reason actually needs', () => {
+  const placed = endLayout('gameover', rankLine(
+    { online: true, submitState: 'recorded', rank: { position: 1 } }));
+  const refused = endLayout('gameover', rankLine(
+    { online: true, submitState: 'refused', submitError: 'nope' }));
+  assert.ok(refused.prompt > placed.prompt,
+    'a two-row rank line did not push the prompt down, so it will be drawn through');
+  assert.equal(refused.prompt - placed.prompt, END_LAYOUT.subGap,
+    'the prompt moved by something other than the height of the extra row');
+});
+
+test('every end-screen rank line fits the width it is centred in', () => {
+  for (const [what, net] of NET_STATES) {
+    const line = rankLine(net);
+    for (const part of [line.head, line.sub]) {
+      if (!part) continue;
+      assert.ok(part.length * CHAR <= VIEW_W - 16,
+        `${what}: "${part}" is ${part.length * CHAR}px wide, the screen is ${VIEW_W}px`);
+    }
+  }
+});
+
+// The refusal reason is the one thing a player can quote back, so it must
+// arrive whole. It was truncated at a guessed 64 characters; the longest
+// message the validator actually sends is 67, so the number at the end —
+// the useful part — was the part cut off.
+test('a real refusal message is not truncated', () => {
+  const real = [
+    'score 1000000000 exceeds the maximum 124264118 attainable in 256.8s',
+    'flew 25 hull(s) in 30.0s, which cannot be done in under 1104.1s at full throttle',
+    'turret count 5000 exceeds 3250, the most a full campaign carries',
+    'a run must be opened before a score can be submitted',
+  ];
+  for (const msg of real) {
+    const line = rankLine({ online: true, submitState: 'refused', submitError: msg });
+    assert.equal(line.sub, msg.toUpperCase(),
+      `"${msg}" (${msg.length} chars) was cut to ${line.sub.length}`);
+    assert.ok(line.sub.length * CHAR <= VIEW_W - 16, `"${msg}" does not fit the screen`);
+  }
+});
+
+test('an absurdly long reason is cut to something that fits', () => {
+  const line = rankLine({ online: true, submitState: 'refused', submitError: 'x'.repeat(500) });
+  assert.equal(line.sub.length, REASON_CHARS);
+  assert.ok(line.sub.length * CHAR <= VIEW_W - 16);
 });

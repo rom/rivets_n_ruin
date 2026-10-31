@@ -28,6 +28,11 @@ const (
 	// later hull can legitimately be flown quicker than the first.
 	MaxVXPerLevel = 24.0
 
+	// MODS.afterburner: +40 top speed, buyable on any hull. Leaving it out
+	// of the floor made every run by a pilot who had bought it look
+	// impossible.
+	AfterburnerBonus = 40.0
+
 	BonusTurnaround = 2500
 	BonusComplete   = 5000
 	TimeBonusGrace  = 260.0
@@ -44,12 +49,58 @@ const (
 	// honest runs with a 422, which has happened before.
 	MaxTurretsPerHull = 130
 
-	// Pickups. At most one drops per kill, and the richest outcome is a
-	// lifesaver collected at maximum lives: its own score plus the 500
-	// consolation bonus.
-	PointsPickup   = 50
-	MaxPickupBonus = 500
-	MaxPerPickup   = PointsPickup + MaxPickupBonus
+	// Pickups. The old model allowed one per kill worth at most 550, which
+	// was true when a kill dropped at most one upgrade crate. It has not
+	// been true since coins, gold bars, coffins and four tiers of treasure
+	// were added: a single boss sheds a hold, and a real 4.6-million run
+	// was rejected against a ceiling of 1.7 million.
+	//
+	// These mirror PICKUP in src/config.js. The parity test compares them.
+	PointsPickup    = 50
+	MaxPickupBonus  = 500
+	CoinValue       = 25
+	MaxCoinsPerKill = 5
+	BarValue        = 250
+	CoffinValue     = 2500
+	BestTreasure    = 9000
+	BossBarsMax     = 6
+	BossCoffinsMax  = 2
+	TreasureRolls   = 7
+
+	// Drop rates, from PICKUP in src/config.js, at their most generous
+	// (the last hull's treasure odds, and a turret's crate chance).
+	CrateChance  = 0.60
+	BarChance    = 0.16
+	CoffinChance = 0.045
+
+	// Treasure odds climb with the hull and are never capped, so the most
+	// generous value is the one on the last hull. Kept as the two parts
+	// rather than the product: the product was quietly the eight-hull
+	// answer long after the campaign reached twenty-five, and the pieces
+	// are what parity.test.mjs can check against src/config.js.
+	TreasureBase    = 0.022
+	TreasurePerHull = 0.006
+
+	// How far above the expected outcome the bound sits. A plausibility
+	// bound has to clear every real run with room to spare; assuming every
+	// kill drops everything instead put the ceiling past a billion, which
+	// bounds nothing.
+	LuckFactor = 4.0
+
+	// SCAVENGER RIG III multiplies what loot is worth; RUIN multiplies
+	// every point awarded. Both are legitimately available.
+	MaxCoinMul  = 3.6
+	MaxScoreMul = 1.7
+
+	// HULL_BONUS in src/config.js, at its most generous: every gun broken,
+	// a full sweep, six ships kept, no losses — plus a share of the haul,
+	// which is applied to the loot total rather than added flat.
+	BonusTowers  = 5000
+	BonusSweep   = 4000
+	BonusPerLife = 1800
+	MaxLives     = 6
+	BonusNoLoss  = 2500
+	HaulShare    = 0.3
 )
 
 // BossRewards mirrors BOSSES[] in src/config.js: the kill score for each
@@ -81,6 +132,13 @@ var HullLengths = []float64{
 // NumLevels is how many hulls a full campaign runs.
 func NumLevels() int { return len(HullLengths) }
 
+// maxTreasureChance is the treasure drop rate on the last hull, which is
+// the most generous one in the game. Derived from the hull count rather
+// than written down, so adding hulls cannot leave it behind.
+func maxTreasureChance() float64 {
+	return TreasureBase + TreasurePerHull*float64(len(HullLengths)-1)
+}
+
 // minHullSec is the fastest hull n can be flown, at the top speed the ship
 // has by the time it gets there.
 //
@@ -94,8 +152,26 @@ func minHullSec(n int) float64 {
 	length := HullLengths[n]
 	// One direction: the launch pad to the boss arena at the far end.
 	distance := length - Apron*0.55 - StartX
-	speed := BaseMaxVX + MaxVXPerLevel*float64(n)
+	// The top speed a ship can have on hull n: every refit so far, plus
+	// the afterburner mod, which the model used to leave out entirely.
+	speed := BaseMaxVX + MaxVXPerLevel*float64(n) + AfterburnerBonus
 	return distance / speed
+}
+
+// minRunSec is the fastest the hulls actually flown can be flown. A run
+// that starts at hull `from` and ends at hull `to` flies only those.
+func minRunSec(from, to int) float64 {
+	if from < 0 {
+		from = 0
+	}
+	if to >= len(HullLengths) {
+		to = len(HullLengths) - 1
+	}
+	total := 0.0
+	for i := from; i <= to; i++ {
+		total += minHullSec(i)
+	}
+	return total
 }
 
 // MinCompletionSec is the fastest a campaign of the given number of hulls can
@@ -122,6 +198,14 @@ type Submission struct {
 	Deaths    int
 	Completed bool
 	Levels    int // hulls reached this run; 0 is treated as 1
+
+	// Hulls actually flown. A run may begin on any hull already reached,
+	// with the earlier refits credited — so finishing AURUM from a standing
+	// start reaches hull eight having flown one. Conflating the two made
+	// the time floor demand eight hulls' worth of flying for one hull's
+	// run and reject it. Zero means "not reported", and falls back to
+	// Levels, which is what every client before this sent.
+	HullsFlown int
 }
 
 func (s Submission) levels() int {
@@ -135,6 +219,17 @@ func (s Submission) levels() int {
 }
 
 // MaxPlausiblePoints is the ceiling for a run of the given shape, with slack.
+// hullsFlown is how many hulls this run actually covered. Clients before
+// the field existed did not send it; for them, reaching hull n means
+// flying n, which is what they were assumed to be doing anyway.
+func (s Submission) hullsFlown() int {
+	n := s.levels()
+	if s.HullsFlown <= 0 || s.HullsFlown > n {
+		return n
+	}
+	return s.HullsFlown
+}
+
 func MaxPlausiblePoints(s Submission) int {
 	n := s.levels()
 	total := 0
@@ -161,14 +256,42 @@ func MaxPlausiblePoints(s Submission) int {
 	total += PointsIntercept * interceptors
 
 	// Each hull reached means its boss could have been fought and killed.
-	bossDrops := 0
 	for i := 0; i < n && i < len(BossRewards); i++ {
 		total += BossRewards[i]
-		bossDrops += BossPickupDrops[i]
 	}
 
-	// One pickup per kill at most, plus whatever the bosses shed.
-	total += MaxPerPickup * (kills + bossDrops)
+	// --- loot
+	//
+	// The generous reading of every kill: the full coin scatter, an upgrade
+	// crate at its best outcome, and a reliquary. No real kill does all
+	// three, which is the point — this is a plausibility bound, not a
+	// simulation, and being loose here costs a cheat headroom while being
+	// tight here rejects people who actually played.
+	// Coins always scatter; everything else is a roll, weighted by its own
+	// rate and then multiplied by LuckFactor so a lucky run still clears.
+	// A crate is capped at one per kill because only one can drop.
+	perKill := float64(MaxCoinsPerKill * CoinValue)
+	perKill += math.Min(CrateChance*LuckFactor, 1) * (PointsPickup + MaxPickupBonus)
+	perKill += BarChance * LuckFactor * BarValue
+	perKill += CoffinChance * LuckFactor * CoffinValue
+	perKill += maxTreasureChance() * LuckFactor * BestTreasure
+	loot := perKill * float64(kills)
+
+	// Every boss additionally sheds a hold.
+	perBoss := BossBarsMax*BarValue + BossCoffinsMax*CoffinValue + TreasureRolls*BestTreasure
+	loot += float64(perBoss * n)
+
+	// Scavenger lifts what loot is worth, and the haul bonus pays a share
+	// of that total on top.
+	loot *= MaxCoinMul * (1 + HaulShare)
+	total += int(loot)
+
+	// --- the end-of-hull bonus, at its most generous
+	perHull := BonusTowers + BonusSweep + BonusPerLife*MaxLives + BonusNoLoss
+	total += perHull * n
+
+	// Difficulty multiplies every point awarded.
+	total = int(float64(total) * MaxScoreMul)
 	return total + 1000 // slack for tuning drift
 }
 
@@ -196,10 +319,15 @@ func Score(s Submission) error {
 	}
 
 	if s.Completed {
-		if min := MinCompletionSec(s.levels()); s.TimeSec < min {
+		// Over the hulls actually flown, not the hull reached. A run that
+		// starts at AURUM flies one hull and reaches eight.
+		flown := s.hullsFlown()
+		to := s.levels() - 1
+		from := to - flown + 1
+		if min := minRunSec(from, to); s.TimeSec < min {
 			return fmt.Errorf(
-				"completed %d hull(s) in %.1fs, but they cannot be flown out and back in under %.1fs at full throttle",
-				s.levels(), s.TimeSec, min)
+				"flew %d hull(s) in %.1fs, which cannot be done in under %.1fs at full throttle",
+				flown, s.TimeSec, min)
 		}
 	}
 	if max := MaxPlausiblePoints(s); s.Points > max {
