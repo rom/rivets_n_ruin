@@ -16,7 +16,10 @@ import { updateParticles, explode, sparks, particles, thrust as thrustPlume } fr
 import {
   updatePickups, resetPickups, pickups, TREASURES, freshHaul,
 } from './pickups.js';
-import { updateFoes, resetFoes, foes, hitFoe, spawnFoeForLevel, SPEC as FOE_SPEC } from './foes.js';
+import {
+  updateFoes, resetFoes, foes, hitFoe, spawnFoeForLevel, dropAttached,
+  SPEC as FOE_SPEC,
+} from './foes.js';
 import { updateOrdnance, resetOrdnance, ordnance } from './armory.js';
 import {
   minis, resetMinis, planMinis, updateMinis, hitMini, hitMinis, miniTargets,
@@ -649,6 +652,9 @@ function recordBest(game) {
 function die(game) {
   const p = game.player;
   p.alive = false;
+  // Whatever was clamped to the hull is destroyed with it, before the new
+  // ship arrives to inherit it.
+  dropAttached(game);
   p.lives--;
   game.deaths++;
   game.deathsThisHull++;

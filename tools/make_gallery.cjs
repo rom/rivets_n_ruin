@@ -40,6 +40,12 @@ const OUT = path.join(__dirname, '..', 'docs');
   if (reached !== 'play') throw new Error(`could not reach play: stuck in ${reached}`);
   await page.evaluate(() => { window.game.player.invuln = 1e9; });
   const el = await page.$('#game');
+  // The frame is three bands: playfield, radar, HUD. These are the element
+  // pixel heights of the first one and of the first two, so a clip says
+  // what it means rather than carrying a number that drifts.
+  const box = await el.boundingBox();
+  const PLAY = Math.round(box.height * (324 / 384));
+  const PLAY_RADAR = Math.round(box.height * (348 / 384));
 
   // Every scene below poses the world by hand, so nothing may be mid-banner,
   // mid-sequence or mid-menu when the shutter opens.
@@ -54,8 +60,19 @@ const OUT = path.join(__dirname, '..', 'docs');
     g.player.invuln = 1e9;
   });
 
-  const shot = async (name, clip) => {
-    await el.screenshot({ path: path.join(OUT, name), ...(clip ? { clip } : {}) });
+  // Element screenshots ignore `clip` — Playwright only honours it on a
+  // page screenshot — so every clip passed here had been quietly doing
+  // nothing. Crops now go through the page, positioned from the element's
+  // own box, and everything else takes the whole frame.
+  const shot = async (name) => {
+    await el.screenshot({ path: path.join(OUT, name) });
+    console.log('  ' + name);
+  };
+  const cropShot = async (name, top, height) => {
+    await page.screenshot({
+      path: path.join(OUT, name),
+      clip: { x: box.x, y: box.y + top, width: box.width, height },
+    });
     console.log('  ' + name);
   };
 
@@ -80,8 +97,7 @@ const OUT = path.join(__dirname, '..', 'docs');
     await clear();
     await page.waitForTimeout(450);
     await clear();
-    await shot(`hull-${String(i + 1).padStart(2, '0')}-${hulls[i].toLowerCase()}.png`,
-      { x: 0, y: 0, width: 1400, height: 660 });
+    await shot(`hull-${String(i + 1).padStart(2, '0')}-${hulls[i].toLowerCase()}.png`);
   }
 
   // --- the attacker roster, posed on one screen
@@ -111,7 +127,7 @@ const OUT = path.join(__dirname, '..', 'docs');
   });
   await clear();
   await page.waitForTimeout(120);
-  await shot('attackers.png', { x: 0, y: 0, width: 1400, height: 660 });
+  await shot('attackers.png');
 
   // --- the miniboss roster, one of each posed on one screen
   console.log('minibosses:');
@@ -144,7 +160,7 @@ const OUT = path.join(__dirname, '..', 'docs');
   await page.waitForTimeout(120);
   await clear();
   await poseMinis(false);
-  await shot('minibosses.png', { x: 0, y: 0, width: 1400, height: 560 });
+  await shot('minibosses.png');
 
   // --- the armory in flight
   console.log('armory:');
@@ -165,7 +181,7 @@ const OUT = path.join(__dirname, '..', 'docs');
   });
   await clear();
   await page.waitForTimeout(320);
-  await shot('armory.png', { x: 0, y: 0, width: 1400, height: 760 });
+  await shot('armory.png');
 
   // --- every boss, one shot each
   console.log('bosses:');
@@ -191,8 +207,7 @@ const OUT = path.join(__dirname, '..', 'docs');
     }, i);
     await clear();
     await page.waitForTimeout(220);
-    await shot(`boss-${String(i + 1).padStart(2, '0')}-${bossNames[i].toLowerCase().replace(/[^a-z]/g, '')}.png`,
-      { x: 0, y: 0, width: 1400, height: 620 });
+    await shot(`boss-${String(i + 1).padStart(2, '0')}-${bossNames[i].toLowerCase().replace(/[^a-z]/g, '')}.png`);
   }
   await page.evaluate(() => { window.game.boss = null; });
 
@@ -226,7 +241,7 @@ const OUT = path.join(__dirname, '..', 'docs');
   });
   await clear();
   await page.waitForTimeout(200);
-  await shot('radar.png', { x: 0, y: 0, width: 1400, height: 120 });
+  await cropShot('radar.png', PLAY - 46, PLAY_RADAR - PLAY + 56);
 
   // --- treasure, laid out
   console.log('treasure:');
@@ -251,7 +266,7 @@ const OUT = path.join(__dirname, '..', 'docs');
   });
   await clear();
   await page.waitForTimeout(150);
-  await shot('treasure.png', { x: 0, y: 0, width: 1400, height: 520 });
+  await shot('treasure.png');
 
   // --- a laser gate, with the ship held against it
   console.log('laser:');
@@ -271,7 +286,7 @@ const OUT = path.join(__dirname, '..', 'docs');
   });
   await clear();
   await page.waitForTimeout(260);
-  await shot('laser.png', { x: 0, y: 0, width: 1400, height: 620 });
+  await shot('laser.png');
 
   // --- deflector shields, at four states of wear
   console.log('shields:');
@@ -298,7 +313,7 @@ const OUT = path.join(__dirname, '..', 'docs');
   await clear();
   await page.waitForTimeout(150);
   await poseShields();
-  await shot('shields.png', { x: 0, y: 0, width: 1400, height: 420 });
+  await shot('shields.png');
 
   // --- the overview, with a bonus and mods on it
   console.log('overview:');

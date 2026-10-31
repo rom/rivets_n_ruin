@@ -6,10 +6,28 @@ export const VERSION = '0.9.0';
 export const BUILD = 'RIVETS';
 
 export const VIEW_W = 640;
-export const VIEW_H = 360;
 
+// Three stacked bands, in this order, and none of them overlaps another.
+//
+// The radar used to be drawn over the top of the playfield, faded out when
+// the ship flew under it. That was never quite honest, and it was plainly
+// wrong for anything that is not the ship: a gun mounted on the upper
+// girder sits at y=16 with its barrel reaching to about y=29, entirely
+// behind a strip that ran from 0 to 22. Half the hull's guns were hidden
+// behind the thing that was supposed to be showing you where they were.
+//
+// So the frame is taller instead. The playfield keeps every pixel it had,
+// which means no gameplay constant moves; the window simply shows a band
+// more. HUD overlays still cover the radar, because a menu should not have
+// a live radar running underneath it.
+export const FIELD_H = 324;              // playfield height, unchanged
+export const RADAR_H = 24;               // the radar strip, its own band
 export const HUD_H = 36;
-export const FIELD_H = VIEW_H - HUD_H;   // 324 — playfield height
+export const VIEW_H = FIELD_H + RADAR_H + HUD_H;   // 384
+
+export const RADAR_Y = FIELD_H;          // top of the radar band
+export const HUD_Y = FIELD_H + RADAR_H;  // top of the HUD panel
+
 export const RIM = 16;                   // structural girder along each hull edge
 export const FIELD_TOP = RIM;            // 16
 export const FIELD_BOT = FIELD_H - RIM;  // 308

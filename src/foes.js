@@ -66,6 +66,23 @@ export const foes = makePool(26, () => ({
 
 export function resetFoes() { foes.clear(); }
 
+// Anything riding the ship goes down with it.
+//
+// A leech latched on when a hull was lost used to survive the explosion and
+// still be attached to the replacement — so one bad grab drained every
+// remaining ship in turn and ended the run. The check inside the leech's
+// own update (`if (!p.alive) kill`) could never fire: death switches the
+// game to the 'dying' state in the same frame, and attackers are not
+// updated in that state at all. It has to happen where the ship dies.
+export function dropAttached(game) {
+  for (let i = foes.count - 1; i >= 0; i--) {
+    const f = foes.items[i];
+    if (f.state !== 1 || !SPEC[f.kind] || !SPEC[f.kind].grabR) continue;
+    explode(f.x, f.y, 0.9, '#d8ff9a', '#9ad94e');
+    foes.kill(i);
+  }
+}
+
 export function spawnFoe(game, kind) {
   const spec = SPEC[kind];
   if (!spec) return null;
@@ -208,7 +225,11 @@ export function updateFoes(game, dt) {
           f.x += (dx / d) * spec.speed * dt;
           f.baseY += (dy / d) * spec.speed * dt;
           f.y = f.baseY;
-          if (p.alive && d < spec.grabR) { f.state = 1; }
+          // Not while the ship is invulnerable: a leech that grabbed
+          // during respawn grace would start draining the instant it ran
+          // out, which is indistinguishable from a respawn that does not
+          // work.
+          if (p.alive && p.invuln <= 0 && d < spec.grabR) { f.state = 1; }
         } else {
           // attached: rides along, draining, until shot off
           f.x = p.x - p.facing * 14;
@@ -245,8 +266,14 @@ export function updateFoes(game, dt) {
 
     if (f.x < game.cam.x - 160 || f.x > game.cam.x + VIEW_W + 160) { foes.kill(i); continue; }
 
-    // ramming
-    if (p.alive && p.invuln <= 0
+    // Ramming — but not for something already clamped on. An attached
+    // leech rides at the ship's own position, so the generic ram fired
+    // every time its 0.35s invulnerability lapsed: 18 damage three times a
+    // second, about five times the drain it is specified to do, and the
+    // invulnerability that ram sets then suppressed the drain entirely. It
+    // has its own damage model; this one does not apply to it.
+    const clamped = f.state === 1 && spec.grabR;
+    if (!clamped && p.alive && p.invuln <= 0
       && Math.abs(f.x - p.x) < spec.r + 9 && Math.abs(f.y - p.y) < spec.r + 5) {
       if (f.kind === 'mine') { detonate(game, f, i); continue; }
       p.shield -= 18;
