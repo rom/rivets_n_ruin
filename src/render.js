@@ -3,13 +3,21 @@ import {
 } from './config.js';
 import { interceptors } from './enemies.js';
 import { playerShots, enemyShots } from './projectiles.js';
-import { particles } from './particles.js';
+import { particles, lights } from './particles.js';
+import { hash2 } from './rng.js';
 import { pickups, tint } from './pickups.js';
 import { livingParts, shellUp } from './boss.js';
 import { PICKUP } from './config.js';
 
 let scanlines = null;
 let vignette = null;
+let depth = null;          // vertical shading over the hull
+let glow = null;           // half-res bright pass
+let glowCtx = null;
+let blur = null;           // quarter-res, for the blur bounce
+let blurCtx = null;
+
+const GLOW_SCALE = 0.5;
 
 function buildOverlays() {
   // 2px scanline pattern, tiled — cheaper than 180 strokes a frame
@@ -32,6 +40,36 @@ function buildOverlays() {
   vg.fillStyle = grad;
   vg.fillRect(0, 0, VIEW_W, FIELD_H);
   vignette = v;
+
+  // A vertical gradient over the hull: brighter through the middle, falling
+  // off toward the girders. Flat lighting is what made the old hull read as
+  // wallpaper rather than a surface.
+  const d = document.createElement('canvas');
+  d.width = 1; d.height = FIELD_H;
+  const dg = d.getContext('2d');
+  const dgrad = dg.createLinearGradient(0, 0, 0, FIELD_H);
+  dgrad.addColorStop(0, 'rgba(0,0,0,0.20)');
+  dgrad.addColorStop(0.055, 'rgba(0,0,0,0.42)');
+  dgrad.addColorStop(0.22, 'rgba(0,0,0,0.10)');
+  dgrad.addColorStop(0.5, 'rgba(96,126,156,0.06)');
+  dgrad.addColorStop(0.78, 'rgba(0,0,0,0.10)');
+  dgrad.addColorStop(0.945, 'rgba(0,0,0,0.42)');
+  dgrad.addColorStop(1, 'rgba(0,0,0,0.20)');
+  dg.fillStyle = dgrad;
+  dg.fillRect(0, 0, 1, FIELD_H);
+  depth = d;
+
+  glow = document.createElement('canvas');
+  glow.width = Math.round(VIEW_W * GLOW_SCALE);
+  glow.height = Math.round(FIELD_H * GLOW_SCALE);
+  glowCtx = glow.getContext('2d');
+
+  blur = document.createElement('canvas');
+  blur.width = Math.round(glow.width / 2);
+  blur.height = Math.round(glow.height / 2);
+  blurCtx = blur.getContext('2d');
+  blurCtx.imageSmoothingEnabled = true;
+  glowCtx.imageSmoothingEnabled = true;
 }
 
 export function drawWorld(ctx, game) {
@@ -54,6 +92,11 @@ export function drawWorld(ctx, game) {
   // the hull itself: one blit from the pre-rendered strip
   ctx.drawImage(game.level.bg, camX, 0, VIEW_W, FIELD_H, 0, camY, VIEW_W, FIELD_H);
 
+  // lighting on the surface, under everything that sits on it
+  drawDepth(ctx, camY);
+  drawLights(ctx, camX, camY);
+  drawBeacons(ctx, camX, camY);
+
   ctx.translate(-camX, camY);
 
   drawTurrets(ctx, game, camX);
@@ -66,6 +109,12 @@ export function drawWorld(ctx, game) {
 
   ctx.restore();
 
+  // superstructure passing in front, scrolling faster than the hull
+  drawForeground(ctx, camX, camY);
+
+  // bloom: re-draw only the bright things small, blur, add back
+  drawBloom(ctx, game, camX, camY);
+
   // CRT dressing
   ctx.drawImage(vignette, 0, 0);
   ctx.fillStyle = scanlines;
@@ -77,6 +126,141 @@ export function drawWorld(ctx, game) {
     ctx.fillRect(0, 0, VIEW_W, FIELD_H);
     ctx.globalAlpha = 1;
   }
+}
+
+function drawDepth(ctx, camY) {
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(depth, 0, 0, 1, FIELD_H, 0, camY, VIEW_W, FIELD_H);
+}
+
+// Explosions and muzzle flashes light the plating around them.
+function drawLights(ctx, camX, camY) {
+  if (!lights.count) return;
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < lights.count; i++) {
+    const l = lights.items[i];
+    const sx = l.x - camX;
+    if (sx < -l.r || sx > VIEW_W + l.r) continue;
+    const a = Math.max(0, l.life / l.maxLife);
+    const g = ctx.createRadialGradient(sx, l.y + camY, 0, sx, l.y + camY, l.r);
+    g.addColorStop(0, l.color);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = a * a * 0.5;
+    ctx.fillStyle = g;
+    ctx.fillRect(sx - l.r, l.y + camY - l.r, l.r * 2, l.r * 2);
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+// Deterministic beacons along the rim girders, so the hull looks powered.
+function drawBeacons(ctx, camX, camY) {
+  const SPACING = 260;
+  const first = Math.floor(camX / SPACING) * SPACING;
+  const t = performance.now() / 1000;
+  for (let bx = first; bx < camX + VIEW_W + SPACING; bx += SPACING) {
+    const n = hash2(bx, 31);
+    const top = n > 0.5;
+    const sx = bx - camX + (n * 60 | 0);
+    if (sx < -6 || sx > VIEW_W + 6) continue;
+    const phase = Math.sin(t * 2.2 + n * 9);
+    if (phase < 0.2) continue;
+    const y = (top ? FIELD_TOP - 7 : FIELD_BOT + 5) + camY;
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = (phase - 0.2) * 0.9;
+    ctx.fillStyle = n > 0.82 ? COL.danger : COL.cool;
+    ctx.fillRect(sx, y, 2, 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillRect(sx, y, 1, 1);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+}
+
+// Superstructure in front of the ship, scrolling faster than the hull so it
+// reads as nearer. Kept to the girders and narrow, because a foreground that
+// hides a threat is a foreground that loses runs.
+function drawForeground(ctx, camX, camY) {
+  const PAR = 1.32;
+  const SPACING = 430;
+  const fx = camX * PAR;
+  const first = Math.floor(fx / SPACING) * SPACING;
+
+  for (let gx = first; gx < fx + VIEW_W + SPACING; gx += SPACING) {
+    const n = hash2(gx, 17);
+    const sx = Math.round(gx - fx + n * 120);
+    if (sx < -26 || sx > VIEW_W + 26) continue;
+
+    const w = 7 + (n * 9 | 0);
+    const fromTop = n > 0.5;
+    const len = 44 + (hash2(gx, 23) * 78 | 0);
+    const y0 = fromTop ? camY : FIELD_H - len + camY;
+
+    ctx.globalAlpha = 0.72;
+    ctx.fillStyle = '#05070b';
+    ctx.fillRect(sx, y0, w, len);
+    // a lit edge so it is structure, not a hole
+    ctx.fillStyle = '#1d242e';
+    ctx.fillRect(sx, y0, 1, len);
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = '#2b3542';
+    ctx.fillRect(sx + 2, fromTop ? y0 + len - 3 : y0 + 1, w - 4, 2);
+    ctx.globalAlpha = 1;
+
+    // an occasional cable swinging across the gap
+    if (hash2(gx, 41) > 0.72) {
+      ctx.globalAlpha = 0.45;
+      ctx.strokeStyle = '#05070b';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(sx + w / 2, fromTop ? y0 + len : y0);
+      ctx.quadraticCurveTo(sx + w / 2 + 40, FIELD_H / 2 + camY, sx + w / 2 + 86, fromTop ? y0 + len - 20 : y0 + 20);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
+// Cheap bloom: the bright elements are re-drawn at half scale into their own
+// buffer, bounced through a quarter-size canvas to blur them, then added
+// back. Everything neon in the scene picks up a halo without a shader.
+function drawBloom(ctx, game, camX, camY) {
+  glowCtx.setTransform(1, 0, 0, 1, 0, 0);
+  glowCtx.clearRect(0, 0, glow.width, glow.height);
+  glowCtx.save();
+  glowCtx.scale(GLOW_SCALE, GLOW_SCALE);
+  glowCtx.translate(-camX, camY);
+  drawShots(glowCtx);
+  drawParticles(glowCtx);
+  if (game.player.alive) drawEngineGlow(glowCtx, game.player);
+  glowCtx.restore();
+
+  // two-tap blur
+  for (let i = 0; i < 2; i++) {
+    blurCtx.clearRect(0, 0, blur.width, blur.height);
+    blurCtx.drawImage(glow, 0, 0, blur.width, blur.height);
+    glowCtx.clearRect(0, 0, glow.width, glow.height);
+    glowCtx.drawImage(blur, 0, 0, blur.width, blur.height, 0, 0, glow.width, glow.height);
+  }
+
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.85;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(glow, 0, 0, glow.width, glow.height, 0, 0, VIEW_W, FIELD_H);
+  ctx.imageSmoothingEnabled = false;
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawEngineGlow(g, p) {
+  g.save();
+  g.translate(Math.round(p.x), Math.round(p.y));
+  g.globalCompositeOperation = 'lighter';
+  g.fillStyle = COL.cool;
+  g.fillRect(-p.facing * 18 - 3, -3, 6, 6);
+  g.fillStyle = COL.coolHi;
+  g.fillRect(-p.facing * 16 - 2, -2, 4, 4);
+  g.restore();
 }
 
 // ----------------------------------------------------------------- entities
@@ -92,6 +276,9 @@ function drawShip(ctx, p) {
 
   ctx.save();
   ctx.translate(Math.round(p.x), Math.round(p.y));
+  // bank into vertical movement; the ship having a body makes the inertia
+  // legible in a way a rigid sprite never does
+  ctx.rotate(clamp(p.vy / 230, -1, 1) * 0.26 * (sx < 0 ? -1 : 1));
   ctx.scale(sx, 1);
 
   if (p.invuln > 0 && Math.floor(p.invuln * 18) % 2 === 0) ctx.globalAlpha = 0.4;

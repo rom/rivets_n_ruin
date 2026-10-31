@@ -47,6 +47,7 @@ export function makeGame(modSpec = null) {
     toast: null,
     returning: false,      // outbound leg done, now fly the hull back
     boss: null,            // set once the arena at the far end is entered
+    quitting: false,       // quit confirmation is open
     banner: null,
     best: Number(localStorage.getItem('rnr.best') || 0),
     onPickup: (kind) => sfxPickup(kind),
@@ -77,6 +78,7 @@ function reset(game) {
   game.spawnCd = 1.2;
   game.returning = false;
   game.boss = null;
+  game.quitting = false;
   game.flash = 0;
   game.time = 0;
   game.runTime = 0;
@@ -170,6 +172,33 @@ function scoreIntensity(game) {
 export function update(game, dt) {
   game.stateT += dt;
   setIntensity(scoreIntensity(game));
+
+  // --- quit confirmation. Freezes the simulation while it is up: being shot
+  // while deciding whether to leave would be a cheap way to lose a run.
+  if (game.quitting) {
+    if (tapped('yes')) {
+      game.quitting = false;
+      // The run was genuinely flown, so it is recorded rather than forfeited.
+      recordBest(game);
+      reportRun(game);
+      game.state = 'title';
+      game.stateT = 0;
+      sfxGameOver();
+    } else if (tapped('no') || tapped('quit') || tapped('pause')) {
+      game.quitting = false;
+      sfxUi();
+    }
+    updateParticles(dt);
+    endFrame();
+    return;
+  }
+
+  if (tapped('quit') && (game.state === 'play' || game.state === 'dying')) {
+    game.quitting = true;
+    sfxUi();
+    endFrame();
+    return;
+  }
   if (game.flash > 0) game.flash = Math.max(0, game.flash - dt * 2.6);
   if (game.banner) {
     game.banner.t -= dt;

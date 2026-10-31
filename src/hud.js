@@ -205,7 +205,7 @@ function drawScreen(ctx, game) {
     }
 
     text(ctx, LEVELS.map((l) => l.name).join('  ·  '), cx, 92, COL.cool, FONT, 'center');
-    text(ctx, 'ARROWS / WASD  THRUST    Z / SPACE  FIRE    M  MUTE    T  TUNE', cx, 112, COL.hudText, FONT, 'center');
+    text(ctx, 'ARROWS / WASD THRUST   Z/SPACE FIRE   M MUTE   T TUNE   Q QUIT', cx, 112, COL.hudText, FONT, 'center');
     text(ctx, 'REVERSE THRUST FLIPS THE SHIP — THE HULL SCROLLS BOTH WAYS', cx, 126, COL.hudText, FONT, 'center');
 
     if (net.online && net.player) {
@@ -293,6 +293,23 @@ function drawRankLine(ctx, cx, y) {
   } else {
     text(ctx, 'SENDING RUN...', cx, y, COL.hudLine, FONT, 'center');
   }
+}
+
+// Quit confirmation. Deliberately unmissable, and deliberately not defaulted
+// to yes: Q sits next to W and A and will get hit by accident.
+export function drawQuitPrompt(ctx, game) {
+  ctx.fillStyle = 'rgba(4,6,10,0.82)';
+  ctx.fillRect(0, 0, VIEW_W, FIELD_H);
+  const cx = VIEW_W / 2;
+  text(ctx, 'ABANDON THE RUN?', cx, 118, COL.danger, FONT_BIG, 'center');
+  text(ctx, 'SCORE ' + String(game.score).padStart(8, '0')
+    + '    HULL ' + game.level.spec.name, cx, 150, COL.hudText, FONT, 'center');
+  text(ctx, 'THE RUN WILL BE RECORDED', cx, 166, COL.hudLine, FONT, 'center');
+  const pulse = 0.55 + 0.45 * Math.sin(game.stateT * 5);
+  ctx.globalAlpha = pulse;
+  text(ctx, 'Y   QUIT TO TITLE', cx, 198, COL.warmHi, FONT, 'center');
+  ctx.globalAlpha = 1;
+  text(ctx, 'N   KEEP FLYING', cx, 214, COL.cool, FONT, 'center');
 }
 
 export function drawPaused(ctx) {

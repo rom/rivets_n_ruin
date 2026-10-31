@@ -3,7 +3,7 @@ import { initInput, tapped, endFrame } from './input.js';
 import { startLoop } from './loop.js';
 import { makeGame, update, syncBest } from './game.js';
 import { drawWorld } from './render.js';
-import { drawHud, drawPaused } from './hud.js';
+import { drawHud, drawPaused, drawQuitPrompt } from './hud.js';
 import { unlock, toggleMute, isMuted, ready } from './audio.js';
 import { startMusic, stopMusic, musicRunning } from './music.js';
 import { sfxUi } from './sfx.js';
@@ -84,7 +84,7 @@ startLoop(
       const i = nextTune();
       game.toast = { text: 'TUNE  ' + tuneName(), kind: 'gunspeed', t: 1.8 };
     }
-    if (tapped('rename') && game.state === 'title' && netState().online) {
+    if (tapped('no') && game.state === 'title' && netState().online) {
       sfxUi();
       promptRename();
     }
@@ -99,6 +99,7 @@ startLoop(
   () => {
     drawWorld(ctx, game);
     drawHud(ctx, game, { muted: isMuted(), audio: ready() });
-    if (paused) drawPaused(ctx);
+    if (game.quitting) drawQuitPrompt(ctx, game);
+    else if (paused) drawPaused(ctx);
   },
 );

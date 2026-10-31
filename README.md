@@ -53,6 +53,7 @@ backend down**; you lose the leaderboard, not the game.
 | `M` | Mute / unmute |
 | `T` | Next tune |
 | `N` | Rename your pilot (title screen) |
+| `Q` | Quit the run (asks first; `Y` confirms, `N` cancels) |
 | `R` | Restart mid-run |
 
 ## The run
@@ -165,6 +166,55 @@ busy hull at speed. They bob, drift, pull toward you slightly within 38px so a
 near miss at full throttle still counts, and flash for their last three seconds
 before expiring. A drop that would land inside solid hull is relocated to open
 space, so a pickup is never unreachable.
+
+## Quitting
+
+`Q` during a run opens a confirmation; only `Y` leaves. `N`, `Esc` or `Q`
+again keeps you flying.
+
+The simulation freezes while the prompt is up — being shot while deciding
+whether to leave would be a cheap way to lose a run. The run is **recorded**
+rather than forfeited, because you flew it; the prompt says so before you
+commit.
+
+This is a browser game, so `window.close()` is blocked for ordinary tabs.
+Quit means what it means in any shoot 'em up: abandon the run, return to the
+title.
+
+## Graphics
+
+Everything is drawn at 640×360 and upscaled by an integer factor, so the
+pixels stay square. On top of the plating and sprites:
+
+**Bloom.** The bright elements — shots, particles, the engine — are re-drawn
+at half scale into their own buffer, bounced through a quarter-size canvas
+twice to blur them, and added back with `lighter`. Every neon thing in the
+scene picks up a halo without needing a shader.
+
+**Dynamic lighting.** Explosions and muzzle flashes light the hull around
+them with a radial falloff that decays over their lifetime, so the surface
+reacts instead of just having sprites composited onto it.
+
+**Parallax foreground.** Superstructure — girders off the rim girders, with
+the occasional cable slung between them — scrolls at 1.32× the hull and
+passes in front of the ship. It is generated deterministically per frame from
+the camera position rather than pre-rendered, so it costs no memory at any
+hull length. Kept narrow and anchored to the rims on purpose: a foreground
+that hides a threat is a foreground that loses runs.
+
+**Surface shading.** A vertical gradient brightens the middle of the hull and
+falls off toward the girders, easing back up at the very edges so the rims
+stay legible — they are the boundary you die against, so the vignette must
+not swallow them.
+
+**Ship banking.** The ship rotates into vertical movement, which makes the
+inertia legible in a way a rigid sprite never manages.
+
+**Rim beacons.** Deterministic pulsing lights along the girders, so the hull
+reads as powered rather than inert.
+
+All of it holds 60fps; `make smoke` asserts the frame rate alongside the
+pixel checks.
 
 ## Audio
 
@@ -373,6 +423,9 @@ These are deliberate omissions from the vertical slice, not bugs:
   obvious next system — the single forward cannon is a placeholder for it.
 - **No landing sequence.** Uridium ends each level with a landing minigame;
   the dock here is just a position.
+- **The graphics work is unjudged.** Bloom strength, foreground density and
+  the surface shading are tuned by eye against screenshots, not by playing.
+  Bloom in particular is easy to overdo.
 - **Boss difficulty is unplayed.** Health pools, fire rates and pattern timing
   are first guesses, and the arena is deliberately escape-proof — whether that
   reads as tense or unfair is a thing only playing decides. All of it is in
