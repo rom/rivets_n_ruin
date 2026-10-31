@@ -833,3 +833,40 @@ function drawBlock(g, o, t) {
     g.fillRect(o.x + 2 + sx, fy, 4, 3);
   }
 }
+
+// ------------------------------------------------------------------ radar
+//
+// A column-per-pixel picture of where the hull is solid, for the minimap.
+// Computed once per hull and cached on the level: walking a few thousand
+// obstacles every frame to draw a 640px strip would be absurd.
+//
+// Each column holds two nibbles: how far the structure reaches down from
+// the top girder, and how far it reaches up from the bottom one, both as
+// 0..15 of the playfield height. That is enough to show a pincer as a
+// pinch and a clear run as a gap, which is what a radar is for.
+export function radarProfile(level, cols) {
+  if (level._radar && level._radar.cols === cols) return level._radar;
+  const top = new Uint8Array(cols);
+  const bot = new Uint8Array(cols);
+  const H = FIELD_BOT - FIELD_TOP;
+  for (const o of level.obstacles) {
+    const c0 = Math.max(0, Math.floor((o.x / level.length) * cols));
+    const c1 = Math.min(cols - 1, Math.ceil(((o.x + o.w) / level.length) * cols));
+    const fromTop = Math.round(((o.y + o.h - FIELD_TOP) / H) * 15);
+    const fromBot = Math.round(((FIELD_BOT - o.y) / H) * 15);
+    const hangsFromTop = o.y <= FIELD_TOP + 2;
+    const sitsOnBot = o.y + o.h >= FIELD_BOT - 2;
+    for (let c = c0; c <= c1; c++) {
+      if (hangsFromTop && fromTop > top[c]) top[c] = Math.min(15, fromTop);
+      if (sitsOnBot && fromBot > bot[c]) bot[c] = Math.min(15, fromBot);
+      // a block floating clear of both girders still has to show up
+      if (!hangsFromTop && !sitsOnBot) {
+        const mid = Math.round(((o.y + o.h / 2 - FIELD_TOP) / H) * 15);
+        if (mid < 8 && fromTop > top[c]) top[c] = Math.min(15, fromTop);
+        else if (mid >= 8 && fromBot > bot[c]) bot[c] = Math.min(15, fromBot);
+      }
+    }
+  }
+  level._radar = { cols, top, bot };
+  return level._radar;
+}

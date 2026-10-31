@@ -2,8 +2,10 @@ import {
   VIEW_W, VIEW_H, FIELD_H, HUD_H, SHIP, LEVELS, LEVEL_UP, THEMES, COL, clamp,
 } from './config.js';
 import { netState } from './net.js';
-import { PICKUP, ARMORY } from './config.js';
-import { tint } from './pickups.js';
+import { PICKUP, ARMORY, APRON } from './config.js';
+import { tint, pickups, isTreasure } from './pickups.js';
+import { minis } from './miniboss.js';
+import { radarProfile } from './level.js';
 import { tuneName, TUNES } from './music.js';
 import { get as setting, DEFS, display } from './settings.js';
 import { rows as shopRows, MODS } from './shop.js';
@@ -104,20 +106,27 @@ export function drawHud(ctx, game, audio = {}) {
   text(ctx, 'SCORE', X.score, L);
   text(ctx, String(game.score).padStart(8, '0'), X.score, V, COL.hudBright);
 
-  // --- hull progress, with the turnaround baked in
+  // --- the hull, and the two running totals the end-of-hull bonus pays on.
+  // Where you are is the radar's job; this is how well you are doing it.
   const spec = game.level.spec;
   text(ctx, (game.returning ? '< ' : '> ') + spec.name
     + '  ' + (game.levelIndex + 1) + '/' + game.specs.length,
     X.prog, L, game.returning ? COL.warmHi : COL.cool);
-  const bx = X.prog;
-  const bw = VIEW_W - bx - 10;
-  ctx.fillStyle = '#1a212b';
-  ctx.fillRect(bx, V + 2, bw, 7);
-  const prog = clamp(p.x / game.level.length, 0, 1);
-  ctx.fillStyle = game.returning ? '#3a2d1a' : '#16242b';
-  ctx.fillRect(bx, V + 2, Math.round(bw * prog), 7);
-  ctx.fillStyle = game.returning ? COL.warmHi : COL.cool;
-  ctx.fillRect(bx + Math.round(bw * prog) - 1, V, 3, 11);
+
+  const guns = game.level.turrets;
+  const broken = guns.reduce((n, t) => n + (t.dead ? 1 : 0), 0);
+  const all = broken === guns.length && guns.length > 0;
+  text(ctx, 'GUNS', X.prog, V, COL.hudText);
+  text(ctx, broken + '/' + guns.length, X.prog + 32, V, all ? '#5fe08a' : COL.hudBright);
+
+  const h = game.hullHaul;
+  if (h) {
+    const bits = [h.coins + 'c'];
+    if (h.bars) bits.push(h.bars + 'b');
+    if (h.coffins) bits.push(h.coffins + 'f');
+    if (h.treasures) bits.push(h.treasures + 't');
+    text(ctx, bits.join(' '), X.prog + 92, V, '#ffd24a');
+  }
 
   const net = netState();
   const flying = net.flying.length;
@@ -128,6 +137,9 @@ export function drawHud(ctx, game, audio = {}) {
   const sym = !audio.audio ? 'SND --' : audio.muted ? 'SND OFF' : 'SND ON';
   text(ctx, sym, VIEW_W - 64, V + 12, audio.muted ? COL.danger : COL.hudLine, FONT, 'right');
 
+  if (setting('radar') && (game.state === 'play' || game.state === 'dying')) {
+    drawRadar(ctx, game);
+  }
   if (game.boss) drawBossBar(ctx, game.boss);
   if (game.toast && setting('damageNumbers')) drawToast(ctx, game.toast);
   if (game.banner) drawBanner(ctx, game.banner);
@@ -264,6 +276,240 @@ function drawBoard(ctx, x, y, rows = 10) {
   });
 }
 
+// ------------------------------------------------------------------ radar
+//
+// The old progress bar answered one question — how far along am I — and the
+// hull is 25,000px of structure with guns, minibosses, treasure and a boss
+// on it. This is a strip across the top of the playfield showing all of it
+// at once, so a decision to turn back for something is a decision you can
+// actually make.
+//
+// Everything is placed by x only: 640px of strip against 25,000px of hull
+// is 39:1, so vertical position would be a lie. Height encodes what a thing
+// IS, not where it is.
+// Three bands, because one band is noise. Top structure hangs down, bottom
+// structure stands up, and the clear lane between them is where everything
+// you might fly to is marked. A gun sits on the inner edge of its own band,
+// which is where it actually sits on the hull.
+const RADAR = {
+  y: 0, h: 23,
+  topY: 1, topH: 8,      // structure hanging from the upper girder
+  laneY: 9, laneH: 6,    // the corridor, and everything in it
+  botY: 15, botH: 7,     // structure standing on the lower girder
+};
+
+export function drawRadar(ctx, game) {
+  const level = game.level;
+  const R = RADAR;
+  const W = VIEW_W;
+  const laneMid = R.laneY + R.laneH / 2;
+  const botEnd = R.botY + R.botH;
+
+  // The strip overlaps the top of the playfield, and skimming the upper
+  // girder is a normal way to fly. So it gets out of the way: full strength
+  // while you are anywhere else, nearly transparent while you are under it.
+  const p = game.player;
+  const clear = clamp((p.y - 24) / 40, 0, 1);
+  ctx.save();
+  ctx.globalAlpha = 0.3 + 0.65 * clear;
+
+  ctx.fillStyle = '#05070b';
+  ctx.fillRect(0, R.y, W, R.h);
+  // the lane is lighter than the structure, so a marker in it always reads
+  ctx.fillStyle = '#0e141c';
+  ctx.fillRect(0, R.laneY, W, R.laneH);
+  ctx.fillStyle = COL.hudLine;
+  ctx.fillRect(0, R.y + R.h - 1, W, 1);
+
+  const at = (wx) => (clamp(wx, 0, level.length) / level.length) * W;
+
+  // --- the aprons: launch and dock, the two places nothing shoots at you
+  ctx.fillStyle = '#101a26';
+  ctx.fillRect(0, R.laneY, at(APRON), R.laneH);
+  const dock = at(level.length - APRON);
+  ctx.fillRect(dock, R.laneY, W - dock, R.laneH);
+
+  // --- the hull, as a silhouette. One flat colour: two tones at this size
+  // made terrain look like markers.
+  const prof = radarProfile(level, W);
+  ctx.fillStyle = '#39424f';
+  for (let c = 0; c < W; c++) {
+    const t = prof.top[c];
+    if (t) ctx.fillRect(c, R.topY, 1, Math.max(1, Math.round((t / 15) * R.topH)));
+    const b = prof.bot[c];
+    if (b) {
+      const hgt = Math.max(1, Math.round((b / 15) * R.botH));
+      ctx.fillRect(c, botEnd - hgt, 1, hgt);
+    }
+  }
+
+  // --- guns, on the inner edge of whichever surface they are mounted on.
+  // Dead ones stay, dimmed: what you have already broken matters as much as
+  // what you have not, and the bonus is paid on the ratio.
+  for (const t of level.turrets) {
+    const tx = Math.round(at(t.x));
+    const up = t.dir === 1;             // mounted on the top girder, firing down
+    if (t.dead) {
+      ctx.fillStyle = '#242c37';
+      ctx.fillRect(tx, up ? R.topY + R.topH - 1 : R.botY, 1, 1);
+      continue;
+    }
+    ctx.fillStyle = (t.tower && t.tower.colour) || COL.danger;
+    ctx.fillRect(tx, up ? R.topY + R.topH - 3 : R.botY, 1, 3);
+  }
+
+  // --- loot in the lane, sized by what it is worth stopping for
+  for (let i = 0; i < pickups.count; i++) {
+    const p = pickups.items[i];
+    const px = Math.round(at(p.x));
+    if (isTreasure(p.kind)) {
+      ctx.fillStyle = tint(p.kind);
+      ctx.fillRect(px - 1, R.laneY, 3, R.laneH);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(px, R.laneY + 2, 1, 2);
+    } else if (p.kind === 'coffin') {
+      ctx.fillStyle = tint('coffin');
+      ctx.fillRect(px, R.laneY, 1, R.laneH);
+    } else if (p.kind === 'goldbar') {
+      ctx.fillStyle = tint('goldbar');
+      ctx.fillRect(px, R.laneY + 1, 1, R.laneH - 2);
+    } else if (p.kind === 'coin') {
+      ctx.fillStyle = '#6e5c2a';
+      ctx.fillRect(px, laneMid - 1, 1, 2);
+    } else {
+      ctx.fillStyle = '#2f6a7a';      // an upgrade crate
+      ctx.fillRect(px, R.laneY + 1, 1, R.laneH - 2);
+    }
+  }
+
+  // --- minibosses, and the ones still waiting further along
+  if (game.miniPlan) {
+    for (const slot of game.miniPlan) {
+      if (slot.spawned) continue;
+      ctx.strokeStyle = '#53606f';
+      ctx.lineWidth = 1;
+      diamondOutline(ctx, Math.round(at(slot.x)), laneMid, 4);
+    }
+  }
+  for (let i = 0; i < minis.count; i++) {
+    const m = minis.items[i];
+    if (m.dead) continue;
+    diamond(ctx, Math.round(at(m.x)), laneMid, 5, m.spec.colour);
+  }
+
+  // --- the arena at the far end, lit red once the boss is actually up
+  const ax = at(level.length - VIEW_W);
+  const live = game.boss && !game.boss.dead;
+  ctx.fillStyle = live ? '#5a1a22' : '#2a2030';
+  ctx.fillRect(ax, R.topY, W - ax, R.h - 2);
+  text(ctx, 'BOSS', W - 3, R.laneY - 2, live ? '#ff8a92' : '#6b5563', FONT, 'right');
+
+  // --- what you can see, and where you are in it
+  const vx0 = at(game.cam.x);
+  const vw = Math.max(3, (VIEW_W / level.length) * W);
+  ctx.strokeStyle = '#7b8696';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(Math.round(vx0) + 0.5, R.y + 1.5, Math.round(vw), R.h - 4);
+
+  const px = Math.round(at(p.x));
+  ctx.fillStyle = game.returning ? COL.warmHi : COL.coolHi;
+  ctx.fillRect(px - 1, R.y + 1, 3, R.h - 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(px, R.y + 1, 1, R.h - 2);
+  ctx.restore();
+}
+
+function diamond(ctx, x, y, r, colour) {
+  ctx.fillStyle = colour;
+  ctx.beginPath();
+  ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y);
+  ctx.closePath(); ctx.fill();
+}
+
+function diamondOutline(ctx, x, y, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + 0.5, y - r); ctx.lineTo(x + r + 0.5, y);
+  ctx.lineTo(x + 0.5, y + r); ctx.lineTo(x - r + 0.5, y);
+  ctx.closePath(); ctx.stroke();
+}
+
+// What the hull paid, itemised. The number alone tells you nothing about
+// which of the three things you did well, which is the only reason to show
+// a breakdown rather than a total.
+function drawBonus(ctx, game, x, y) {
+  const b = game.bonus;
+  text(ctx, 'HULL BONUS', x, y, COL.warmHi, FONT);
+  if (!b) {
+    text(ctx, 'NOT RECORDED', x, y + 14, COL.hudLine, FONT);
+    return;
+  }
+  const W = 268;
+  // reveal one line at a time, so the total is read as it is counted
+  const shown = Math.min(b.lines.length, Math.floor(Math.max(0, game.stateT - 0.5) / 0.22));
+  let ry = y + 15;
+  b.lines.forEach((line, i) => {
+    if (i >= shown) return;
+    const on = line.points > 0;
+    text(ctx, line.label, x, ry, on ? COL.hudBright : COL.hudLine, FONT);
+    text(ctx, (on ? '+' : '') + line.points.toLocaleString(), x + W, ry,
+      on ? '#5fe08a' : COL.hudLine, FONT, 'right');
+    // The haul line names four kinds of loot and will not fit beside its own
+    // number, so it gets the row underneath rather than running into it.
+    if (line.detail.length > 22) {
+      ry += 11;
+      text(ctx, line.detail, x + 10, ry, COL.hudLine, FONT);
+    } else {
+      text(ctx, line.detail, x + 104, ry, on ? COL.hudText : COL.hudLine, FONT);
+    }
+    ry += 12;
+  });
+  if (shown >= b.lines.length) {
+    ctx.fillStyle = COL.hudLine;
+    ctx.fillRect(x, ry + 2, W, 1);
+    text(ctx, 'TOTAL', x, ry + 6, COL.warmHi, FONT);
+    text(ctx, '+' + b.total.toLocaleString(), x + W, ry + 6, COL.warmHi, FONT, 'right');
+  }
+}
+
+// The ship, as it now stands: what the refit built in, and what was bought.
+// Mods were invisible here, so the one screen that is meant to answer "what
+// am I flying" left out the half of the answer you paid coins for.
+function drawFit(ctx, game, x, y) {
+  const p = game.player;
+  const W = 272;   // x + W must stay inside VIEW_W
+  text(ctx, 'REFIT COMPLETE', x, y, COL.warmHi, FONT);
+  const refit = [
+    ['SHIELD', String(p.shieldMax)],
+    ['ACCEL', '+' + Math.round((p.accelMul - 1) * 100) + '%'],
+    ['TOP SPEED', '+' + p.maxVXBonus],
+    ['GUN SPEED', p.gunSpeed + '/' + p.gunCap],
+    ['GUN SPREAD', p.gunBlaze + '/' + p.gunCap],
+    ['SHIPS', String(p.lives)],
+  ];
+  let ry = y + 15;
+  for (const [k, v] of refit) {
+    text(ctx, k, x, ry, COL.hudText, FONT);
+    text(ctx, v, x + W, ry, '#5fe08a', FONT, 'right');
+    ry += 12;
+  }
+
+  ry += 6;
+  const owned = Object.keys(MODS).filter((id) => game.mods && game.mods[id]);
+  text(ctx, 'MODS FITTED  ' + owned.length + '/' + Object.keys(MODS).length,
+    x, ry, owned.length ? COL.warmHi : COL.hudLine, FONT);
+  ry += 15;
+  if (!owned.length) {
+    text(ctx, 'NONE \u2014 E AT THE ARMOURER', x, ry, COL.hudLine, FONT);
+    return;
+  }
+  for (const id of owned) {
+    ctx.fillStyle = '#ffd24a';
+    ctx.fillRect(x, ry + 3, 4, 4);
+    text(ctx, MODS[id].name, x + 9, ry, '#ffd24a', FONT);
+    ry += 12;
+  }
+}
+
 // The hull just cleared, which is one behind the index after advancing.
 const spec0 = (game) => game.specs[game.levelIndex];
 
@@ -330,10 +576,9 @@ function drawScreen(ctx, game) {
     const curTheme = THEMES[cur.theme] || THEMES.steel;
     const nextTheme = THEMES[next.theme] || THEMES.steel;
 
-    text(ctx, cur.name + ' CLEARED', cx, 20, COL.coolHi, FONT_BIG, 'center');
+    text(ctx, cur.name + ' CLEARED', cx, 12, COL.coolHi, FONT_BIG, 'center');
     text(ctx, 'SCORE ' + String(game.score).padStart(8, '0')
-      + '    TIME ' + game.time.toFixed(1) + 'S'
-      + (game.coins ? '    COINS ' + game.coins : ''), cx, 48, COL.hudText, FONT, 'center');
+      + '    TIME ' + game.time.toFixed(1) + 'S', cx, 38, COL.hudText, FONT, 'center');
 
     // --- the hulls, to scale against each other
     const BX = 110;
@@ -345,53 +590,47 @@ function drawScreen(ctx, game) {
       const w = Math.max(6, Math.round(BW * (spec.length / longest) * frac));
       ctx.globalAlpha = dim ? 0.45 : 1;
       ctx.fillStyle = '#0a0d13';
-      ctx.fillRect(BX, y, BW, 13);
+      ctx.fillRect(BX, y, BW, 11);
       ctx.fillStyle = theme.mid;
-      ctx.fillRect(BX, y, w, 13);
+      ctx.fillRect(BX, y, w, 11);
       ctx.fillStyle = theme.rimDark;
       ctx.fillRect(BX, y, w, 2);
-      ctx.fillRect(BX, y + 11, w, 2);
+      ctx.fillRect(BX, y + 9, w, 2);
       ctx.fillStyle = theme.rivet;
-      for (let rx = BX + 5; rx < BX + w - 3; rx += 12) ctx.fillRect(rx, y + 5, 2, 2);
+      for (let rx = BX + 5; rx < BX + w - 3; rx += 12) ctx.fillRect(rx, y + 4, 2, 2);
       ctx.fillStyle = theme.edgeHi;
-      ctx.fillRect(BX + w - 2, y, 2, 13);
+      ctx.fillRect(BX + w - 2, y, 2, 11);
       ctx.globalAlpha = 1;
       text(ctx, label, BX, y - 10, dim ? COL.hudLine : COL.hudBright, FONT);
-      text(ctx, (spec.length / 1000).toFixed(1) + 'K', BX + BW + 6, y + 2,
+      text(ctx, (spec.length / 1000).toFixed(1) + 'K', BX + BW + 6, y + 1,
         dim ? COL.hudLine : COL.coolHi, FONT);
     };
 
-    row(86, cur, curTheme, 1, 'FLOWN: ' + cur.name, true);
-    row(126, next, nextTheme, grow, 'NEXT: ' + next.name, false);
-
-    const longer = Math.round(next.length - cur.length);
-    text(ctx, '+' + longer.toLocaleString() + ' PX OF HULL   ·   ' + next.subtitle,
-      cx, 148, COL.warmHi, FONT, 'center');
+    row(68, cur, curTheme, 1, 'FLOWN: ' + cur.name, true);
+    row(100, next, nextTheme, grow, 'NEXT: ' + next.name, false);
 
     // --- what is new about it
     const newFoes = (next.foes || []).filter((f) => !(cur.foes || []).includes(f));
+    const newTowers = (next.towers || []).filter((t) => !(cur.towers || []).includes(t));
     const bits = [
+      '+' + Math.round(next.length - cur.length).toLocaleString() + ' PX',
       'TURRETS ' + cur.turretHp + ' \u2192 ' + next.turretHp + ' HP',
       'TRAFFIC +' + Math.round((cur.interceptorSpawn / next.interceptorSpawn - 1) * 100) + '%',
     ];
+    if (newTowers.length) bits.push('GUNS: ' + newTowers.join(', ').toUpperCase());
     if (newFoes.length) bits.push('NEW: ' + newFoes.join(', ').toUpperCase());
-    text(ctx, bits.join('   ·   '), cx, 166, COL.hudText, FONT, 'center');
+    text(ctx, bits.join('   \u00b7   '), cx, 120, COL.warmHi, FONT, 'center');
 
-    // --- the refit, compact
-    text(ctx, 'REFIT COMPLETE', cx, 190, COL.warmHi, FONT, 'center');
-    const refit = [
-      p.shieldMax + ' SHIELD',
-      Math.round((p.accelMul - 1) * 100) + '% ACCEL',
-      '+' + p.maxVXBonus + ' SPEED',
-      p.gunCap + ' MOUNTS',
-      p.lives + ' SHIPS',
-    ];
-    text(ctx, refit.join('   ·   '), cx, 206, '#5fe08a', FONT, 'center');
+    // --- two columns: what the hull paid, and what the ship now is
+    const LX = 24;
+    const RX = 338;
+    drawBonus(ctx, game, LX, 142);
+    drawFit(ctx, game, RX, 142);
 
     ctx.globalAlpha = pulse;
-    text(ctx, 'ENTER TO LAUNCH', cx, 226, COL.warmHi, FONT, 'center');
+    text(ctx, 'ENTER TO LAUNCH', cx, 296, COL.warmHi, FONT, 'center');
     ctx.globalAlpha = 1;
-    text(ctx, 'E  ARMOURER     ' + (game.coins || 0) + ' COINS', cx, 240, '#ffd24a', FONT, 'center');
+    text(ctx, 'E  ARMOURER     ' + (game.coins || 0) + ' COINS', cx, 310, '#ffd24a', FONT, 'center');
     return;
   }
 

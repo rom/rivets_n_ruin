@@ -167,6 +167,116 @@ const OUT = path.join(__dirname, '..', 'docs');
   await page.waitForTimeout(320);
   await shot('armory.png', { x: 0, y: 0, width: 1400, height: 760 });
 
+  // --- every boss, one shot each
+  console.log('bosses:');
+  const bossNames = await page.evaluate(async () =>
+    (await import('./src/config.js')).BOSSES.map((b) => b.name));
+  for (let i = 0; i < bossNames.length; i++) {
+    await page.evaluate(async (i) => {
+      const { buildLevel } = await import('./src/level.js');
+      const bs = await import('./src/boss.js');
+      const g = window.game;
+      g.levelIndex = i;
+      g.level = buildLevel(g.specs[i]);
+      g.returning = false;
+      g.player.invuln = 1e9;
+      g.player.x = g.level.length - 540;
+      g.player.y = 170;
+      g.cam.x = g.level.length - 640;
+      g.boss = bs.makeBoss(g);
+      g.boss.entry = 0;
+      g.boss.x = g.cam.x + 400;
+      g.boss.baseY = 165; g.boss.y = 165;
+      g.boss.t = 1.2;
+    }, i);
+    await clear();
+    await page.waitForTimeout(220);
+    await shot(`boss-${String(i + 1).padStart(2, '0')}-${bossNames[i].toLowerCase().replace(/[^a-z]/g, '')}.png`,
+      { x: 0, y: 0, width: 1400, height: 620 });
+  }
+  await page.evaluate(() => { window.game.boss = null; });
+
+  // --- the radar, with a hull part-cleared and loot on it
+  console.log('radar:');
+  await page.evaluate(async () => {
+    const { buildLevel } = await import('./src/level.js');
+    const mb = await import('./src/miniboss.js');
+    const pk = await import('./src/pickups.js');
+    const g = window.game;
+    g.levelIndex = 4;
+    g.level = buildLevel(g.specs[4]);
+    g.boss = null;
+    g.player.x = g.level.length * 0.42;
+    g.player.y = 210;
+    g.cam.x = g.player.x - 320;
+    g.miniPlan = mb.planMinis(g.level, 4);
+    mb.resetMinis();
+    g.miniPlan[0].spawned = true;
+    const m = mb.spawnMini(g, 'bulwark', g.player.x + 240);
+    if (m) m.seen = true;
+    g.level.turrets.forEach((t, i) => { t.dead = i % 3 !== 0; });
+    pk.resetPickups();
+    for (let i = 0; i < 44; i++) pk.spawnPickup(g, 900 + i * 400, 110 + (i % 5) * 36, 'coin');
+    for (const [k, n] of [['goldbar', 5], ['coffin', 3], ['gem', 3], ['idol', 2], ['crown', 1], ['reliquary', 1]]) {
+      for (let i = 0; i < n; i++) {
+        pk.spawnPickup(g, 1600 + Math.random() * (g.level.length - 3400), 120 + Math.random() * 110, k);
+      }
+    }
+    g.hullHaul = { coins: 318, bars: 2, coffins: 1, treasures: 1, value: 9400 };
+  });
+  await clear();
+  await page.waitForTimeout(200);
+  await shot('radar.png', { x: 0, y: 0, width: 1400, height: 120 });
+
+  // --- treasure, laid out
+  console.log('treasure:');
+  await page.evaluate(async () => {
+    const pk = await import('./src/pickups.js');
+    const g = window.game;
+    pk.resetPickups();
+    // On the first hull: a steel-grey background, so the colours of the
+    // treasure are the colours of the treasure and not of the theme.
+    const { buildLevel } = await import('./src/level.js');
+    g.levelIndex = 0;
+    g.level = buildLevel(g.specs[0]);
+    g.cam.x = 3000;
+    // park the ship well clear, or the magnet collects the whole row
+    g.player.y = 292;
+    g.player.x = g.cam.x + 320;
+    const kinds = ['coin', 'goldbar', 'coffin', ...pk.TREASURES];
+    kinds.forEach((k, i) => {
+      const p = pk.spawnPickup(g, g.cam.x + 70 + i * 72, 92, k);
+      if (p) { p.t = 1.1; p.vx = 0; p.vy = 0; p.baseY = 92; p.y = 92; }
+    });
+  });
+  await clear();
+  await page.waitForTimeout(150);
+  await shot('treasure.png', { x: 0, y: 0, width: 1400, height: 520 });
+
+  // --- the overview, with a bonus and mods on it
+  console.log('overview:');
+  await page.evaluate(async () => {
+    const g = window.game;
+    const { buildLevel } = await import('./src/level.js');
+    const gm = await import('./src/game.js');
+    g.levelIndex = 2;
+    g.level = buildLevel(g.specs[2]);
+    g.score = 148250; g.time = 212.4; g.coins = 1840;
+    g.player.lives = 3; g.player.shieldMax = 170; g.player.accelMul = 1.26;
+    g.player.maxVXBonus = 60; g.player.gunCap = 4; g.player.gunSpeed = 3; g.player.gunBlaze = 2;
+    g.mods = { magnet: true, scavenger: true, afterburner: true };
+    g.deathsThisHull = 0;
+    g.hullHaul = { coins: 612, bars: 4, coffins: 2, treasures: 3, value: 24150 };
+    g.level.turrets.forEach((t, i) => { t.dead = i % 7 !== 0; });
+    g.bonus = gm.hullBonus(g);
+    g.banner = null; g.toast = null;
+    g.state = 'levelclear';
+    g.stateT = 4;
+  });
+  await page.waitForTimeout(250);
+  await shot('overview.png');
+  await page.evaluate(() => { window.game.state = 'play'; });
+
   // --- a boss fight
   console.log('scenes:');
   await page.evaluate(async () => {

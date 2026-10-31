@@ -1,5 +1,5 @@
 import {
-  SHIP, INTERCEPTOR, LEVELS, LEVEL_UP, PICKUP, BOSS, APRON, VIEW_W,
+  SHIP, INTERCEPTOR, LEVELS, LEVEL_UP, PICKUP, BOSS, HULL_BONUS, APRON, VIEW_W,
   FIELD_TOP, FIELD_BOT, clamp,
 } from './config.js';
 import { diff, award } from './score.js';
@@ -12,7 +12,9 @@ import {
 } from './enemies.js';
 import { playerShots, enemyShots, advance } from './projectiles.js';
 import { updateParticles, explode, sparks, particles, thrust as thrustPlume } from './particles.js';
-import { updatePickups, resetPickups, pickups } from './pickups.js';
+import {
+  updatePickups, resetPickups, pickups, TREASURES, freshHaul,
+} from './pickups.js';
 import { updateFoes, resetFoes, foes, hitFoe, spawnFoeForLevel, SPEC as FOE_SPEC } from './foes.js';
 import { updateOrdnance, resetOrdnance, ordnance } from './armory.js';
 import {
@@ -22,7 +24,7 @@ import { resetShop, applyMods } from './shop.js';
 import { SPLASH_TIME, LAUNCH_TIME, LANDING_TIME, ENDING_TIME, launchPose, landingPose } from './sequences.js';
 import { tapped, anyTapped, endFrame } from './input.js';
 import {
-  sfxCoin, sfxGoldBar, sfxCoffin,
+  sfxCoin, sfxGoldBar, sfxCoffin, sfxTreasure,
   sfxPickup, sfxPlayerHit, sfxHullAbsorb, sfxDeath, sfxRespawn,
   sfxTurnaround, sfxComplete, sfxGameOver, sfxUi,
 } from './sfx.js';
@@ -54,6 +56,11 @@ export function makeGame(modSpec = null) {
     coins: 0,
     coffins: 0,
     bars: 0,
+    treasures: 0,
+    haul: freshHaul(),       // the whole run
+    hullHaul: freshHaul(),   // this hull only, for the end-of-hull bonus
+    bonus: null,             // last hull's bonus breakdown, for the overview
+    deathsThisHull: 0,
     mods: {},
     bought: {},
     submitted: false,
@@ -79,7 +86,8 @@ export function makeGame(modSpec = null) {
     onHaul: (kind) => {
       if (kind === 'coin') sfxCoin();
       else if (kind === 'goldbar') sfxGoldBar();
-      else sfxCoffin();
+      else if (kind === 'coffin') sfxCoffin();
+      else sfxTreasure(TREASURES.indexOf(kind));
     },
   };
   // A miniboss announces itself: it is not another interceptor, and the
@@ -131,6 +139,11 @@ function reset(game) {
   game.coins = 0;
   game.coffins = 0;
   game.bars = 0;
+  game.treasures = 0;
+  game.haul = freshHaul();
+  game.hullHaul = freshHaul();
+  game.bonus = null;
+  game.deathsThisHull = 0;
   resetShop(game);
   game.submitted = false;
   game.spawnCd = 1.2;
@@ -197,6 +210,9 @@ function loadNextHull(game) {
   game.submitted = false;
   game.boss = null;
   game.time = 0;          // per-hull clock restarts; runTime keeps going
+  game.hullHaul = freshHaul();
+  game.bonus = null;
+  game.deathsThisHull = 0;
   game.spawnCd = 1.2;
   game.toast = null;
   resetEnemies();
@@ -365,7 +381,7 @@ export function update(game, dt) {
   if (game.state === 'dying') {
     updateParticles(dt);
     advance(playerShots, dt);
-    advance(enemyShots, dt);
+    advance(enemyShots, dt, game.player);
     updateCamera(game.cam, game.player, game.level.length, dt);
     if (game.stateT > 1.15) {
       if (game.player.lives <= 0) {
@@ -402,7 +418,7 @@ export function update(game, dt) {
   applyBlasts(game);
   updatePickups(game, dt);
   advance(playerShots, dt);
-  advance(enemyShots, dt);
+  advance(enemyShots, dt, game.player);
   updateParticles(dt);
   collide(game);
   updateCamera(game.cam, p, game.level.length, dt,
@@ -432,10 +448,12 @@ export function update(game, dt) {
     sfxTurnaround();
   } else if (game.returning && p.x < APRON * 0.55) {
     game.seqFromX = p.x;
-    // Award the bonus BEFORE anything reads the score. This used to report
+    // Award the bonuses BEFORE anything reads the score. This used to report
     // the run to the backend first, so every submitted completion was short
     // by its own completion bonus.
     award(game, 5000 + Math.max(0, Math.round((260 - game.time) * 25)));
+    game.bonus = hullBonus(game);
+    for (const line of game.bonus.lines) award(game, line.points);
     game.stateT = 0;
     sfxComplete();
 
@@ -558,6 +576,55 @@ function finishSequence(game) {
   game.stateT = 0;
 }
 
+// What clearing this hull paid, itemised. Three questions, each about a
+// different way of flying it: did you break the guns, did you keep your
+// ships, did you pick the hull clean. Returned rather than applied so the
+// overview can show the breakdown that produced the number.
+export function hullBonus(game) {
+  const turrets = game.level.turrets;
+  const total = turrets.length;
+  const killed = turrets.reduce((n, t) => n + (t.dead ? 1 : 0), 0);
+  const pct = total ? killed / total : 0;
+  const h = game.hullHaul || { coins: 0, bars: 0, coffins: 0, treasures: 0, value: 0 };
+  const lives = Math.max(0, game.player.lives);
+
+  const lines = [];
+  lines.push({
+    id: 'guns',
+    label: 'GUNS BROKEN',
+    detail: killed + '/' + total + '   ' + Math.round(pct * 100) + '%',
+    points: Math.round(HULL_BONUS.towers * pct),
+  });
+  if (total && killed === total) {
+    lines.push({ id: 'sweep', label: 'FULL SWEEP', detail: 'NOTHING LEFT FIRING', points: HULL_BONUS.fullSweep });
+  }
+  lines.push({
+    id: 'ships',
+    label: 'SHIPS REMAINING',
+    detail: String(lives),
+    points: HULL_BONUS.perLife * lives,
+  });
+  if (!game.deathsThisHull) {
+    lines.push({ id: 'intact', label: 'NO LOSSES', detail: 'HULL FLOWN CLEAN', points: HULL_BONUS.noLoss });
+  }
+  lines.push({
+    id: 'haul',
+    label: 'HAUL',
+    detail: haulLine(h),
+    points: Math.round(h.value * HULL_BONUS.haulPct),
+  });
+
+  return { lines, total: lines.reduce((a, l) => a + l.points, 0), killed, towers: total, pct, haul: h };
+}
+
+function haulLine(h) {
+  const bits = [h.coins + ' COINS'];
+  if (h.bars) bits.push(h.bars + ' BAR' + (h.bars > 1 ? 'S' : ''));
+  if (h.coffins) bits.push(h.coffins + ' COFFIN' + (h.coffins > 1 ? 'S' : ''));
+  if (h.treasures) bits.push(h.treasures + ' TREASURE' + (h.treasures > 1 ? 'S' : ''));
+  return bits.join(' \u00b7 ');
+}
+
 function recordBest(game) {
   if (game.score > game.best) {
     game.best = game.score;
@@ -570,6 +637,7 @@ function die(game) {
   p.alive = false;
   p.lives--;
   game.deaths++;
+  game.deathsThisHull++;
   explode(p.x, p.y, 2.4, '#b4f4ff', '#4fd0e8');
   explode(p.x, p.y, 1.6);
   sfxDeath();
@@ -599,6 +667,23 @@ function collide(game) {
       const f = foes.items[j];
       const r = FOE_SPEC[f.kind].r;
       if (Math.abs(s.x - f.x) < r && Math.abs(s.y - f.y) < r) gone = hitFoe(game, j, s.x, s.y, s.dmg);
+    }
+
+    // A homing missile is the only enemy ordnance that can be destroyed,
+    // and it has to be: there is no dodging something that turns.
+    for (let j = enemyShots.count - 1; j >= 0 && !gone; j--) {
+      const m = enemyShots.items[j];
+      if (m.hp <= 0) continue;
+      if (Math.abs(s.x - m.x) > m.r + 6 || Math.abs(s.y - m.y) > m.r + 6) continue;
+      m.hp -= s.dmg;
+      gone = true;
+      if (m.hp <= 0) {
+        explode(m.x, m.y, 0.7, '#ffd0e8', '#ff5fa8');
+        enemyShots.kill(j);
+        award(game, 60);
+      } else {
+        sparks(m.x, m.y, -Math.sign(s.vx), 0, 3, '#ff5fa8');
+      }
     }
 
     if (!gone && hitMinis(game, s.x, s.y, s.dmg)) gone = true;

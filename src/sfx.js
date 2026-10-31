@@ -103,8 +103,7 @@ export function sfxRespawn() {
 
 // Arpeggio stingers. The turnaround and the dock are the two moments the run
 // has structure, so they get the only melodic sounds outside the music.
-function arp(semis, t, peak, type = 'square', step = 0.075) {
-  const root = 293.66; // D4
+function arp(semis, t, peak, type = 'square', step = 0.075, root = 293.66) {
   semis.forEach((s, i) => {
     tone({
       type, f0: root * Math.pow(2, s / 12), t: t + i * step,
@@ -189,6 +188,31 @@ export function sfxCoffin() {
   arp([0, 4, 7, 12, 16, 19], t, 0.2, 'square', 0.06);
   arp([12, 16, 19, 24], t + 0.03, 0.1, 'triangle', 0.06);
   tone({ type: 'sawtooth', f0: 110, f1: 110, t, attack: 0.03, decay: 0.8, peak: 0.1 });
+}
+
+// Treasure. Four tiers, each a longer and higher flourish than the last, so
+// what you picked up is audible before the toast is read. Tier 0 is a quick
+// chime; tier 3 ducks the music and takes its time.
+export function sfxTreasure(tier = 0) {
+  if (!ready()) return;
+  const t = now();
+  const k = Math.max(0, Math.min(3, tier));
+  if (k >= 2) duckMusic(0.5, 0.55 + k * 0.15, 0.3);
+
+  const figures = [
+    [0, 7, 12],
+    [0, 5, 9, 14],
+    [0, 4, 7, 12, 16],
+    [0, 3, 7, 10, 14, 19, 24],
+  ];
+  const base = [660, 700, 740, 784][k];
+  const gap = [0.055, 0.06, 0.055, 0.05][k];
+  arp(figures[k], t, 0.05 + k * 0.012, 'square', gap, base);
+  arp(figures[k].map((n) => n + 12), t + 0.025, 0.03 + k * 0.01, 'triangle', gap, base);
+  noiseHit({ t, attack: 0.002, decay: 0.1 + k * 0.08, peak: 0.05, filter: 'highpass', f0: 5200 });
+  if (k >= 2) {
+    tone({ type: 'sawtooth', f0: 98, f1: 196, t, attack: 0.02, decay: 0.5 + k * 0.2, peak: 0.08, sweep: 'lin' });
+  }
 }
 
 export function sfxUi() {

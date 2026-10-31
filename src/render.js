@@ -8,8 +8,9 @@ import { hash2 } from './rng.js';
 import { hullChunk, warmChunks, CHUNK_W } from './level.js';
 import { get as setting } from './settings.js';
 import { renderScale, scaleGeneration, hullScale } from './display.js';
-import { pickups, tint } from './pickups.js';
-import { livingParts, shellUp } from './boss.js';
+import { pickups, tint, isTreasure } from './pickups.js';
+
+import { drawBossBody, drawBossParts } from './bossart.js';
 import { foes, SPEC as FOE_SPEC } from './foes.js';
 import { drawMinis } from './miniboss.js';
 import { drawOrdnance } from './armory.js';
@@ -446,12 +447,24 @@ function drawTurrets(ctx, game, camX) {
 
     // housing, tinted by kind so the gun you are approaching is identifiable
     const tw = t.tower || {};
-    ctx.fillStyle = '#596372';
-    ctx.beginPath();
-    ctx.arc(0, d * 1, tw.aura ? 7 : 5.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = tw.colour || COL.danger;
-    ctx.fillRect(-1, d * 1 - 1, 2, 2);
+    if (tw.seek) {
+      // a launcher rack: four tubes, so it is obvious at a glance that this
+      // one does not fire bullets
+      ctx.fillStyle = '#596372';
+      ctx.fillRect(-8, d === 1 ? 0 : -8, 16, 8);
+      ctx.fillStyle = '#20262e';
+      for (let k = 0; k < 4; k++) ctx.fillRect(-7 + k * 4, d === 1 ? 2 : -6, 3, 4);
+      ctx.fillStyle = tw.colour;
+      ctx.fillRect(-8, d === 1 ? 0 : -1, 16, 1);
+      ctx.fillRect(-7 + (t.burstLeft > 0 ? 0 : 8), d === 1 ? 3 : -5, 3, 2);
+    } else {
+      ctx.fillStyle = '#596372';
+      ctx.beginPath();
+      ctx.arc(0, d * 1, tw.aura ? 7 : 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = tw.colour || COL.danger;
+      ctx.fillRect(-1, d * 1 - 1, 2, 2);
+    }
 
     // a lance winding up: an unmissable tell, because the shot itself is
     // too fast to react to
@@ -483,6 +496,111 @@ function drawTurrets(ctx, game, camX) {
   }
 }
 
+function drawTreasure(ctx, p, x, y, c) {
+  const bob = Math.sin(p.t * 3) * 1.5;
+  ctx.save();
+  ctx.translate(x, y + bob);
+
+  // halo, so it is visible against busy plating from a long way off
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.13 + 0.07 * Math.sin(p.t * 4);
+  ctx.fillStyle = c;
+  ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+
+  ctx.strokeStyle = '#0a0d13';
+  ctx.lineWidth = 2;
+  ctx.fillStyle = c;
+
+  if (p.kind === 'gem') {
+    // a cut stone: crown facets above a pavilion
+    const w = 3 + Math.abs(Math.cos(p.t * 2.2)) * 4;    // turns slowly
+    ctx.beginPath();
+    ctx.moveTo(0, 8); ctx.lineTo(-w, -1); ctx.lineTo(-w * 0.55, -6);
+    ctx.lineTo(w * 0.55, -6); ctx.lineTo(w, -1);
+    ctx.closePath(); ctx.stroke(); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha = 0.75;
+    ctx.beginPath();
+    ctx.moveTo(0, 8); ctx.lineTo(-w * 0.3, -1); ctx.lineTo(w * 0.3, -1);
+    ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
+  } else if (p.kind === 'idol') {
+    // a squat alien figure: broad head, three eyes, folded arms
+    ctx.beginPath();
+    ctx.moveTo(-5, 8); ctx.lineTo(-4, -1); ctx.lineTo(-6, -4);
+    ctx.lineTo(0, -8); ctx.lineTo(6, -4); ctx.lineTo(4, -1); ctx.lineTo(5, 8);
+    ctx.closePath(); ctx.stroke(); ctx.fill();
+    ctx.fillStyle = '#1a0f28';
+    for (let k = -1; k <= 1; k++) ctx.fillRect(k * 3 - 1, -5, 2, 2);
+    ctx.fillRect(-3, 1, 6, 1);
+  } else if (p.kind === 'crown') {
+    // five points on a jewelled band
+    ctx.beginPath();
+    ctx.moveTo(-7, 6); ctx.lineTo(-7, -2); ctx.lineTo(-4, 1); ctx.lineTo(-2, -6);
+    ctx.lineTo(0, 1); ctx.lineTo(2, -6); ctx.lineTo(4, 1); ctx.lineTo(7, -2);
+    ctx.lineTo(7, 6);
+    ctx.closePath(); ctx.stroke(); ctx.fill();
+    ctx.fillStyle = '#e8434f';
+    ctx.fillRect(-1, 3, 2, 2);
+    ctx.fillStyle = '#4fd0e8';
+    ctx.fillRect(-5, 3, 2, 2); ctx.fillRect(3, 3, 2, 2);
+  } else {
+    // reliquary: a sealed alien casket with something lit inside it
+    ctx.beginPath();
+    ctx.moveTo(-6, -3); ctx.lineTo(0, -9); ctx.lineTo(6, -3);
+    ctx.lineTo(6, 7); ctx.lineTo(-6, 7);
+    ctx.closePath(); ctx.stroke(); ctx.fill();
+    ctx.fillStyle = '#19061a';
+    ctx.fillRect(-4, -2, 8, 7);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = '#fff0ff';
+    ctx.globalAlpha = 0.5 + 0.5 * Math.abs(Math.sin(p.t * 5));
+    ctx.beginPath(); ctx.arc(0, 1.5, 2.4, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  // The glint: a star of light crossing the piece itself. It used to orbit
+  // out at nine pixels, which at this size read as a separate "+" floating
+  // next to the treasure rather than as light on it.
+  const ga = p.t * 2.1;
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = '#ffffff';
+  ctx.globalAlpha = 0.5 + 0.4 * Math.sin(p.t * 6);
+  const gx = Math.round(Math.cos(ga) * 3);
+  const gy = Math.round(Math.sin(ga) * 2) - 2;
+  ctx.fillRect(gx - 4, gy, 9, 1);
+  ctx.fillRect(gx, gy - 4, 1, 9);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.restore();
+}
+
+// An enemy missile is drawn as a missile, nose-on to its heading, with a
+// flaring exhaust — it has to read as a thing that can be shot down rather
+// than as a bullet that happens to curve.
+function drawMissile(ctx, s) {
+  const a = Math.atan2(s.vy, s.vx);
+  ctx.save();
+  ctx.translate(Math.round(s.x), Math.round(s.y));
+  ctx.rotate(a);
+  const flare = 5 + Math.random() * 6;
+  ctx.fillStyle = '#ff9a3a';
+  ctx.fillRect(-5 - flare, -1.5, flare, 3);
+  ctx.fillStyle = '#ffd24a';
+  ctx.fillRect(-5 - flare * 0.5, -1, flare * 0.5, 2);
+  ctx.fillStyle = '#ff5fa8';
+  ctx.beginPath();
+  ctx.moveTo(7, 0); ctx.lineTo(-2, -3.5); ctx.lineTo(-5, -2);
+  ctx.lineTo(-5, 2); ctx.lineTo(-2, 3.5);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#ffd0e8';
+  ctx.fillRect(0, -1, 5, 2);
+  ctx.restore();
+}
+
 // Each pickup carries a glyph, not just a colour: colour alone fails for
 // anyone who cannot separate the cyan from the green, and these appear
 // against a busy hull at speed.
@@ -508,6 +626,11 @@ function drawPickups(ctx) {
       ctx.globalCompositeOperation = 'source-over';
       continue;
     }
+
+    // Treasure is not cargo in a crate. It gets its own silhouette, a halo
+    // and a turning glint, because the whole point of it is that you see it
+    // across the hull and decide to go.
+    if (isTreasure(p.kind)) { drawTreasure(ctx, p, x, y, c); continue; }
 
     const h = PICKUP.size / 2;
     ctx.save();
@@ -595,87 +718,12 @@ function drawPickups(ctx) {
 // large enemies. Each silhouette is distinct enough to recognise from the
 // edge of the arena.
 function drawBoss(ctx, b) {
-  const x = Math.round(b.x);
-  const y = Math.round(b.y);
   ctx.save();
-  ctx.translate(x, y);
-
-  if (b.dead) {
-    // coming apart: flicker and sink
-    ctx.globalAlpha = 0.35 + 0.4 * Math.abs(Math.sin(b.death * 22));
-  }
-
-  const lit = b.flash > 0;
-
-  if (b.kind === 'warden') {
-    // spine
-    ctx.fillStyle = '#20252e';
-    ctx.fillRect(-10, -96, 22, 192);
-    ctx.fillStyle = '#39404c';
-    ctx.fillRect(-8, -94, 18, 188);
-    for (let ry = -90; ry < 90; ry += 14) {
-      ctx.fillStyle = '#7b8795';
-      ctx.fillRect(-6, ry, 2, 2);
-      ctx.fillRect(6, ry, 2, 2);
-    }
-    // core, exposed only once the pods are gone
-    const open = !shellUp(b);
-    ctx.fillStyle = lit ? '#ffd24a' : open ? '#5b2730' : '#2a3038';
-    ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = open ? '#e8434f' : '#4b5462';
-    ctx.lineWidth = 3; ctx.stroke();
-    if (open) {
-      ctx.fillStyle = '#ff7a2f';
-      ctx.beginPath(); ctx.arc(0, 0, 12 + Math.sin(b.t * 7) * 3, 0, Math.PI * 2); ctx.fill();
-    }
-  } else if (b.kind === 'drayline') {
-    ctx.fillStyle = '#1b2029';
-    ctx.beginPath();
-    ctx.moveTo(-40, 0); ctx.lineTo(-14, -42); ctx.lineTo(34, -26);
-    ctx.lineTo(34, 26); ctx.lineTo(-14, 42); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = lit ? '#ffd24a' : '#444d5a';
-    ctx.beginPath();
-    ctx.moveTo(-34, 0); ctx.lineTo(-12, -36); ctx.lineTo(28, -22);
-    ctx.lineTo(28, 22); ctx.lineTo(-12, 36); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#8e9aa9';
-    ctx.fillRect(-36, -6, 16, 12);
-    ctx.fillStyle = '#e8434f';
-    ctx.fillRect(-4, -5, 10, 10);
-    for (let ry = -30; ry < 30; ry += 12) {
-      ctx.fillStyle = '#7b8795';
-      ctx.fillRect(14, ry, 2, 2);
-    }
-  } else {
-    // riveter: core plus rotating plates
-    ctx.fillStyle = lit ? '#ffd24a' : '#333a45';
-    ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#59636f'; ctx.lineWidth = 3; ctx.stroke();
-    const open = !shellUp(b);
-    ctx.fillStyle = open ? '#ff7a2f' : '#20262e';
-    ctx.beginPath(); ctx.arc(0, 0, open ? 15 + Math.sin(b.t * 9) * 3 : 12, 0, Math.PI * 2); ctx.fill();
-  }
-
-  // destructible parts
-  for (const part of b.parts) {
-    if (part.dead) continue;
-    const hurt = 1 - part.hp / part.maxHp;
-    ctx.save();
-    ctx.translate(part.dx, part.dy);
-    ctx.fillStyle = '#161b22';
-    ctx.fillRect(-part.r - 2, -part.r - 2, part.r * 2 + 4, part.r * 2 + 4);
-    ctx.fillStyle = part.flash > 0 ? '#ffd24a' : '#4e5765';
-    ctx.fillRect(-part.r, -part.r, part.r * 2, part.r * 2);
-    ctx.fillStyle = '#9fadbd';
-    ctx.fillRect(-part.r, -part.r, part.r * 2, 2);
-    // damage shows as a reddening eye
-    ctx.fillStyle = hurt > 0.6 ? '#e8434f' : hurt > 0.3 ? '#ff7a2f' : '#ffd24a';
-    ctx.fillRect(-4, -4, 8, 8);
-    ctx.fillStyle = '#b4c0ce';
-    ctx.fillRect(-part.r + 2, -part.r + 2, 2, 2);
-    ctx.fillRect(part.r - 4, part.r - 4, 2, 2);
-    ctx.restore();
-  }
-
+  ctx.translate(Math.round(b.x), Math.round(b.y));
+  // coming apart: flicker and sink
+  if (b.dead) ctx.globalAlpha = 0.35 + 0.4 * Math.abs(Math.sin(b.death * 22));
+  drawBossBody(ctx, b);
+  drawBossParts(ctx, b);
   ctx.globalAlpha = 1;
   ctx.restore();
 }
@@ -818,6 +866,7 @@ function drawShots(ctx) {
   }
   for (let i = 0; i < enemyShots.count; i++) {
     const s = enemyShots.items[i];
+    if (s.seek > 0) { drawMissile(ctx, s); continue; }
     ctx.fillStyle = COL.warm;
     ctx.fillRect(Math.round(s.x) - 3, Math.round(s.y) - 3, 6, 6);
     ctx.fillStyle = COL.warmHi;

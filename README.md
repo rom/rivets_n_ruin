@@ -76,6 +76,10 @@ backend down**; you lose the leaderboard, not the game.
 | A bomb, a grenade and a missile in the air at once | The attacker roster |
 | ![Minibosses](docs/minibosses.png) | ![Boss](docs/scene-boss.png) |
 | The miniboss roster | GILTHAMMER, in the arena at the end of AURUM |
+| ![Radar](docs/radar.png) | ![Treasure](docs/treasure.png) |
+| The radar: guns, loot, minibosses, the arena | Coins, a bar, a coffin and the four treasures |
+| ![Overview](docs/overview.png) | ![Shop](docs/shop.png) |
+| The hull bonus, the refit and the mods fitted | The armourer between hulls |
 
 ## The hulls
 
@@ -120,7 +124,7 @@ the dock. Dying out of ships ends the run wherever you are.
 
 ## Gun towers
 
-Five kinds, introduced hull by hull. Each is a different problem rather than
+Six kinds, introduced hull by hull. Each is a different problem rather than
 a tougher version of the same one.
 
 | Tower | From | Behaviour |
@@ -128,12 +132,30 @@ a tougher version of the same one.
 | **GUN** | ARGENTUM | Aimed three-round burst with lead prediction |
 | **FLAK** | TANTALUM | A wide fan — cannot be beaten by sitting off its line |
 | **LANCE** | CUPRUM | Charges visibly, then one very fast shot. Respect the tell |
+| **ROCKET** | CUPRUM | Launches homing missiles. The only one that follows you |
 | **MORTAR** | PYRITE | Lobs heavy shells on an arc that ignores your altitude |
 | **WARDEN** | WOLFRAM | Shields its neighbours. Changes the order you must kill in |
 
 A hull's roster is `LEVELS[].towers`. While a warden lives, nearby towers
 take no damage and visibly shimmer — so the question stops being "what is
 shooting me" and becomes "what do I have to kill first".
+
+### The rocket, and the only enemy ordnance you can shoot
+
+Every other tower is beaten by not being on its line. A rocket launches wide
+and turns in afterwards at 1.45 rad/s, which is slow enough to out-turn and
+fast enough that standing still does not work.
+
+So it needs an answer, and it has one: **a missile in flight can be
+destroyed**. It is the only enemy ordnance the cannon can touch — two hits,
+worth 60 points, and the explosion is its own reward. Ordinary bullets stay
+untouchable, because a game where you can shoot down every bullet is a
+different game.
+
+Homing is implemented as a turn rate on the shot itself (`seek` in
+`src/projectiles.js`), applied to the velocity's *direction* only: a missile
+that accelerated while turning would be unavoidable, and a test asserts its
+speed never changes.
 
 ## Attackers
 
@@ -174,6 +196,12 @@ keeps spawning while you do.
 | **BULWARK** | PYRITE | Radial walls and a lot of health. Expensive to stop for |
 | **HARRIER PACK** | FERRUM | Fast, and calls escorts while it runs rings around you |
 
+They are drawn in the same register as the bosses: the hauler is a pirate
+freighter with a bridge tower and colours off the stern, the cutter is an
+alien ray with one eye and an arc strung between two horns, the bulwark is
+an assault drum with its barrels out, and the harrier is a raider with a
+crew canopy and a pennant.
+
 One appears on ARGENTUM and a fourth is added by AURUM, spread evenly along
 the hull and always clear of both aprons and of the boss arena. If a boss is
 up, anything still alive breaks off and runs: the fight at the far end is
@@ -184,6 +212,28 @@ what makes stopping worth it. Health scales with the hull and with the
 difficulty, like everything else.
 
 ## Bosses
+
+Eight of them, one per hull, and eight distinct ships — not one disc with
+different numbers. They belong to factions you can read at a glance:
+an emplacement, pirates, assault craft, two kinds of alien, and one thing
+that is plainly alive.
+
+| | |
+| --- | --- |
+| ![THE WARDEN](docs/boss-01-thewarden.png) | ![DRAYLINE](docs/boss-02-drayline.png) |
+| **1 · THE WARDEN** — emplaced boarding rig, clamp arms and a plated spine | **2 · DRAYLINE** — pirate gunship: ram prow, broadside ports, colours flown |
+| ![THE RIVETER](docs/boss-03-theriveter.png) | ![COLDFORGE](docs/boss-04-coldforge.png) |
+| **3 · THE RIVETER** — assault ship with a hammer for a bow | **4 · COLDFORGE** — alien minelayer, segmented and legged |
+| ![SLAGHEART](docs/boss-05-slagheart.png) | ![NIGHTFALL](docs/boss-06-nightfall.png) |
+| **5 · SLAGHEART** — a space monster: ribbed carapace, a maw, veins of heat | **6 · NIGHTFALL** — barely here. A frame around a hole, and a phase ghost |
+| ![THE SEXTON](docs/boss-07-thesexton.png) | ![GILTHAMMER](docs/boss-08-gilthammer.png) |
+| **7 · THE SEXTON** — scavenger barge, armoured in salvage, towing its take | **8 · GILTHAMMER** — the admiralty's gilded dreadnought |
+
+Their destructible sections match: a pod on an alien is an egg sac that
+swells and pulses, a plate on a warship is bolted armour with a visible
+mount. Drawing all of them as the same grey square threw away the only
+chance to say which faction you are shooting at. The bodies live in
+`src/bossart.js`, one function each.
 
 Each hull is guarded at its far end, and the boss is what opens the way home —
 so a run reads as approach, fight, escape rather than a lap with a waypoint.
@@ -289,6 +339,36 @@ You are not immune to your own ordnance, though you take far less of it.
 
 Crates drop from kills; each refills a couple of rounds, up to a cap.
 
+## Clearing a hull
+
+![The overview between hulls](docs/overview.png)
+
+Reaching the dock pays a flat completion bonus and a time bonus, and then
+asks three questions about *how* you flew it. They are three different ways
+to play the same hull, and the breakdown is itemised rather than totalled
+because the number on its own tells you nothing about which of the three you
+did well.
+
+| Line | Pays |
+| --- | --- |
+| **GUNS BROKEN** | 5,000 × the fraction of the hull's guns destroyed |
+| **FULL SWEEP** | 4,000 more if nothing on the hull is still firing |
+| **SHIPS REMAINING** | 1,800 each |
+| **NO LOSSES** | 2,500 for the hull flown without losing one |
+| **HAUL** | 30% of the value of the loot collected on this hull |
+
+All of it is `HULL_BONUS` in `src/config.js`, and all of it goes through
+`award()`, so the difficulty multiplier applies. The HUD carries the two
+running totals while you fly — `GUNS 24/48` and the hull's haul — so the
+bonus is something you can play toward rather than something you are told
+about afterwards.
+
+The same screen is the overview: the next hull drawn to scale against the
+one just flown, what is new about it, the refit, and **the mods you have
+bought**. Mods were missing from it, which meant the one screen that is
+meant to answer "what am I flying" left out the half of the answer you paid
+coins for.
+
 ## The armourer
 
 ![The shop](docs/shop.png)
@@ -340,6 +420,32 @@ apart on impact then drifting like any other pickup. They are constant
 background income and get no toast; the run's haul shows on the HUD. A **gold
 coffin** is the rare one, worth 2,500. Bosses shed both in quantity.
 
+## Treasure
+
+![Coins, a bar, a coffin and the four treasures](docs/treasure.png)
+
+Above the coffin there are four tiers that are not scattered by every kill.
+They come off the things that are hard to kill, each is rarer and worth more
+than the last, and each has its own silhouette, its own halo and its own
+flourish when you take it — so what you found is audible before you have
+read the toast.
+
+| Treasure | Worth | At the armourer | Rarity |
+| --- | --- | --- | --- |
+| **CUT GEM** | 900 | 24 coins | common, as treasure goes |
+| **ALIEN IDOL** | 2,000 | 52 coins | uncommon |
+| **PIRATE CROWN** | 4,500 | 110 coins | rare |
+| **RELIQUARY** | 9,000 | 230 coins | the one you tell someone about |
+
+The odds start at 2.2% a kill on ARGENTUM and climb to 6.4% on AURUM, so the
+late game pays for the trouble it causes. A boss rolls seven times, which is
+why flying into its wreck is worth the risk. All of it is `PICKUP.treasure`
+in `src/config.js`.
+
+Treasure also shows on the radar as a full-height mark in the lane, which is
+the point of having a radar: seeing a reliquary four thousand pixels back is
+what makes turning round a decision.
+
 ## Pickups
 
 Everything you destroy can drop one, so shooting pays beyond score and a long
@@ -373,6 +479,38 @@ busy hull at speed. They bob, drift, and pull toward you — within 74px for an
 upgrade and 118px for loot, so a near miss at full throttle still counts —
 and flash for their last three seconds before expiring. A drop that would land inside solid hull is relocated to open
 space, so a pickup is never unreachable.
+
+## The radar
+
+![The radar strip](docs/radar.png)
+
+The old progress bar answered one question — how far along am I — while the
+hull held guns, loot, minibosses and a boss, and none of it was visible until
+it was on screen. The strip across the top shows all of it at once.
+
+Three bands, because one band is noise:
+
+- **Top and bottom** are the hull itself, drawn as a silhouette from a
+  profile computed once per hull and cached (`radarProfile` in
+  `src/level.js`). A pincer reads as a pinch; a clear run reads as a gap.
+- **The lane between them** is everything you might fly to. Coins are dim
+  pips, bars and coffins are taller marks, treasure is a full-height block
+  with a white core. Guns sit on the inner edge of whichever surface they
+  are mounted on, in their own colour, and stay on the map dimmed once
+  broken — what you have already cleared matters as much as what you have
+  not, because the bonus is paid on the ratio.
+- **Minibosses** are diamonds; the ones still waiting further along are
+  hollow. The arena at the far end is marked, and lights red when the boss
+  is actually up.
+
+Your position is a bright caret and the box around it is what you can
+currently see. Everything is placed by x only: 640 pixels of strip against
+25,000 pixels of hull is 39:1, so vertical position would be a lie, and
+height is used to say what a thing *is* instead.
+
+The strip overlaps the top of the playfield, and skimming the upper girder
+is a normal way to fly — so it fades to near-transparent while you are under
+it, and comes back when you leave. `RADAR STRIP` in settings turns it off.
 
 ## Settings
 
@@ -551,20 +689,52 @@ that actually make a 6581 recognisable, in rough order of importance:
 - **Drums from the same voices**: bit-crushed noise plus a pitch-swept tone,
   because the chip had no sampler.
 
-Four of them. `T` cycles; each hull also selects its own, so the score tracks
-where you are in the campaign unless you override it.
+### Form — the thing that was actually missing
 
-| Tune | Character |
-| --- | --- |
-| **DROSS** | D phrygian, 152 BPM — the default driver |
-| **QUENCH** | A aeolian, 126 BPM, half time — lower, heavier |
-| **OVERDRIVE** | E dorian, 174 BPM, double time — relentless |
-| **VACUUM** | D aeolian, 104 BPM — sparse, drifting |
+Every tune used to be four bars, looping. Four bars of anything repeats
+forty times across a hull, and no amount of good writing survives that: it
+was a texture, not a tune. The loop is now sixteen bars with a shape:
 
-A tune is pure data in `TUNES` in `src/music.js`: tempo, root, mode, chord
-movement, drum masks and lead shape. Adding a fifth is adding an entry, not
-code. Switches land on the next bar line so a change never chops a phrase in
-half, but the UI reports your selection immediately rather than waiting.
+```
+bars  0-3   A, no lead        the groove states itself
+bars  4-7   A, with the hook  the part you are meant to remember
+bars  8-11  B, its own hook   on its own chords — the middle eight
+bars 12-15  A, hook again     and a fill into the turnaround
+```
+
+So a tune takes about twenty-five seconds to come round, it goes somewhere
+in the middle, and the part you remember arrives twice. On top of that: a
+written melody instead of an arpeggio cycling forever, a drum fill on the
+last beat of every four-bar group, and a bass that walks up into the next
+phrase rather than restating one note.
+
+A melody is 32 eighth notes of **scale degrees**, not semitones, so it is in
+key by construction and a wrong note is not expressible. Rests are as
+deliberate as notes, and a test asserts each hook has at least six and at
+most twenty-six of its thirty-two slots filled — silence with extra steps at
+one end, a drill at the other.
+
+### The eight tunes
+
+`T` cycles; each hull selects its own, so the score tracks where you are in
+the campaign unless you override it in settings.
+
+| Tune | Hull | Character |
+| --- | --- | --- |
+| **DROSS** | ARGENTUM | D phrygian, 152 — the working tune |
+| **QUENCH** | OSMIUM | A aeolian, 126, half time — lower, heavier |
+| **GANTRY** | TANTALUM | G dorian, 138 — a march |
+| **OVERDRIVE** | CUPRUM | E dorian, 174, double time — relentless |
+| **CORSAIR** | PYRITE | B phrygian, 164 — a raiding party |
+| **VACUUM** | WOLFRAM | D aeolian, 104 — sparse, drifting |
+| **BLACKSTAR** | FERRUM | C harmonic minor, 118 — something alive |
+| **HAMMERFALL** | AURUM | F# aeolian, 186 — the last hull |
+
+A tune is pure data in `TUNES` in `src/music.js`: tempo, root, mode, two
+chord progressions, drum masks and two hooks. Adding a ninth is adding an
+entry, not code. Switches land on the next bar line so a change never chops
+a phrase in half, but the UI reports your selection immediately rather than
+waiting.
 
 Audio cannot start before a user gesture (browsers forbid it), so the context is
 created on your first keypress. Mute is `M`; both it and your tune choice
@@ -738,6 +908,7 @@ src/level.js      hull generation, collision buckets, pre-rendered plating
 src/player.js     ship physics, flip, firing, hull collision response
 src/enemies.js    turret and interceptor behaviour
 src/miniboss.js   the four mid-hull minibosses
+src/bossart.js    eight boss bodies and their destructible sections
 src/score.js      difficulty multipliers, and the one way points are awarded
 src/game.js       state machine, collision pairs, run objective
 src/render.js     world drawing
@@ -800,6 +971,20 @@ Several exist because of bugs that shipped:
   `game.score +=`. Points are awarded at sixteen places; a difficulty that
   pays more has to pay more at all sixteen, and the fifteen-of-sixteen
   version of that bug is invisible from in front of the screen.
+- **`test/projectiles.test.mjs`** asserts a homing missile turns at exactly
+  its stated rate and that its *speed never changes* — a missile that
+  accelerated while turning would be unavoidable — and that a reused pool
+  slot does not leave an ordinary bullet homing.
+- **`test/music.test.mjs`** checks the form and the melodies: that the hook
+  index walks each four-bar phrase exactly once in order, that every note of
+  every tune over every chord lands in the audible range, and that no two
+  hulls in sequence play the same tune. The music cannot be heard from here,
+  so what can be checked is checked.
+- **`tools/optimise_gallery.py`** measures the most saturated pixel before
+  and after quantising and fails the build if it drops by a quarter. It was
+  written after noticing that every README image had been losing most of its
+  colour — the hull themes went from 200 saturation to 42 — because median
+  cut allocates its palette by area and these screenshots are 95% dark hull.
 
 Run the Go tests with `go test ./...` (and `-race`, which the suite is clean
 under — it covers concurrent submission and concurrent store access).
@@ -818,19 +1003,24 @@ a stale gap list is worse than none, so this is current as of the version in
 below follows from that one fact.
 
 - **Balance is all first guesses.** Eight hulls, eight bosses, four
-  minibosses, eight attacker types, five tower types, the coin economy, the
-  armourer's prices, the refit curve and the four difficulty settings were
-  all picked by reasoning about them, not by playing them. Whether a run
+  minibosses, eight attacker types, six tower types, four treasure tiers,
+  the coin economy, the armourer's prices, the refit curve, the end-of-hull
+  bonus and the four difficulty settings were all picked by reasoning about
+  them, not by playing them. Whether a run
   outgrows its hull, whether RUIN is hard or merely tedious, and whether
   stopping for a BULWARK is ever worth the coins are open questions. The
   numbers are all data: `LEVELS`, `BOSSES`, `LEVEL_UP`, `PICKUP`, `ARMORY`
   and `DIFFICULTY` in `src/config.js`, and `KINDS` in `src/miniboss.js`.
 - **The music is unheard by me.** The techniques are the real ones a SID
-  used and the spectra look right, but whether it sounds good is not
-  something measuring RMS can tell you.
+  used, the form and the melodies are written rather than generated, and
+  the tests prove every note is in key and in range — but whether the hooks
+  are any good is not something a test can tell you. Eight tunes written
+  deaf is eight chances to be wrong.
 - **The graphics are unjudged.** Bloom strength, foreground density and the
   surface shading are tuned by eye against screenshots, not by playing.
-  Bloom in particular is easy to overdo.
+  Bloom in particular is easy to overdo. The eight boss bodies and the
+  radar strip were drawn against still frames; whether a boss reads at speed
+  with forty bullets on screen is a different question.
 - **Coverage is partial and the report says so.** Rendering, audio and HUD
   modules are exercised only by the browser smoke test, so they contribute
   no line coverage. The smoke test asserts pixels, not that anything looks
@@ -841,6 +1031,9 @@ below follows from that one fact.
   what it does and does not establish.
 - **No mod browser in-game.** Mods are published over the API and played via
   `/?mod=<id>`; there is no UI for discovering them yet.
+- **The radar overlaps the playfield.** It fades while you fly under it,
+  which works, but the honest fix is a taller HUD — and that would shorten
+  the playfield, which changes the game rather than the chrome.
 - **Single-process storage.** JSON snapshots, no SQL, no horizontal scaling.
 - **Account recovery needs a password.** A pilot who never set one is only
   the token in `localStorage`: lose it and that identity is gone, though
