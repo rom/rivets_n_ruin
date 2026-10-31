@@ -207,11 +207,29 @@ arrive hull by hull, each asking a different question:
 | **Orbiter** | CUPRUM | Parks, circles, sprays radially. Forces you to close or leave |
 | **Warder** | PYRITE | Frontal plate: head-on shots bounce. Must be flanked, or blasted |
 | **Splitter** | PYRITE | Breaks into two halves that keep coming. Killing it early is cheaper |
-| **Leech** | WOLFRAM | Latches on and drains your shield until you shoot it off |
+| **Leech** | WOLFRAM | Clamps onto the hull and drains the shield until you shoot it off |
 | **Bomber** | FERRUM | Seeds mines along its path, so ignoring it costs you the lane |
 
 Which hull fields which is `LEVELS[].foes` in `src/config.js`. ARGENTUM
 fields none of them — the first hull is turrets and interceptors only.
+
+A leech is the only attacker that does not simply have to be avoided: once
+it is on, it is on, and it costs 11 shield a second until something takes
+it off. Two things about that were wrong and are now fixed:
+
+- **It drained at five times its stated rate.** An attached leech sits at
+  the ship's own position, which also tripped the generic ram check: 18
+  damage every 0.35 seconds, and the brief invulnerability that ram grants
+  then suppressed the drain it is actually specified to do. It is excluded
+  from ramming now, because it has its own damage model.
+- **It survived the hull it was on.** A leech attached when a ship was lost
+  was still attached to the replacement, so one bad grab drained every
+  remaining ship in turn and ended the run with nothing the player could do.
+  Anything clamped to a hull is destroyed with it, and a leech can no longer
+  grab a ship that is still in its respawn grace — a grab during those two
+  seconds would have started draining the instant they ran out, which from
+  the front of the screen is indistinguishable from a respawn that does not
+  work.
 
 ### Deflector shields
 
@@ -553,7 +571,20 @@ space, so a pickup is never unreachable.
 
 The old progress bar answered one question — how far along am I — while the
 hull held guns, loot, minibosses and a boss, and none of it was visible until
-it was on screen. The strip across the top shows all of it at once.
+it was on screen. The strip shows all of it at once.
+
+**It has a band of its own.** The frame is three stacked regions — playfield,
+radar, HUD — and none of them overlaps another. The radar was first drawn
+over the top of the playfield and faded out when the ship flew under it,
+which was never quite honest and was plainly wrong for anything that is not
+the ship: a gun mounted on the upper girder sits at y=16 with its barrel
+reaching to about y=29, entirely behind a strip that ran from 0 to 22. Half
+of every hull's guns were hidden behind the thing that was meant to be
+showing you where they were.
+
+The playfield kept every pixel it had, so no gameplay constant moved; the
+frame grew from 640×360 to 640×384 instead. A test walks every hull and
+asserts no gun anywhere reaches into the radar band.
 
 Three bands, because one band is noise:
 
@@ -575,9 +606,7 @@ currently see. Everything is placed by x only: 640 pixels of strip against
 25,000 pixels of hull is 39:1, so vertical position would be a lie, and
 height is used to say what a thing *is* instead.
 
-The strip overlaps the top of the playfield, and skimming the upper girder
-is a normal way to fly — so it fades to near-transparent while you are under
-it, and comes back when you leave. `RADAR STRIP` in settings turns it off.
+`RADAR STRIP` in settings turns it off.
 
 ## Settings
 
@@ -1067,6 +1096,15 @@ Several exist because of bugs that shipped:
   that cannot be finished — and that the beam holds the ship at its clear
   distance with the thrust held down, rather than merely bouncing it, which
   enough speed would push through.
+- **`test/shields.test.mjs`** drives a real death through the real update
+  loop with a leech clamped on. A leech attached when a hull was lost used
+  to survive the explosion and still be attached to the replacement, so one
+  bad grab drained every remaining ship in turn and ended the run. The guard
+  inside the leech's own update could never fire — death switches the game
+  to `dying` in the same frame, and attackers are not updated in that state
+  at all — so the test has to go through `update()`, not through the helper.
+- **`test/radar.test.mjs`** asserts the three bands stack without
+  overlapping and that no gun on any hull reaches into the radar's band.
 - **`test/mods.test.mjs`** asserts no two shop rows share an id. The Tractor
   Coils upgrade and the Lodestone mod both used `magnet`, so anything that
   looked a row up by id got whichever came first.
@@ -1124,9 +1162,6 @@ below follows from that one fact.
   what it does and does not establish.
 - **No mod browser in-game.** Mods are published over the API and played via
   `/?mod=<id>`; there is no UI for discovering them yet.
-- **The radar overlaps the playfield.** It fades while you fly under it,
-  which works, but the honest fix is a taller HUD — and that would shorten
-  the playfield, which changes the game rather than the chrome.
 - **The adaptive scaler still climbs slowly.** Menus are sharp now because
   they ignore the cap, but gameplay itself takes about twenty seconds of
   flying to reach the resolution a machine can actually hold. The pacing is

@@ -1,5 +1,6 @@
 import {
-  VIEW_W, VIEW_H, FIELD_H, HUD_H, SHIP, LEVELS, LEVEL_UP, THEMES, COL, clamp,
+  VIEW_W, VIEW_H, FIELD_H, HUD_H, HUD_Y, RADAR_Y, RADAR_H,
+  SHIP, LEVELS, LEVEL_UP, THEMES, COL, clamp,
 } from './config.js';
 import { netState } from './net.js';
 import { PICKUP, ARMORY, APRON, LASER } from './config.js';
@@ -15,6 +16,10 @@ import { VERSION } from './config.js';
 import { livingParts, shellUp } from './boss.js';
 import { activeMod } from './mods.js';
 
+// Everything a full-screen overlay covers: the playfield and the radar
+// band. Not the HUD, which stays readable under a menu.
+const SCREEN_H = FIELD_H + RADAR_H;
+
 const FONT = 'bold 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 const FONT_BIG = 'bold 20px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 
@@ -28,7 +33,7 @@ function text(ctx, str, x, y, color = COL.hudText, font = FONT, align = 'left') 
 
 export function drawHud(ctx, game, audio = {}) {
   const p = game.player;
-  const y0 = FIELD_H;
+  const y0 = HUD_Y;
 
   ctx.fillStyle = COL.hudBg;
   ctx.fillRect(0, y0, VIEW_W, HUD_H);
@@ -292,10 +297,10 @@ function drawBoard(ctx, x, y, rows = 10) {
 // you might fly to is marked. A gun sits on the inner edge of its own band,
 // which is where it actually sits on the hull.
 const RADAR = {
-  y: 0, h: 23,
-  topY: 1, topH: 8,      // structure hanging from the upper girder
-  laneY: 9, laneH: 6,    // the corridor, and everything in it
-  botY: 15, botH: 7,     // structure standing on the lower girder
+  y: RADAR_Y, h: RADAR_H,
+  topY: RADAR_Y + 2, topH: 8,         // structure hanging from the upper girder
+  laneY: RADAR_Y + 10, laneH: 6,      // the corridor, and everything in it
+  botY: RADAR_Y + 16, botH: 7,        // structure standing on the lower girder
 };
 
 export function drawRadar(ctx, game) {
@@ -305,20 +310,17 @@ export function drawRadar(ctx, game) {
   const laneMid = R.laneY + R.laneH / 2;
   const botEnd = R.botY + R.botH;
 
-  // The strip overlaps the top of the playfield, and skimming the upper
-  // girder is a normal way to fly. So it gets out of the way: full strength
-  // while you are anywhere else, nearly transparent while you are under it.
+  // It has a band of its own now, so it is always at full strength: it can
+  // neither be flown under nor hide anything behind it.
   const p = game.player;
-  const clear = clamp((p.y - 24) / 40, 0, 1);
   ctx.save();
-  ctx.globalAlpha = 0.3 + 0.65 * clear;
-
   ctx.fillStyle = '#05070b';
   ctx.fillRect(0, R.y, W, R.h);
   // the lane is lighter than the structure, so a marker in it always reads
   ctx.fillStyle = '#0e141c';
   ctx.fillRect(0, R.laneY, W, R.laneH);
   ctx.fillStyle = COL.hudLine;
+  ctx.fillRect(0, R.y, W, 1);
   ctx.fillRect(0, R.y + R.h - 1, W, 1);
 
   const at = (wx) => (clamp(wx, 0, level.length) / level.length) * W;
@@ -387,7 +389,7 @@ export function drawRadar(ctx, game) {
   for (const g of level.gates || []) {
     const gx = Math.round(at(g.x));
     ctx.fillStyle = g.dead ? '#3a2a30' : LASER.colour;
-    ctx.fillRect(gx, R.topY, 1, R.h - 2);
+    ctx.fillRect(gx, R.topY, 1, R.h - 4);
     if (!g.dead) {
       ctx.fillStyle = '#ffd0d4';
       ctx.fillRect(gx - 1, g.dir === 1 ? R.topY : botEnd - 3, 3, 3);
@@ -413,7 +415,7 @@ export function drawRadar(ctx, game) {
   const ax = at(level.length - VIEW_W);
   const live = game.boss && !game.boss.dead;
   ctx.fillStyle = live ? '#5a1a22' : '#2a2030';
-  ctx.fillRect(ax, R.topY, W - ax, R.h - 2);
+  ctx.fillRect(ax, R.topY, W - ax, R.h - 4);
   text(ctx, 'BOSS', W - 3, R.laneY - 2, live ? '#ff8a92' : '#6b5563', FONT, 'right');
 
   // --- what you can see, and where you are in it
@@ -534,7 +536,7 @@ function drawScreen(ctx, game) {
   if (game.state === 'ending') { drawEnding(ctx, game); return; }
 
   ctx.fillStyle = 'rgba(4,6,10,0.80)';
-  ctx.fillRect(0, 0, VIEW_W, FIELD_H);
+  ctx.fillRect(0, 0, VIEW_W, SCREEN_H);
 
   const cx = VIEW_W / 2;
   const net = netState();
@@ -705,7 +707,7 @@ function drawRankLine(ctx, cx, y) {
 function drawEnding(ctx, game) {
   const t = game.stateT;
   ctx.fillStyle = '#04060a';
-  ctx.fillRect(0, 0, VIEW_W, FIELD_H);
+  ctx.fillRect(0, 0, VIEW_W, SCREEN_H);
   const cx = VIEW_W / 2;
 
   // starfield drifting past, then the pad rising into frame
@@ -790,7 +792,7 @@ function drawEnding(ctx, game) {
 
 export function drawShop(ctx, game, sel, note) {
   ctx.fillStyle = '#04060a';
-  ctx.fillRect(0, 0, VIEW_W, FIELD_H);
+  ctx.fillRect(0, 0, VIEW_W, SCREEN_H);
   const cx = VIEW_W / 2;
 
   text(ctx, 'ARMOURER', cx, 12, COL.hudBright, FONT_BIG, 'center');
@@ -836,7 +838,7 @@ export function drawShop(ctx, game, sel, note) {
 
 export function drawSettings(ctx, game, sel) {
   ctx.fillStyle = '#04060a';
-  ctx.fillRect(0, 0, VIEW_W, FIELD_H);
+  ctx.fillRect(0, 0, VIEW_W, SCREEN_H);
   const cx = VIEW_W / 2;
 
   text(ctx, 'SETTINGS', cx, 16, COL.hudBright, FONT_BIG, 'center');
@@ -879,7 +881,7 @@ export function drawSettings(ctx, game, sel) {
 
 export function drawQuitPrompt(ctx, game) {
   ctx.fillStyle = 'rgba(4,6,10,0.82)';
-  ctx.fillRect(0, 0, VIEW_W, FIELD_H);
+  ctx.fillRect(0, 0, VIEW_W, SCREEN_H);
   const cx = VIEW_W / 2;
   text(ctx, 'ABANDON THE RUN?', cx, 118, COL.danger, FONT_BIG, 'center');
   text(ctx, 'SCORE ' + String(game.score).padStart(8, '0')
@@ -894,7 +896,7 @@ export function drawQuitPrompt(ctx, game) {
 
 export function drawPaused(ctx) {
   ctx.fillStyle = 'rgba(4,6,10,0.7)';
-  ctx.fillRect(0, 0, VIEW_W, FIELD_H);
+  ctx.fillRect(0, 0, VIEW_W, SCREEN_H);
   text(ctx, 'PAUSED', VIEW_W / 2, 150, COL.hudBright, FONT_BIG, 'center');
   text(ctx, 'P TO RESUME', VIEW_W / 2, 180, COL.hudText, FONT, 'center');
 }
