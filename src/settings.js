@@ -5,6 +5,8 @@
 // screen that draws them needs no knowledge of what any particular setting
 // means — adding one is an entry in this list.
 
+import { DIFFICULTY } from './config.js';
+
 const KEY = 'rnr.settings';
 
 export const DEFS = [
@@ -16,6 +18,8 @@ export const DEFS = [
     help: 'Overall output level.' },
   { id: 'tune', label: 'TUNE', kind: 'tune', def: 0,
     help: 'Each hull picks its own unless you override it here.' },
+  { id: 'difficulty', label: 'DIFFICULTY', kind: 'difficulty', def: 1,
+    help: 'Takes effect on the next run. Harder settings score more.' },
   { id: 'bloom', label: 'BLOOM', kind: 'bool', def: true,
     help: 'Glow around bright things. Off is cheaper on a slow machine.' },
   { id: 'scanlines', label: 'CRT SCANLINES', kind: 'bool', def: true,
@@ -45,6 +49,9 @@ function load() {
         state[d.id] = Math.max(d.min, Math.min(d.max, saved[d.id]));
       }
       if (d.kind === 'tune' && Number.isFinite(saved[d.id])) state[d.id] = saved[d.id];
+      if (d.kind === 'difficulty' && Number.isFinite(saved[d.id])) {
+        state[d.id] = Math.max(0, Math.min(DIFFICULTY.length - 1, saved[d.id]));
+      }
     }
   } catch { /* corrupt or unavailable; defaults stand */ }
 }
@@ -70,6 +77,8 @@ export function nudge(id, dir, tuneCount = 1) {
     set(id, Math.max(d.min, Math.min(d.max, state[id] + dir * d.step)));
   } else if (d.kind === 'tune') {
     set(id, ((state[id] + dir) % tuneCount + tuneCount) % tuneCount);
+  } else if (d.kind === 'difficulty') {
+    set(id, Math.max(0, Math.min(DIFFICULTY.length - 1, state[id] + dir)));
   }
 }
 
@@ -87,5 +96,6 @@ export function display(d, tuneName) {
   if (d.kind === 'bool') return state[d.id] ? 'ON' : 'OFF';
   if (d.kind === 'range') return String(state[d.id]);
   if (d.kind === 'tune') return tuneName || String(state[d.id]);
+  if (d.kind === 'difficulty') return DIFFICULTY[state[d.id]].name;
   return '';
 }

@@ -53,6 +53,11 @@ export const ITEMS = [
     can: (p) => p.shieldMax < PICKUP.shieldCeiling,
     buy: (p) => { p.shieldMax += 25; p.shield = p.shieldMax; },
     owned: (p) => p.shieldMax, max: () => PICKUP.shieldCeiling },
+  { id: 'magnet', name: 'TRACTOR COILS', base: 600, step: 300,
+    blurb: 'Pull loot in from further away.',
+    can: (p) => (p.magnetLevel || 0) < PICKUP.magnetLevels.length - 1,
+    buy: (p) => { p.magnetLevel = (p.magnetLevel || 0) + 1; },
+    owned: (p) => p.magnetLevel || 0, max: () => PICKUP.magnetLevels.length - 1 },
   { id: 'life', name: 'SPARE SHIP', base: 1400, step: 700,
     blurb: 'One more ship in the hangar.',
     can: (p) => p.lives < PICKUP.maxLives,
@@ -127,7 +132,10 @@ export function buy(game, row) {
 export function applyMods(game) {
   const p = game.player;
   const m = game.mods || {};
-  p.magnetMul = m.magnet ? 2 : 1;
+  // Coils bought in the shop stack multiplicatively with the Lodestone mod,
+  // so a pilot who invests in both barely has to steer for loot at all.
+  const coils = PICKUP.magnetLevels[Math.min(p.magnetLevel || 0, PICKUP.magnetLevels.length - 1)];
+  p.magnetMul = coils * (m.magnet ? 2 : 1);
   p.scrapeMul = m.plating ? 0.6 : 1;
   p.reloadMul = m.autoloader ? 0.65 : 1;
   p.coinMul = m.scavenger ? 2 : 1;

@@ -8,6 +8,7 @@ import {
   FIELD_TOP, FIELD_BOT, VIEW_W, APRON, clamp,
 } from './config.js';
 import { makePool } from './pool.js';
+import { award } from './score.js';
 import { enemyShots, fire } from './projectiles.js';
 import { explode, sparks } from './particles.js';
 import { sfxTurretShot, sfxEnemyHit, sfxExplode } from './sfx.js';
@@ -284,6 +285,6 @@ export function hitFoe(game, index, sx, sy, dmg) {
       }
     }
   }
-  game.score += spec.score;
+  award(game, spec.score);
   return true;
 }

@@ -74,6 +74,8 @@ backend down**; you lose the leaderboard, not the game.
 | Hull select — anything up to the furthest you have reached | The refit between hulls, with the next one drawn to scale |
 | ![Armory](docs/armory.png) | ![Attackers](docs/attackers.png) |
 | A bomb, a grenade and a missile in the air at once | The attacker roster |
+| ![Minibosses](docs/minibosses.png) | ![Boss](docs/scene-boss.png) |
+| The miniboss roster | GILTHAMMER, in the arena at the end of AURUM |
 
 ## The hulls
 
@@ -98,14 +100,20 @@ documentation drifts from the code the first time a palette changes.
 
 ## The run
 
-Three hulls, flown back to back. Each one is longer, denser and better defended
-than the last, and each is named for a metal — Uridium's stage-naming ritual.
+Eight hulls, flown back to back. Each one is longer, denser and better
+defended than the last, and each is named for a metal — Uridium's
+stage-naming ritual.
 
 | Hull | Length | Turret HP | Interceptors | Tune |
 | --- | --- | --- | --- | --- |
 | **ARGENTUM** — patrol hull | 12,000px | 3 | 172px/s, every 1.5s | DROSS |
 | **OSMIUM** — line hull | 14,500px | 4 | 196px/s, every 1.2s | QUENCH |
 | **TANTALUM** — flagship hull | 17,000px | 5 | 220px/s, every 0.98s | OVERDRIVE |
+| **CUPRUM** — salvage hulk | 18,500px | 6 | 236px/s, every 0.9s | QUENCH |
+| **PYRITE** — foundry hull | 20,000px | 7 | 252px/s, every 0.82s | OVERDRIVE |
+| **WOLFRAM** — siege hull | 21,500px | 8 | 266px/s, every 0.75s | OVERDRIVE |
+| **FERRUM** — derelict hull | 23,000px | 9 | 280px/s, every 0.7s | DROSS |
+| **AURUM** — admiralty hull | 25,000px | 10 | 294px/s, every 0.64s | OVERDRIVE |
 
 On each hull: fly to the far end, **kill what is guarding it**, then run back to
 the dock. Dying out of ships ends the run wherever you are.
@@ -147,6 +155,33 @@ arrive hull by hull, each asking a different question:
 
 Which hull fields which is `LEVELS[].foes` in `src/config.js`. ARGENTUM
 fields none of them — the first hull is turrets and interceptors only.
+
+## Minibosses
+
+The gap between an attacker you kill in two shots and a boss that gates the
+hull is a wide one, and a long hull with nothing in between gets flat. A
+miniboss arrives partway along, announces itself, carries its own health bar
+and takes real attention — but it does **not** wall you in. You can outrun
+one. The reward for stopping is the loot; the cost is everything else that
+keeps spawning while you do.
+
+![The miniboss roster](docs/minibosses.png)
+
+| Miniboss | From | Behaviour |
+| --- | --- | --- |
+| **ORE HAULER** | ARGENTUM | Slow and fat, and it sheds coins as it comes apart — so hurting it pays before it dies |
+| **ARC CUTTER** | TANTALUM | Keeps pace with you and fires tight aimed spreads. No safe range |
+| **BULWARK** | PYRITE | Radial walls and a lot of health. Expensive to stop for |
+| **HARRIER PACK** | FERRUM | Fast, and calls escorts while it runs rings around you |
+
+One appears on ARGENTUM and a fourth is added by AURUM, spread evenly along
+the hull and always clear of both aprons and of the boss arena. If a boss is
+up, anything still alive breaks off and runs: the fight at the far end is
+meant to read as one room with one thing in it.
+
+Killing one pays a boss-sized spoil — coins, a gold bar, a coffin — which is
+what makes stopping worth it. Health scales with the hull and with the
+difficulty, like everything else.
 
 ## Bosses
 
@@ -264,9 +299,14 @@ dearer each time, so the shop cannot be drained into one stat. **Mods** are
 permanent changes to how the ship behaves, bought once, and they are where
 the interesting decisions live:
 
+Upgrades worth calling out: **TRACTOR COILS** widens the pull radius on
+everything you collect, in three steps up to ×2.6, and stacks with the
+Lodestone mod for ×5.2 — a fully coiled ship sweeps coins off most of the
+screen, which changes how a hull is flown as much as any gun does.
+
 | Mod | Effect |
 | --- | --- |
-| **LODESTONE** | Pickups and coins pull from twice as far |
+| **LODESTONE** | Pickups and coins pull from twice as far (stacks with Tractor Coils) |
 | **ABLATIVE PLATING** | Hull scrapes cost 40% less shield |
 | **AUTOLOADER** | Ordnance reloads 35% faster |
 | **SCAVENGER RIG** | Coins are worth double |
@@ -329,9 +369,9 @@ you to the gun that hull was issued with.
 
 Each pickup carries a glyph as well as a colour, because colour alone fails for
 anyone who can't separate the cyan from the green, and these appear against a
-busy hull at speed. They bob, drift, pull toward you slightly within 38px so a
-near miss at full throttle still counts, and flash for their last three seconds
-before expiring. A drop that would land inside solid hull is relocated to open
+busy hull at speed. They bob, drift, and pull toward you — within 74px for an
+upgrade and 118px for loot, so a near miss at full throttle still counts —
+and flash for their last three seconds before expiring. A drop that would land inside solid hull is relocated to open
 space, so a pickup is never unreachable.
 
 ## Settings
@@ -339,14 +379,33 @@ space, so a pickup is never unreachable.
 ![Settings](docs/settings.png)
 
 `O` opens them. Music and sound effects separately, master volume, tune
-override, and switches for bloom, scanlines, screen shake, the foreground
-layer and pickup toasts — the visual ones double as a performance escape
-hatch on a slow machine. Everything persists, and the definitions are data,
-so adding a setting is a list entry rather than a UI change.
+override, **difficulty**, and switches for bloom, scanlines, screen shake,
+the foreground layer and pickup toasts — the visual ones double as a
+performance escape hatch on a slow machine. Everything persists, and the
+definitions are data, so adding a setting is a list entry rather than a UI
+change.
+
+### Difficulty
+
+Four settings, and one place in the code decides what each means
+(`diff()` in `src/game.js`, reading `DIFFICULTY` in `src/config.js`). A
+change applies to the next run, not the one in progress.
+
+| | Enemy damage | Boss & miniboss health | Spawn rate | Scrape damage | Score |
+| --- | --- | --- | --- | --- | --- |
+| **CADET** | ×0.6 | ×0.7 | ×0.74 | ×0.6 | ×0.7 |
+| **PILOT** | ×1.0 | ×1.0 | ×1.0 | ×1.0 | ×1.0 |
+| **VETERAN** | ×1.4 | ×1.3 | ×1.25 | ×1.3 | ×1.3 |
+| **RUIN** | ×1.9 | ×1.6 | ×1.6 | ×1.7 | ×1.7 |
+
+Harder settings pay more, so the board is not simply a list of who played on
+CADET the longest.
 
 ## Leaderboards, two ways
 
-`B` switches between them:
+`B` switches between them. Both list ten, highest first, in two columns,
+each row stamped with how long ago it was set (`9M AGO`, `2H AGO`, `16D AGO`,
+then a plain `YY-MM-DD` once a score is over a month old):
 
 - **TOP PILOTS** folds to one row per player — their best run. Answers *who
   is best*.
@@ -641,7 +700,8 @@ rules.
 The campaign is modelled hull by hull, including the fact that the ship gets
 faster with each refit — a later hull can legitimately be flown quicker than the
 first, and a bound that ignored that would reject honest runs. Three hulls out
-and back cannot be done in under **249 seconds**.
+and back cannot be done in under **249 seconds**, and the full eight-hull
+campaign not in under **738 seconds**.
 
 **These are plausibility bounds, not anti-cheat.** They stop someone curling a
 score of 10⁹ onto the board. They do not stop anyone who reads the rules and
@@ -677,7 +737,9 @@ src/loop.js       fixed 120Hz timestep, free-running render
 src/level.js      hull generation, collision buckets, pre-rendered plating
 src/player.js     ship physics, flip, firing, hull collision response
 src/enemies.js    turret and interceptor behaviour
-src/game.js       state machine, collision pairs, scoring, run objective
+src/miniboss.js   the four mid-hull minibosses
+src/score.js      difficulty multipliers, and the one way points are awarded
+src/game.js       state machine, collision pairs, run objective
 src/render.js     world drawing
 src/hud.js        HUD and the title / game-over / complete screens
 src/pool.js       fixed-capacity object pools (no allocation during play)
@@ -712,7 +774,7 @@ Client tests live in `test/` on node's built-in runner. `_setup.mjs` provides
 deliberately inert `localStorage`, canvas and `AudioContext` stubs - anything
 depending on what was actually drawn or heard belongs in the smoke test.
 
-Three exist because of bugs that shipped:
+Several exist because of bugs that shipped:
 
 - **`test/parity.test.mjs`** reads `internal/validate/score.go` and compares
   it against `src/config.js`. The Go validator mirrors hull lengths, top
@@ -724,6 +786,20 @@ Three exist because of bugs that shipped:
   while score, ship and frame rate all still look healthy.
 - **`test/level.test.mjs`** walks every hull asserting no vertical slice is
   fully blocked. An unwinnable hull would otherwise only surface by playing.
+- **`test/boss.test.mjs`** sweeps a simulated shot across every boss from
+  both sides and asserts each section is reachable and the boss is killable
+  outright. THE WARDEN shipped unkillable: its middle pod sat inside the
+  core's absorb box, so shots at that height were eaten before they could
+  reach it — two of three pods could be destroyed and the fight could never
+  be finished. This reproduced it in one line of output.
+- **`test/miniboss.test.mjs`** does the same for minibosses, and checks
+  their spawn points stay clear of both aprons and the boss arena. It caught
+  one being announced and then culled on the same frame whenever the camera
+  had not yet caught up.
+- **`test/score.test.mjs`** greps the whole of `src/` for a bare
+  `game.score +=`. Points are awarded at sixteen places; a difficulty that
+  pays more has to pay more at all sixteen, and the fifteen-of-sixteen
+  version of that bug is invisible from in front of the screen.
 
 Run the Go tests with `go test ./...` (and `-race`, which the suite is clean
 under — it covers concurrent submission and concurrent store access).
@@ -733,42 +809,42 @@ game object is exposed as `window.game` for poking at from the devtools console.
 
 ## Known gaps
 
-These are deliberate omissions from the vertical slice, not bugs:
+These are the honest ones. Several entries here used to describe a slice
+that no longer exists — an absent shop, an absent landing, three hulls — and
+a stale gap list is worse than none, so this is current as of the version in
+`src/config.js`.
 
-- **No upgrade shop.** The weapon-mount economy that drives Jets'n'Guns is the
-  obvious next system — the single forward cannon is a placeholder for it.
-- **No landing sequence.** Uridium ends each level with a landing minigame;
-  the dock here is just a position.
+**Nothing in this game has been judged for feel by a human.** Everything
+below follows from that one fact.
+
+- **Balance is all first guesses.** Eight hulls, eight bosses, four
+  minibosses, eight attacker types, five tower types, the coin economy, the
+  armourer's prices, the refit curve and the four difficulty settings were
+  all picked by reasoning about them, not by playing them. Whether a run
+  outgrows its hull, whether RUIN is hard or merely tedious, and whether
+  stopping for a BULWARK is ever worth the coins are open questions. The
+  numbers are all data: `LEVELS`, `BOSSES`, `LEVEL_UP`, `PICKUP`, `ARMORY`
+  and `DIFFICULTY` in `src/config.js`, and `KINDS` in `src/miniboss.js`.
+- **The music is unheard by me.** The techniques are the real ones a SID
+  used and the spectra look right, but whether it sounds good is not
+  something measuring RMS can tell you.
+- **The graphics are unjudged.** Bloom strength, foreground density and the
+  surface shading are tuned by eye against screenshots, not by playing.
+  Bloom in particular is easy to overdo.
 - **Coverage is partial and the report says so.** Rendering, audio and HUD
   modules are exercised only by the browser smoke test, so they contribute
-  no line coverage.
-- **The music rewrite is unheard by me.** The techniques are the real ones a
-  SID used, and the spectra look right, but whether it actually sounds good
-  is not something measuring RMS can tell you.
-- **The graphics work is unjudged.** Bloom strength, foreground density and
-  the surface shading are tuned by eye against screenshots, not by playing.
-  Bloom in particular is easy to overdo.
-- **Boss difficulty is unplayed.** Health pools, fire rates and pattern timing
-  are first guesses, and the arena is deliberately escape-proof — whether that
-  reads as tense or unfair is a thing only playing decides. All of it is in
-  `BOSSES` in `src/config.js`.
-- **The refit curve is unplayed.** Three hulls and the per-hull upgrades are
-  first guesses; whether the ship outgrows the difficulty is exactly the thing
-  only playing will tell you. All of it is in `LEVELS` and `LEVEL_UP` in
-  `src/config.js`.
-- **HUD text uses the system monospace font**, not a bitmap font, so it doesn't
-  scale as crisply as the rest of the art.
-- The hull texture is one 12000×324 offscreen canvas (~15MB). Fine at this
-  length; chunked lazy tiles if the level grows much past it.
-- **Anti-cheat is defence in depth, not proof.** See the backend section.
-- **Pickup balance is unplayed.** Drop rates, the 40-point refill and the gun
-  curves are first guesses; nobody has judged whether the run gets too strong
-  too fast. They are all in `PICKUP` in `src/config.js`.
+  no line coverage. The smoke test asserts pixels, not that anything looks
+  right.
+- **HUD text uses the system monospace font**, not a bitmap font, so it does
+  not scale as crisply as the rest of the art.
+- **Anti-cheat is defence in depth, not proof.** See the backend section for
+  what it does and does not establish.
 - **No mod browser in-game.** Mods are published over the API and played via
   `/?mod=<id>`; there is no UI for discovering them yet.
 - **Single-process storage.** JSON snapshots, no SQL, no horizontal scaling.
-- **No account recovery.** Lose the token in `localStorage` and that pilot's
-  identity is gone, though their scores stay on the board.
+- **Account recovery needs a password.** A pilot who never set one is only
+  the token in `localStorage`: lose it and that identity is gone, though
+  their scores stay on the board under the old name.
 
 ## Licence
 
