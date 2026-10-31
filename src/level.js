@@ -1,5 +1,5 @@
 import {
-  FIELD_TOP, FIELD_BOT, FIELD_H, RIM, APRON, THEMES,
+  FIELD_TOP, FIELD_BOT, FIELD_H, RIM, APRON, THEMES, clamp,
 } from './config.js';
 import { mulberry32, rr, ri, hash2 } from './rng.js';
 
@@ -46,6 +46,28 @@ function layout(r, spec) {
     obstacles.push({ x: 0, y, w, h, face: 1 });
     if (r() < 0.45) turrets.push({ x: w / 2, y, dir: 1 });
     advance = w;
+  } else if (roll < 0.95) {
+    // A narrows: the corridor itself closes down for a long stretch and
+    // opens again. Single obstacles are dodged; this has to be flown.
+    const seg = ri(r, 5, 9);
+    const segW = rr(r, 46, 68);
+    const tightest = rr(r, 74, 104);
+    const centre = rr(r, FIELD_TOP + 70, FIELD_BOT - 70);
+    let sx = 0;
+    for (let i = 0; i < seg; i++) {
+      // taper in and back out again over the run
+      const k = Math.sin((i / (seg - 1)) * Math.PI);
+      const gap = (FIELD_BOT - FIELD_TOP) - k * ((FIELD_BOT - FIELD_TOP) - tightest);
+      const top = clamp(centre - gap / 2, FIELD_TOP, FIELD_BOT - gap);
+      if (top - FIELD_TOP > 8) {
+        obstacles.push({ x: sx, y: FIELD_TOP, w: segW + 1, h: top - FIELD_TOP, face: 1 });
+      }
+      if (FIELD_BOT - (top + gap) > 8) {
+        obstacles.push({ x: sx, y: top + gap, w: segW + 1, h: FIELD_BOT - top - gap, face: -1 });
+      }
+      sx += segW;
+    }
+    advance = sx;
   } else {
     // stepped stack — climbs, so you have to commit to a line early
     const n = ri(r, 2, 3);
@@ -198,6 +220,264 @@ export function warmChunks(level, camX, viewW, scale, generation) {
   }
 }
 
+// --- surfaces
+//
+// Each hull is painted by a different routine. Swapping a palette was not
+// enough: the hulls read as the same corridor in another colour, which is
+// exactly the complaint. These change what the ground *is*.
+
+const plate = (g, t, px, py, n) => {
+  g.fillStyle = t.tones[(n * t.tones.length) | 0];
+  g.fillRect(px, py, PLATE_W, PLATE_H);
+  g.fillStyle = t.seam;
+  g.globalAlpha = 0.55;
+  g.fillRect(px + PLATE_W - 1, py, 1, PLATE_H);
+  g.fillRect(px, py + PLATE_H - 1, PLATE_W, 1);
+  g.globalAlpha = 1;
+};
+
+const SURFACE = {
+  // riveted hull plating: the baseline
+  plates(g, t, x0, w) {
+    for (let py = 0; py < FIELD_H; py += PLATE_H) {
+      for (let px = Math.floor(x0 / PLATE_W) * PLATE_W; px < x0 + w; px += PLATE_W) {
+        const n = hash2((px / PLATE_W) | 0, (py / PLATE_H) | 0);
+        plate(g, t, px, py, n);
+        g.fillStyle = t.rivet;
+        g.globalAlpha = 0.42 + n * 0.22;
+        for (const [rx, ry] of [[4, 4], [PLATE_W - 6, 4], [4, PLATE_H - 6], [PLATE_W - 6, PLATE_H - 6]]) {
+          g.fillRect(px + rx, py + ry, 2, 2);
+        }
+        g.globalAlpha = 1;
+        if (n > 0.93) {
+          g.fillStyle = t.seam; g.globalAlpha = 0.6;
+          g.fillRect(px + 10, py + 9, PLATE_W - 22, PLATE_H - 20);
+          g.globalAlpha = 1;
+        } else if (n < 0.045) {
+          g.fillStyle = t.hazard; g.globalAlpha = 0.5;
+          for (let sx = 0; sx < PLATE_W - 12; sx += 6) g.fillRect(px + 6 + sx, py + 14, 3, 7);
+          g.globalAlpha = 1;
+        }
+      }
+    }
+  },
+
+  // deep machinery: fat pipe runs and junction boxes, almost no flat plate
+  conduit(g, t, x0, w) {
+    g.fillStyle = t.tones[2];
+    g.fillRect(x0, 0, w, FIELD_H);
+    for (let i = 0; i < 9; i++) {
+      const cy = 14 + i * 34;
+      const n = hash2(i, 5);
+      const th = 9 + (n * 14 | 0);
+      g.fillStyle = t.seam; g.globalAlpha = 0.8;
+      g.fillRect(x0, cy, w, th);
+      g.globalAlpha = 1;
+      g.fillStyle = t.mid;
+      g.fillRect(x0, cy + 1, w, th - 2);
+      g.fillStyle = t.hi; g.globalAlpha = 0.5;
+      g.fillRect(x0, cy + 1, w, 2);
+      g.globalAlpha = 1;
+      // flanges at intervals
+      const step = 60 + (n * 50 | 0);
+      for (let fx = Math.floor(x0 / step) * step; fx < x0 + w; fx += step) {
+        g.fillStyle = t.rivet;
+        g.fillRect(fx, cy - 2, 5, th + 4);
+        g.fillStyle = t.rivetHi;
+        g.fillRect(fx, cy - 2, 5, 1);
+      }
+    }
+  },
+
+  // frozen: cracked sheet ice with frost blooms, no rivets at all
+  ice(g, t, x0, w) {
+    for (let py = 0; py < FIELD_H; py += 26) {
+      for (let px = Math.floor(x0 / 40) * 40; px < x0 + w; px += 40) {
+        const n = hash2(px * 7, py * 3);
+        g.fillStyle = t.tones[(n * t.tones.length) | 0];
+        g.fillRect(px, py, 40, 26);
+      }
+    }
+    // cracks
+    g.strokeStyle = t.hi;
+    g.lineWidth = 1;
+    for (let i = Math.floor(x0 / 90); i < (x0 + w) / 90 + 1; i++) {
+      const n = hash2(i, 11);
+      g.globalAlpha = 0.25 + n * 0.3;
+      g.beginPath();
+      let cx = i * 90 + n * 40;
+      let cy = 10;
+      g.moveTo(cx, cy);
+      for (let k = 0; k < 6; k++) {
+        cx += (hash2(i, k) - 0.5) * 50;
+        cy += 48;
+        g.lineTo(cx, cy);
+      }
+      g.stroke();
+      g.globalAlpha = 1;
+    }
+    // frost blooms
+    for (let i = Math.floor(x0 / 70); i < (x0 + w) / 70 + 1; i++) {
+      const n = hash2(i, 23);
+      if (n < 0.55) continue;
+      const bx = i * 70 + n * 30;
+      const by = 24 + hash2(i, 29) * (FIELD_H - 60);
+      g.fillStyle = t.rivetHi;
+      g.globalAlpha = 0.14;
+      g.beginPath(); g.arc(bx, by, 10 + n * 14, 0, Math.PI * 2); g.fill();
+      g.globalAlpha = 1;
+    }
+  },
+
+  // desert: dune bands and scattered grit, nothing manufactured
+  dunes(g, t, x0, w) {
+    for (let band = 0; band < 7; band++) {
+      const n = hash2(band, 3);
+      const top = band * 46 - 10;
+      g.fillStyle = t.tones[(n * t.tones.length) | 0];
+      g.beginPath();
+      g.moveTo(x0, top + 46);
+      for (let px = x0; px <= x0 + w; px += 16) {
+        const wave = Math.sin(px * 0.013 + band * 1.7) * 9 + Math.sin(px * 0.004 + band) * 13;
+        g.lineTo(px, top + 26 + wave);
+      }
+      g.lineTo(x0 + w, top + 60);
+      g.closePath();
+      g.fill();
+      // the lit crest of each dune
+      g.strokeStyle = t.hi;
+      g.globalAlpha = 0.3;
+      g.beginPath();
+      for (let px = x0; px <= x0 + w; px += 16) {
+        const wave = Math.sin(px * 0.013 + band * 1.7) * 9 + Math.sin(px * 0.004 + band) * 13;
+        if (px === x0) g.moveTo(px, top + 26 + wave); else g.lineTo(px, top + 26 + wave);
+      }
+      g.stroke();
+      g.globalAlpha = 1;
+    }
+    g.fillStyle = t.rivetHi;
+    for (let i = Math.floor(x0 / 7); i < (x0 + w) / 7; i++) {
+      const n = hash2(i, 41);
+      if (n < 0.88) continue;
+      g.globalAlpha = 0.1 + n * 0.2;
+      g.fillRect(i * 7, (hash2(i, 43) * FIELD_H) | 0, 1, 1);
+    }
+    g.globalAlpha = 1;
+  },
+
+  // foundry: dark slag with channels of molten metal running through it
+  molten(g, t, x0, w) {
+    for (let py = 0; py < FIELD_H; py += 22) {
+      for (let px = Math.floor(x0 / 30) * 30; px < x0 + w; px += 30) {
+        const n = hash2(px * 5, py * 11);
+        g.fillStyle = t.tones[(n * t.tones.length) | 0];
+        g.fillRect(px, py, 30, 22);
+      }
+    }
+    for (let i = 0; i < 5; i++) {
+      const cy = 26 + i * 60 + hash2(i, 7) * 20;
+      g.globalAlpha = 0.85;
+      g.fillStyle = '#2a0f06';
+      g.beginPath();
+      for (let px = x0; px <= x0 + w; px += 12) {
+        g.lineTo(px, cy + Math.sin(px * 0.02 + i) * 7);
+      }
+      for (let px = x0 + w; px >= x0; px -= 12) {
+        g.lineTo(px, cy + 9 + Math.sin(px * 0.02 + i) * 7);
+      }
+      g.closePath(); g.fill();
+      // the glow inside the channel
+      g.globalAlpha = 1;
+      g.fillStyle = '#ff6a18';
+      for (let px = x0; px <= x0 + w; px += 4) {
+        const yy = cy + 3 + Math.sin(px * 0.02 + i) * 7;
+        g.globalAlpha = 0.5 + Math.sin(px * 0.07 + i * 2) * 0.35;
+        g.fillRect(px, yy, 4, 3);
+      }
+      g.globalAlpha = 1;
+    }
+  },
+
+  // open space: the hull falls away, leaving stars and dust
+  void(g, t, x0, w) {
+    g.fillStyle = t.base;
+    g.fillRect(x0, 0, w, FIELD_H);
+    for (let i = Math.floor(x0 / 5); i < (x0 + w) / 5; i++) {
+      const n = hash2(i, 61);
+      if (n < 0.955) continue;
+      const sy = (hash2(i, 67) * FIELD_H) | 0;
+      const b = (n - 0.955) / 0.045;
+      g.fillStyle = b > 0.7 ? '#dfe6ff' : b > 0.4 ? '#8d97c4' : '#565e80';
+      g.fillRect(i * 5, sy, b > 0.7 ? 2 : 1, b > 0.7 ? 2 : 1);
+    }
+    // faint nebula banding, so it is not a flat black field
+    for (let i = 0; i < 3; i++) {
+      const cy = 50 + i * 90;
+      g.fillStyle = ['#1a1440', '#101a38', '#201230'][i];
+      g.globalAlpha = 0.10;
+      g.beginPath();
+      for (let px = x0; px <= x0 + w; px += 20) g.lineTo(px, cy + Math.sin(px * 0.006 + i * 2) * 26);
+      for (let px = x0 + w; px >= x0; px -= 20) g.lineTo(px, cy + 46 + Math.sin(px * 0.006 + i * 2) * 26);
+      g.closePath(); g.fill();
+      g.globalAlpha = 1;
+    }
+  },
+
+  // derelict: plating with holes torn through it, stars showing beneath
+  broken(g, t, x0, w) {
+    SURFACE.plates(g, t, x0, w);
+    for (let i = Math.floor(x0 / 110); i < (x0 + w) / 110 + 1; i++) {
+      const n = hash2(i, 13);
+      if (n < 0.45) continue;
+      const hx = i * 110 + n * 60;
+      const hy = 30 + hash2(i, 17) * (FIELD_H - 80);
+      const r = 14 + n * 26;
+      g.fillStyle = '#04050a';
+      g.beginPath();
+      for (let k = 0; k < 9; k++) {
+        const a = (k / 9) * Math.PI * 2;
+        const rr = r * (0.65 + hash2(i, k) * 0.6);
+        g.lineTo(hx + Math.cos(a) * rr, hy + Math.sin(a) * rr);
+      }
+      g.closePath(); g.fill();
+      // stars through the hole
+      for (let k = 0; k < 5; k++) {
+        g.fillStyle = k % 2 ? '#9aa4cc' : '#dfe6ff';
+        g.fillRect(hx + (hash2(i, k * 3) - 0.5) * r, hy + (hash2(i, k * 7) - 0.5) * r, 1, 1);
+      }
+      g.strokeStyle = t.rivetHi; g.globalAlpha = 0.3; g.lineWidth = 1;
+      g.beginPath(); g.arc(hx, hy, r * 0.9, 0, Math.PI * 2); g.stroke();
+      g.globalAlpha = 1;
+    }
+  },
+
+  // admiralty: polished panels, inlay and fluting
+  ornate(g, t, x0, w) {
+    for (let py = 0; py < FIELD_H; py += 54) {
+      for (let px = Math.floor(x0 / 72) * 72; px < x0 + w; px += 72) {
+        const n = hash2(px, py);
+        g.fillStyle = t.tones[(n * t.tones.length) | 0];
+        g.fillRect(px, py, 72, 54);
+        g.strokeStyle = t.rivet; g.globalAlpha = 0.5; g.lineWidth = 1;
+        g.strokeRect(px + 6.5, py + 6.5, 59, 41);
+        g.globalAlpha = 0.28;
+        g.strokeRect(px + 12.5, py + 12.5, 47, 29);
+        g.globalAlpha = 1;
+        // a medallion in the richer panels
+        if (n > 0.7) {
+          g.fillStyle = t.rivetHi; g.globalAlpha = 0.35;
+          g.beginPath(); g.arc(px + 36, py + 27, 7, 0, Math.PI * 2); g.fill();
+          g.globalAlpha = 1;
+        }
+      }
+    }
+    // vertical fluting
+    g.fillStyle = t.hi; g.globalAlpha = 0.14;
+    for (let px = Math.floor(x0 / 18) * 18; px < x0 + w; px += 18) g.fillRect(px, 0, 2, FIELD_H);
+    g.globalAlpha = 1;
+  },
+};
+
 function renderChunk(level, index, scale) {
   const t = THEMES[level.spec.theme] || THEMES.steel;
   const x0 = index * CHUNK_W;
@@ -213,56 +493,7 @@ function renderChunk(level, index, scale) {
   g.fillStyle = t.base;
   g.fillRect(x0, 0, w, FIELD_H);
 
-  // Plating. The grid is indexed on absolute position so chunks tile without
-  // a visible seam.
-  const px0 = Math.floor(x0 / PLATE_W) * PLATE_W;
-  for (let py = 0; py < FIELD_H; py += PLATE_H) {
-    for (let px = px0; px < x0 + w; px += PLATE_W) {
-      const gx = (px / PLATE_W) | 0;
-      const gy = (py / PLATE_H) | 0;
-      const n = hash2(gx, gy);
-
-      g.fillStyle = t.tones[(n * t.tones.length) | 0];
-      g.fillRect(px, py, PLATE_W, PLATE_H);
-
-      g.fillStyle = t.seam;
-      g.globalAlpha = 0.55;
-      g.fillRect(px + PLATE_W - 1, py, 1, PLATE_H);
-      g.fillRect(px, py + PLATE_H - 1, PLATE_W, 1);
-      g.globalAlpha = 0.12;
-      g.fillStyle = t.hi;
-      g.fillRect(px, py, PLATE_W - 1, 1);
-      g.globalAlpha = 1;
-
-      // rivets — the namesake
-      g.fillStyle = t.rivet;
-      g.globalAlpha = 0.42 + n * 0.22;
-      for (const [rx, ry] of [[4, 4], [PLATE_W - 6, 4], [4, PLATE_H - 6], [PLATE_W - 6, PLATE_H - 6]]) {
-        g.fillRect(px + rx, py + ry, 2, 2);
-      }
-      g.globalAlpha = 1;
-
-      if (n > 0.93) {
-        g.fillStyle = t.seam;
-        g.globalAlpha = 0.6;
-        g.fillRect(px + 10, py + 9, PLATE_W - 22, PLATE_H - 20);
-        g.globalAlpha = 0.25;
-        g.fillStyle = t.hi;
-        g.fillRect(px + 10, py + 9, PLATE_W - 22, 1);
-        g.globalAlpha = 1;
-      } else if (n < 0.045) {
-        g.fillStyle = t.hazard;
-        g.globalAlpha = 0.5;
-        for (let sx = 0; sx < PLATE_W - 12; sx += 6) g.fillRect(px + 6 + sx, py + 14, 3, 7);
-        g.globalAlpha = 1;
-      } else if (n > 0.86 && n < 0.9) {
-        g.fillStyle = t.seam;
-        g.globalAlpha = 0.45;
-        for (let k = 0; k < 4; k++) g.fillRect(px + 8, py + 10 + k * 5, PLATE_W - 18, 2);
-        g.globalAlpha = 1;
-      }
-    }
-  }
+  SURFACE[t.surface || 'plates'](g, t, x0, w);
 
   // Longitudinal conduits running the length of the ship.
   for (const [cy, th] of [[FIELD_TOP + 46, 3], [FIELD_H / 2 - 1, 4], [FIELD_BOT - 50, 3]]) {
@@ -318,56 +549,277 @@ function renderChunk(level, index, scale) {
   return c;
 }
 
-function drawBlock(g, o, t) {
-  // Obstacles are the thing that kills you, so they get the strongest value
-  // separation in the scene: a deep cast shadow, a body clearly lighter than
-  // the surrounding plating, a hard dark outline, and a lit top-left bevel.
-  g.fillStyle = '#05070a';
-  g.globalAlpha = 0.7;
-  g.fillRect(o.x + 7, o.y + 7, o.w, o.h);
-  g.globalAlpha = 0.4;
-  g.fillRect(o.x + 3, o.y + 3, o.w + 6, o.h + 6);
-  g.globalAlpha = 1;
+// --- obstacle shapes
+//
+// The silhouette changes with the hull, not just the fill. A crystal field
+// and a dune field play differently because the collision boxes are the
+// same but the read is not, and a player steers by what they see.
 
-  g.fillStyle = t.blockEdge;
-  g.fillRect(o.x - 1, o.y - 1, o.w + 2, o.h + 2);
-
+function bevelBody(g, o, t) {
   g.fillStyle = t.block;
   g.fillRect(o.x, o.y, o.w, o.h);
-
   for (let py = o.y; py < o.y + o.h; py += 18) {
     for (let px = o.x; px < o.x + o.w; px += 22) {
       const n = hash2(px * 3, py * 7);
       g.fillStyle = n > 0.66 ? t.blockHi : n > 0.33 ? t.block : t.blockLo;
       g.fillRect(px, py, Math.min(21, o.x + o.w - px), Math.min(17, o.y + o.h - py));
-      g.fillStyle = t.seam;
-      g.globalAlpha = 0.5;
-      g.fillRect(px, py + Math.min(17, o.y + o.h - py) - 1, Math.min(21, o.x + o.w - px), 1);
-      g.fillRect(px + Math.min(21, o.x + o.w - px) - 1, py, 1, Math.min(17, o.y + o.h - py));
-      g.globalAlpha = 1;
     }
   }
+}
 
-  g.fillStyle = t.edgeHi;
-  g.fillRect(o.x, o.y, o.w, 2);
-  g.fillRect(o.x, o.y, 2, o.h);
-  g.fillStyle = t.blockEdge;
-  g.fillRect(o.x, o.y + o.h - 2, o.w, 2);
-  g.fillRect(o.x + o.w - 2, o.y, 2, o.h);
+const SHAPE = {
+  // riveted steel box
+  block(g, o, t) {
+    bevelBody(g, o, t);
+    g.fillStyle = t.edgeHi;
+    g.fillRect(o.x, o.y, o.w, 2);
+    g.fillRect(o.x, o.y, 2, o.h);
+    g.fillStyle = t.blockEdge;
+    g.fillRect(o.x, o.y + o.h - 2, o.w, 2);
+    g.fillRect(o.x + o.w - 2, o.y, 2, o.h);
+    g.fillStyle = t.rivetHi;
+    g.globalAlpha = 0.8;
+    for (let rx = o.x + 5; rx < o.x + o.w - 5; rx += 11) {
+      g.fillRect(rx, o.y + 4, 2, 2);
+      g.fillRect(rx, o.y + o.h - 6, 2, 2);
+    }
+    g.globalAlpha = 1;
+  },
 
-  g.fillStyle = t.rivetHi;
-  g.globalAlpha = 0.8;
-  for (let rx = o.x + 5; rx < o.x + o.w - 5; rx += 11) {
-    g.fillRect(rx, o.y + 4, 2, 2);
-    g.fillRect(rx, o.y + o.h - 6, 2, 2);
+  // a capped cylinder: machinery, not architecture
+  pipe(g, o, t) {
+    const r = Math.min(o.w, o.h) / 2;
+    bevelBody(g, o, t);
+    g.fillStyle = t.blockEdge;
+    g.fillRect(o.x, o.y, o.w, 2);
+    g.fillRect(o.x, o.y + o.h - 2, o.w, 2);
+    g.fillStyle = t.hi;
+    g.globalAlpha = 0.45;
+    g.fillRect(o.x, o.y + r * 0.4, o.w, 3);     // specular line along the barrel
+    g.globalAlpha = 1;
+    g.fillStyle = t.rivet;
+    for (let rx = o.x + 7; rx < o.x + o.w - 4; rx += 16) g.fillRect(rx, o.y, 3, o.h);
+    g.fillStyle = t.edgeHi;
+    g.fillRect(o.x, o.y, 3, o.h);
+    g.fillRect(o.x + o.w - 3, o.y, 3, o.h);
+  },
+
+  // angular ice, faceted and translucent at the tip
+  crystal(g, o, t) {
+    const up = o.face === 1 ? 1 : -1;
+    const tipY = up === 1 ? o.y + o.h : o.y;
+    const baseY = up === 1 ? o.y : o.y + o.h;
+    g.fillStyle = t.block;
+    g.beginPath();
+    g.moveTo(o.x, baseY);
+    g.lineTo(o.x + o.w, baseY);
+    g.lineTo(o.x + o.w * 0.72, tipY);
+    g.lineTo(o.x + o.w * 0.28, tipY);
+    g.closePath();
+    g.fill();
+    g.fillStyle = t.blockHi;
+    g.globalAlpha = 0.6;
+    g.beginPath();
+    g.moveTo(o.x + o.w * 0.1, baseY);
+    g.lineTo(o.x + o.w * 0.44, baseY);
+    g.lineTo(o.x + o.w * 0.38, tipY);
+    g.lineTo(o.x + o.w * 0.3, tipY);
+    g.closePath();
+    g.fill();
+    g.globalAlpha = 1;
+    g.strokeStyle = t.rivetHi;
+    g.lineWidth = 1;
+    g.globalAlpha = 0.5;
+    g.beginPath();
+    g.moveTo(o.x + o.w * 0.28, tipY); g.lineTo(o.x, baseY);
+    g.moveTo(o.x + o.w * 0.72, tipY); g.lineTo(o.x + o.w, baseY);
+    g.stroke();
+    g.globalAlpha = 1;
+  },
+
+  // a sand mound with a wind-scoured lee side
+  dune(g, o, t) {
+    const up = o.face === 1 ? 1 : -1;
+    const crest = up === 1 ? o.y + o.h : o.y;
+    const base = up === 1 ? o.y : o.y + o.h;
+    g.fillStyle = t.block;
+    g.beginPath();
+    g.moveTo(o.x, base);
+    g.quadraticCurveTo(o.x + o.w * 0.3, crest, o.x + o.w * 0.62, crest);
+    g.lineTo(o.x + o.w, base);
+    g.closePath();
+    g.fill();
+    g.fillStyle = t.blockHi;
+    g.globalAlpha = 0.5;
+    g.beginPath();
+    g.moveTo(o.x + o.w * 0.1, base);
+    g.quadraticCurveTo(o.x + o.w * 0.34, crest, o.x + o.w * 0.6, crest);
+    g.lineTo(o.x + o.w * 0.5, base);
+    g.closePath();
+    g.fill();
+    g.globalAlpha = 1;
+    g.strokeStyle = t.rivetHi;
+    g.globalAlpha = 0.35;
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(o.x, base);
+    g.quadraticCurveTo(o.x + o.w * 0.3, crest, o.x + o.w * 0.62, crest);
+    g.stroke();
+    g.globalAlpha = 1;
+  },
+
+  // cooled slag, cracked, still glowing underneath
+  slag(g, o, t) {
+    bevelBody(g, o, t);
+    g.fillStyle = '#ff6a18';
+    for (let i = 0; i < 5; i++) {
+      const n = hash2(o.x + i * 13, o.y);
+      g.globalAlpha = 0.25 + n * 0.5;
+      g.fillRect(o.x + 3 + n * (o.w - 8), o.y + 3 + hash2(o.x, i) * (o.h - 8), 2 + n * 3, 2);
+    }
+    g.globalAlpha = 1;
+    g.strokeStyle = '#1a0a05';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(o.x, o.y + o.h * 0.4);
+    g.lineTo(o.x + o.w * 0.45, o.y + o.h * 0.6);
+    g.lineTo(o.x + o.w, o.y + o.h * 0.35);
+    g.stroke();
+    g.fillStyle = t.edgeHi;
+    g.globalAlpha = 0.4;
+    g.fillRect(o.x, o.y, o.w, 2);
+    g.globalAlpha = 1;
+  },
+
+  // irregular rock, lit from one side
+  asteroid(g, o, t) {
+    const cx = o.x + o.w / 2;
+    const cy = o.y + o.h / 2;
+    g.fillStyle = t.block;
+    g.beginPath();
+    for (let k = 0; k < 11; k++) {
+      const a = (k / 11) * Math.PI * 2;
+      const rr = 0.52 + hash2(o.x + k, o.y) * 0.5;
+      g.lineTo(cx + Math.cos(a) * o.w * rr, cy + Math.sin(a) * o.h * rr);
+    }
+    g.closePath();
+    g.fill();
+    g.fillStyle = t.blockHi;
+    g.globalAlpha = 0.45;
+    g.beginPath();
+    for (let k = 0; k < 11; k++) {
+      const a = (k / 11) * Math.PI * 2 - 0.4;
+      const rr = 0.3 + hash2(o.x + k, o.y + 3) * 0.3;
+      g.lineTo(cx + Math.cos(a) * o.w * rr - o.w * 0.12, cy + Math.sin(a) * o.h * rr - o.h * 0.12);
+    }
+    g.closePath();
+    g.fill();
+    g.globalAlpha = 1;
+    g.fillStyle = t.blockEdge;
+    for (let k = 0; k < 4; k++) {
+      const n = hash2(o.x, k * 5);
+      g.beginPath();
+      g.arc(o.x + 6 + n * (o.w - 12), o.y + 6 + hash2(o.y, k) * (o.h - 12), 2 + n * 3, 0, Math.PI * 2);
+      g.fill();
+    }
+    // A hard rim. Against a star field a soft-edged rock reads as haze, and
+    // the player needs to know instantly where the thing that kills them
+    // begins — the same reason every other hull has a lit bevel.
+    g.strokeStyle = t.edgeHi;
+    g.lineWidth = 2;
+    g.beginPath();
+    for (let k = 0; k < 11; k++) {
+      const a = (k / 11) * Math.PI * 2;
+      const rr = 0.52 + hash2(o.x + k, o.y) * 0.5;
+      g.lineTo(cx + Math.cos(a) * o.w * rr, cy + Math.sin(a) * o.h * rr);
+    }
+    g.closePath();
+    g.stroke();
+  },
+
+  // torn plating with exposed ribs
+  wreck(g, o, t) {
+    bevelBody(g, o, t);
+    g.fillStyle = t.blockEdge;
+    // a bitten edge on the playfield-facing side
+    const fy = o.face === 1 ? o.y + o.h : o.y;
+    const dir = o.face === 1 ? -1 : 1;
+    g.beginPath();
+    g.moveTo(o.x, fy);
+    for (let px = o.x; px <= o.x + o.w; px += 9) {
+      g.lineTo(px, fy + dir * hash2(px, o.y) * 11);
+    }
+    g.lineTo(o.x + o.w, fy - dir * 2);
+    g.lineTo(o.x, fy - dir * 2);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = t.rivet;
+    g.lineWidth = 2;
+    g.globalAlpha = 0.6;
+    for (let rx = o.x + 8; rx < o.x + o.w - 4; rx += 15) {
+      g.beginPath(); g.moveTo(rx, o.y + 2); g.lineTo(rx, o.y + o.h - 2); g.stroke();
+    }
+    g.globalAlpha = 1;
+  },
+
+  // a fluted column with a capital
+  pillar(g, o, t) {
+    bevelBody(g, o, t);
+    g.fillStyle = t.hi;
+    g.globalAlpha = 0.3;
+    for (let px = o.x + 4; px < o.x + o.w - 2; px += 7) g.fillRect(px, o.y, 2, o.h);
+    g.globalAlpha = 1;
+    // capital and base
+    const capH = Math.min(10, o.h * 0.18);
+    g.fillStyle = t.blockHi;
+    g.fillRect(o.x - 3, o.y, o.w + 6, capH);
+    g.fillRect(o.x - 3, o.y + o.h - capH, o.w + 6, capH);
+    g.fillStyle = t.rivetHi;
+    g.globalAlpha = 0.7;
+    g.fillRect(o.x - 3, o.y, o.w + 6, 2);
+    g.fillRect(o.x - 3, o.y + o.h - 2, o.w + 6, 2);
+    g.globalAlpha = 1;
+  },
+};
+
+// Shapes that fill their whole bounding box. The others are silhouettes, so
+// a rectangular shadow and outline would frame them in black — which is
+// exactly what a dune looked like before this existed.
+const FILLS_BOX = new Set(['block', 'pipe', 'slag', 'wreck', 'pillar']);
+
+function drawBlock(g, o, t) {
+  const shape = SHAPE[t.shape] ? t.shape : 'block';
+  const draw = SHAPE[shape];
+
+  if (FILLS_BOX.has(shape)) {
+    // cast shadow, offset down-right: cheap depth, big readability win
+    g.fillStyle = '#05070a';
+    g.globalAlpha = 0.7;
+    g.fillRect(o.x + 7, o.y + 7, o.w, o.h);
+    g.globalAlpha = 0.4;
+    g.fillRect(o.x + 3, o.y + 3, o.w + 6, o.h + 6);
+    g.globalAlpha = 1;
+    g.fillStyle = t.blockEdge;
+    g.fillRect(o.x - 1, o.y - 1, o.w + 2, o.h + 2);
+    draw(g, o, t);
+  } else {
+    // silhouette shadow: draw the shape itself, offset and darkened
+    g.save();
+    g.translate(6, 6);
+    g.globalAlpha = 0.55;
+    const flat = { ...t, block: '#05070a', blockHi: '#05070a', blockLo: '#05070a',
+      edgeHi: '#05070a', rivetHi: '#05070a', blockEdge: '#05070a', hi: '#05070a' };
+    draw(g, o, flat);
+    g.restore();
+    g.globalAlpha = 1;
+    draw(g, o, t);
   }
-  for (let ry = o.y + 5; ry < o.y + o.h - 5; ry += 11) {
-    g.fillRect(o.x + 4, ry, 2, 2);
-    g.fillRect(o.x + o.w - 6, ry, 2, 2);
-  }
-  g.globalAlpha = 1;
 
-  // hazard chevrons on the face that points into the playfield
+  // Hazard chevrons on the face that points into the playfield. Only on
+  // shapes that fill their box: on a silhouette they float in empty space
+  // away from the edge they are supposed to mark. Those shapes draw their
+  // own lit crest instead.
+  if (!FILLS_BOX.has(shape)) return;
   const fy = o.face === 1 ? o.y + o.h - 5 : o.y + 2;
   for (let sx = 0; sx < o.w - 4; sx += 8) {
     g.fillStyle = (sx / 8) % 2 ? '#15181e' : t.chevron;
