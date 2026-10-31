@@ -102,8 +102,15 @@ function shootTurret(t, p) {
       + (shots === 1 ? (Math.random() - 0.5) * tw.spread : 0);
     const mx = t.x + Math.cos(a) * 9;
     const my = t.y + Math.sin(a) * 9;
-    fire(enemyShots, mx, my, Math.cos(a) * speed, Math.sin(a) * speed, 3.4, tw.arc ? 13 : 9, tw.arc ? 3 : 2);
-    sparks(mx, my, Math.cos(a), Math.sin(a), 3, tw.colour);
+    // A rocket launches wide of its aim on purpose and turns in afterwards,
+    // so the threat reads as a missile arcing onto you rather than a bullet
+    // that happens to curve.
+    const la = tw.seek ? a + (Math.random() - 0.5) * 0.9 : a;
+    fire(enemyShots, mx, my, Math.cos(la) * speed, Math.sin(la) * speed,
+      tw.seek ? tw.seekLife : 3.4, tw.arc ? 13 : tw.seek ? 14 : 9,
+      tw.arc ? 3 : tw.seek ? 3 : 2,
+      tw.seek ? { seek: tw.seek, hp: tw.seekHp } : null);
+    sparks(mx, my, Math.cos(la), Math.sin(la), 3, tw.colour);
   }
   sfxTurretShot();
 }

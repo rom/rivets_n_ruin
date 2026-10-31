@@ -11,8 +11,51 @@ import { award } from './score.js';
 import { pointBlocked } from './level.js';
 import { sparks } from './particles.js';
 
+export const TREASURES = Object.keys(PICKUP.treasure);
+
 export const KINDS = ['shield', 'life', 'healthbar', 'gunspeed', 'gunblaze',
-  'coin', 'goldbar', 'coffin', 'bomb', 'grenade', 'missile'];
+  'coin', 'goldbar', 'coffin', 'bomb', 'grenade', 'missile', ...TREASURES];
+
+// Everything that is loot rather than an upgrade. One list, so the HUD, the
+// minimap, the end-of-hull bonus and the drop code cannot disagree about
+// what counts as treasure.
+export const LOOT = new Set(['coin', 'goldbar', 'coffin', ...TREASURES]);
+export const isTreasure = (kind) => kind in PICKUP.treasure;
+
+// Run totals and this-hull totals, in one place. The end-of-hull bonus asks
+// what was collected on this hull, the overview asks what the run has
+// collected in all, and keeping two counters in step by hand is how one of
+// them ends up wrong.
+export const freshHaul = () => ({ coins: 0, bars: 0, coffins: 0, treasures: 0, value: 0 });
+
+function haul(game, kind, value, coins = 0) {
+  game.coins = (game.coins || 0) + coins;
+  for (const h of [game.haul, game.hullHaul]) {
+    if (!h) continue;
+    h.value += value;
+    h.coins += coins;
+    if (kind === 'goldbar') h.bars++;
+    else if (kind === 'coffin') h.coffins++;
+    else if (isTreasure(kind)) h.treasures++;
+  }
+  // kept for the HUD and the backend, which have always read these
+  if (kind === 'goldbar') game.bars = (game.bars || 0) + 1;
+  else if (kind === 'coffin') game.coffins = (game.coffins || 0) + 1;
+  else if (isTreasure(kind)) game.treasures = (game.treasures || 0) + 1;
+}
+
+const TREASURE_WEIGHT = TREASURES.reduce((a, k) => a + PICKUP.treasure[k].weight, 0);
+
+// Which treasure a roll produces. The tiers are weighted, so a reliquary is
+// something you tell someone about.
+export function rollTreasure() {
+  let r = Math.random() * TREASURE_WEIGHT;
+  for (const k of TREASURES) {
+    r -= PICKUP.treasure[k].weight;
+    if (r <= 0) return k;
+  }
+  return TREASURES[0];
+}
 
 // Weighted drop table. Shield refills are the backbone; an extra ship is the
 // rare one, because handing them out freely removes the run's whole tension.
@@ -64,7 +107,8 @@ export function spawnPickup(game, x, y, kind = rollKind()) {
   p.life = kind === 'coin' ? PICKUP.coinLife
     : kind === 'goldbar' ? PICKUP.barLife
       : kind === 'coffin' ? PICKUP.coffinLife
-        : PICKUP.life;
+        : isTreasure(kind) ? PICKUP.treasure[kind].life
+          : PICKUP.life;
   p.maxLife = p.life;
   p.t = Math.random() * 6;
   return p;
@@ -104,6 +148,21 @@ export function spoils(game, x, y, source) {
   }
   if (Math.random() < PICKUP.coffinChance * (source === 'boss' ? 8 : 1)) {
     spawnPickup(game, x + (Math.random() - 0.5) * 24, y, 'coffin');
+  }
+
+  // Treasure. Rarer than a coffin and worth more, with the odds improving
+  // hull by hull so the late game pays for the trouble it causes. A boss
+  // rolls several times, which is why its wreck is worth flying into.
+  const odds = PICKUP.treasureChance + PICKUP.treasureHullBonus * (game.levelIndex || 0);
+  const rolls = source === 'boss' ? PICKUP.treasureFromBoss : 1;
+  for (let i = 0; i < rolls; i++) {
+    if (Math.random() >= odds) continue;
+    const t = spawnPickup(game, x + (Math.random() - 0.5) * 36, y, rollTreasure());
+    if (t) {
+      const a = Math.random() * Math.PI * 2;
+      t.vx = Math.cos(a) * 70;
+      t.vy = Math.sin(a) * 70;
+    }
   }
   return maybeDrop(game, x, y, source);
 }
@@ -150,7 +209,7 @@ export function updatePickups(game, dt) {
     const d = Math.hypot(dx, dy);
     // Loot is pulled from further than upgrade crates: a coin you flew past
     // is a coin you earned, and chasing it back is not gameplay.
-    const loot = p.kind === 'coin' || p.kind === 'goldbar' || p.kind === 'coffin';
+    const loot = LOOT.has(p.kind);
     const base = loot ? PICKUP.magnetLoot : PICKUP.magnet;
     const magnet = base * (pl.magnetMul || 1);
     if (d < magnet && d > 0.01) {
@@ -172,27 +231,39 @@ export function updatePickups(game, dt) {
 function collect(game, p) {
   const pl = game.player;
   let label = '';
-  // Coins and coffins carry their own value; everything else pays the flat
-  // pickup score on top of its effect.
-  if (p.kind !== 'coin' && p.kind !== 'coffin') award(game, PICKUP.score);
+  // Loot carries its own value; everything else pays the flat pickup score
+  // on top of its effect.
+  if (!LOOT.has(p.kind)) award(game, PICKUP.score);
+
+  // Treasure: value, coins at the armourer, and a toast loud enough that
+  // you know something unusual just happened.
+  if (isTreasure(p.kind)) {
+    const t = PICKUP.treasure[p.kind];
+    award(game, t.value);
+    haul(game, p.kind, t.value, Math.round(t.coins * (pl.coinMul || 1)));
+    game.onHaul?.(p.kind);
+    game.toast = { text: t.label + '  +' + t.value, kind: p.kind, t: 2.4 };
+    sparks(p.x, p.y, 0, -1, 18, t.colour);
+    game.onPickup?.(p.kind);
+    return;
+  }
 
   switch (p.kind) {
     case 'goldbar':
       award(game, PICKUP.barValue * (pl.coinMul || 1));
-      game.coins = (game.coins || 0) + 10 * (pl.coinMul || 1);
-      game.bars = (game.bars || 0) + 1;
+      haul(game, 'goldbar', PICKUP.barValue * (pl.coinMul || 1), 10 * (pl.coinMul || 1));
       game.onHaul?.('goldbar');
       label = 'GOLD BAR  +' + PICKUP.barValue;
       break;
     case 'coin':
       award(game, PICKUP.coinValue * (pl.coinMul || 1));
-      game.coins = (game.coins || 0) + (pl.coinMul || 1);
+      haul(game, 'coin', PICKUP.coinValue * (pl.coinMul || 1), pl.coinMul || 1);
       game.onHaul?.('coin');
       return;                       // no toast: coins are constant background
     case 'coffin':
       award(game, PICKUP.coffinValue);
+      haul(game, 'coffin', PICKUP.coffinValue, 0);
       game.onHaul?.('coffin');
-      game.coffins = (game.coffins || 0) + 1;
       label = 'GOLD COFFIN  +' + PICKUP.coffinValue;
       break;
     case 'shield':
@@ -247,6 +318,7 @@ function collect(game, p) {
 }
 
 export function tint(kind) {
+  if (isTreasure(kind)) return PICKUP.treasure[kind].colour;
   switch (kind) {
     case 'coin': return '#ffd24a';
     case 'goldbar': return '#ffc93a';

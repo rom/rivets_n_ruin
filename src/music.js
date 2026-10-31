@@ -9,30 +9,71 @@ import { ctx, now, musicBus, env, ready } from './audio.js';
 
 const LOOKAHEAD = 0.12;
 const TICK = 25;
-const BARS = 4;
+// Sixteen bars, not four. Four bars of anything repeats forty times across a
+// hull, and no amount of good writing survives that. The form is the thing
+// that was missing:
+//
+//   bars  0-3   A, no lead      — the groove states itself
+//   bars  4-7   A, with the hook
+//   bars  8-11  B, with its own hook, on its own chords
+//   bars 12-15  A, hook again, and a fill into the turnaround
+//
+// So a tune takes about 25 seconds to come round, it goes somewhere in the
+// middle, and the part you remember arrives twice.
+const BARS = 16;
 const STEPS = BARS * 16;
 
 // Scales, as semitone offsets from the root.
 const PHRYGIAN = [0, 1, 3, 5, 7, 8, 10];
 const AEOLIAN = [0, 2, 3, 5, 7, 8, 10];
 const DORIAN = [0, 2, 3, 5, 7, 9, 10];
+const HARM_MINOR = [0, 2, 3, 5, 7, 8, 11];
 
-// Each tune is data: tempo, root, mode, chord movement, drum masks and the
-// shape of the lead. Adding another is adding an entry here, not code.
+// A hook is 32 eighth notes: four bars, eight to the bar. Each entry is a
+// scale degree above the bar's chord, or null for a rest. Degrees run past
+// 6 into the next octave, so melodies are always in key by construction and
+// a wrong note is not expressible.
+const R = null;
+
+// Which section a bar belongs to, and whether the lead plays over it.
+// Exported because the form IS the tune model: a test that cannot see it
+// can only check that nothing threw.
+// Where in a four-bar hook a given bar and sixteenth lands. Eighth notes,
+// eight to the bar, four bars to a phrase.
+export const hookIndex = (bar, pos) => (bar % 4) * 8 + (pos >> 1);
+
+export function form(bar) {
+  if (bar < 4) return { sec: 'A', lead: false };
+  if (bar < 8) return { sec: 'A', lead: true };
+  if (bar < 12) return { sec: 'B', lead: true };
+  return { sec: 'A', lead: true };
+}
+
 export const TUNES = [
   {
     name: 'DROSS',
-    blurb: 'D PHRYGIAN · 152',
+    blurb: 'D PHRYGIAN · 152 · THE WORKING TUNE',
     bpm: 152,
     root: 73.416,                       // D2
     scale: PHRYGIAN,
     prog: [0, 1, 0, -2],                // i bII i bVII — the flat second bites
+    progB: [-4, -4, -2, 1],
     bass: [1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0],
     kick: [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0],
     snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1],
-    arp: [0, 3, 7, 10, 7, 3],
     chord: [0, 3, 7],           // minor
-    arpEvery: 2,
+    hook: [
+      0, R, 2, 0, 4, R, 2, R,
+      1, R, 0, R, R, R, R, R,
+      4, R, 5, 4, 7, R, 5, R,
+      4, 2, 1, R, 0, R, R, R,
+    ],
+    hookB: [
+      7, R, R, 6, 5, R, 4, R,
+      3, R, 4, 5, R, R, R, R,
+      2, R, R, 3, 4, R, 5, R,
+      7, R, 6, R, 5, 4, R, R,
+    ],
     bassType: 'sawtooth',
     leadType: 'square',
     padCut: 1100,
@@ -44,12 +85,23 @@ export const TUNES = [
     root: 55.000,                       // A1 — sits lower, feels heavier
     scale: AEOLIAN,
     prog: [0, 0, -4, -2],
+    progB: [-5, -5, -3, -2],
     bass: [1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1],
     kick: [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0],
     snare: [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-    arp: [0, 7, 12, 7, 3, 7],
     chord: [0, 3, 7, 10],       // minor seventh, heavier
-    arpEvery: 4,                        // sparser: more space between hits
+    hook: [
+      0, R, R, R, 4, R, 3, R,
+      2, R, R, R, R, R, R, R,
+      7, R, R, 6, 4, R, R, R,
+      3, R, 2, R, 0, R, R, R,
+    ],
+    hookB: [
+      4, R, R, 5, 7, R, R, R,
+      6, R, 5, R, 4, R, R, R,
+      2, R, R, 3, 4, R, 2, R,
+      0, R, R, R, R, R, R, R,
+    ],
     bassType: 'square',
     leadType: 'triangle',
     padCut: 760,
@@ -61,12 +113,23 @@ export const TUNES = [
     root: 82.407,                       // E2
     scale: DORIAN,
     prog: [0, 3, 5, 3],
+    progB: [-2, -2, 2, 3],
     bass: [1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1],
     kick: [1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1],
     snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0],
-    arp: [0, 3, 7, 12, 10, 7, 3, 0],
     chord: [0, 3, 7, 9],        // dorian sixth, brighter
-    arpEvery: 1,                        // relentless
+    hook: [
+      0, 2, 4, R, 7, R, 4, 2,
+      3, R, 2, R, 0, R, R, R,
+      7, 6, 7, R, 9, R, 7, R,
+      6, 4, 3, 2, 0, R, R, R,
+    ],
+    hookB: [
+      4, R, 4, 5, 6, R, 7, R,
+      9, R, 7, 6, 4, R, R, R,
+      2, 3, 4, R, 6, R, 4, R,
+      3, 2, 1, R, 0, R, R, R,
+    ],
     bassType: 'sawtooth',
     leadType: 'square',
     padCut: 1500,
@@ -78,15 +141,138 @@ export const TUNES = [
     root: 73.416,
     scale: AEOLIAN,
     prog: [0, -3, -5, -3],
+    progB: [-7, -5, -3, -1],
     bass: [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0],
     kick: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     snare: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
-    arp: [0, 7, 12, 15, 12, 7],
     chord: [0, 7, 12],          // open fifth, sparse
-    arpEvery: 4,
+    hook: [
+      7, R, R, R, R, R, 6, R,
+      4, R, R, R, R, R, R, R,
+      5, R, R, R, 4, R, R, R,
+      2, R, R, R, R, R, R, R,
+    ],
+    hookB: [
+      9, R, R, R, 7, R, R, R,
+      6, R, R, 5, R, R, R, R,
+      7, R, R, R, 9, R, R, R,
+      11, R, R, R, R, R, R, R,
+    ],
     bassType: 'triangle',
     leadType: 'triangle',
     padCut: 620,
+  },
+  {
+    name: 'GANTRY',
+    blurb: 'G DORIAN · 138 · MARCH',
+    bpm: 138,
+    root: 48.999,                       // G1
+    scale: DORIAN,
+    prog: [0, 0, 5, 3],
+    progB: [-4, 1, -2, 0],
+    bass: [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1],
+    kick: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+    snare: [0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0],
+    chord: [0, 3, 7],
+    hook: [
+      0, R, 0, 2, 3, R, R, 2,
+      4, R, R, R, 3, R, 2, R,
+      0, R, 0, 2, 3, R, 4, R,
+      5, R, 4, 3, 2, R, R, R,
+    ],
+    hookB: [
+      3, R, 4, R, 5, R, 4, R,
+      7, R, R, 6, 5, R, R, R,
+      4, R, 3, R, 2, R, 3, R,
+      4, R, R, R, R, R, R, R,
+    ],
+    bassType: 'sawtooth',
+    leadType: 'square',
+    padCut: 980,
+  },
+  {
+    name: 'CORSAIR',
+    blurb: 'B PHRYGIAN · 164 · RAIDING PARTY',
+    bpm: 164,
+    root: 61.735,                       // B1
+    scale: PHRYGIAN,
+    prog: [0, 1, 5, 1],
+    progB: [3, 3, 1, 0],
+    bass: [1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1],
+    kick: [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0],
+    snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1],
+    chord: [0, 3, 7, 10],
+    hook: [
+      7, 7, R, 6, 7, R, R, R,
+      4, R, 5, R, 4, R, 2, R,
+      1, R, R, 2, 4, R, R, R,
+      5, 4, 2, 1, 0, R, R, R,
+    ],
+    hookB: [
+      9, R, 8, R, 7, R, R, R,
+      5, R, R, 4, 5, R, 7, R,
+      8, R, 7, R, 5, R, 4, R,
+      2, R, 1, R, 0, R, R, R,
+    ],
+    bassType: 'sawtooth',
+    leadType: 'square',
+    padCut: 1350,
+  },
+  {
+    name: 'BLACKSTAR',
+    blurb: 'C HARMONIC MINOR · 118 · SOMETHING ALIVE',
+    bpm: 118,
+    root: 65.406,                       // C2
+    scale: HARM_MINOR,
+    prog: [0, 0, -1, 4],
+    progB: [-5, -1, -3, 4],
+    bass: [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0],
+    kick: [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+    snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+    chord: [0, 3, 7, 11],       // the major seventh is what makes it uneasy
+    hook: [
+      0, R, R, 1, 2, R, R, R,
+      6, R, R, R, 5, R, 4, R,
+      2, R, 1, R, 0, R, R, R,
+      R, R, 6, R, 7, R, R, R,
+    ],
+    hookB: [
+      4, R, R, 5, 6, R, 7, R,
+      6, R, 5, R, 4, R, R, R,
+      2, R, 3, R, 4, R, 2, R,
+      1, R, R, R, 0, R, R, R,
+    ],
+    bassType: 'triangle',
+    leadType: 'triangle',
+    padCut: 840,
+  },
+  {
+    name: 'HAMMERFALL',
+    blurb: 'F# AEOLIAN · 186 · THE LAST HULL',
+    bpm: 186,
+    root: 92.499,                       // F#2
+    scale: AEOLIAN,
+    prog: [0, -2, -4, -2],
+    progB: [3, 2, 0, -2],
+    bass: [1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1],
+    kick: [1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0],
+    snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1],
+    chord: [0, 3, 7, 10],
+    hook: [
+      0, 0, R, 4, R, 3, R, 2,
+      4, R, R, 7, R, R, R, R,
+      5, 5, R, 4, R, 2, R, 1,
+      2, R, 0, R, R, R, R, R,
+    ],
+    hookB: [
+      7, R, 9, R, 11, R, 9, R,
+      7, R, 6, 5, 4, R, R, R,
+      5, R, 7, R, 9, R, 7, R,
+      4, 3, 2, R, 0, R, R, R,
+    ],
+    bassType: 'sawtooth',
+    leadType: 'square',
+    padCut: 1700,
   },
 ];
 
@@ -104,6 +290,14 @@ const M = {
 const cur = () => TUNES[M.tune];
 const stepDur = () => 60 / cur().bpm / 4;
 const note = (semi) => cur().root * Math.pow(2, semi / 12);
+
+// A scale degree to a semitone offset, wrapping into higher octaves past
+// the seventh. Melodies are written in degrees so they cannot leave the key.
+export function deg(T, d) {
+  const n = T.scale.length;
+  const oct = Math.floor(d / n);
+  return T.scale[((d % n) + n) % n] + 12 * oct;
+}
 
 export function setIntensity(n) { M.target = n; }
 
@@ -165,26 +359,39 @@ function schedule() {
   }
 }
 
+// The fill that turns a four-bar group over: sixteenths on the last beat,
+// which is the oldest trick there is and still the one that works.
+const FILL = [1, 1, 0, 1, 1, 0, 1, 1];
+
 function playStep(s, t) {
   const bus = musicBus();
   const T = cur();
   const bar = (s / 16) | 0;
   const pos = s % 16;
-  const chord = T.prog[bar];
+  const f = form(bar);
+  const chord = (f.sec === 'B' ? T.progB : T.prog)[bar % 4];
   const I = M.intensity;
   const step = stepDur();
+  const lastBar = bar % 4 === 3;
+  const inFill = lastBar && pos >= 12 && I >= 2;
 
   // ---- drums
   if (I >= 1) {
-    if (T.kick[pos]) kick(t, bus);
-    if (T.snare[pos]) snare(t, bus);
+    if (T.kick[pos] && !inFill) kick(t, bus);
+    if (inFill) {
+      if (FILL[(pos - 12) * 2 % FILL.length]) snare(t, bus);
+      if (pos === 12) kick(t, bus);
+    } else if (T.snare[pos]) {
+      snare(t, bus);
+    }
     const hatEvery = I >= 3 ? 1 : 2;
     if (pos % hatEvery === 0) hat(t, bus, pos % 4 === 0 ? 0.08 : 0.045);
   }
 
-  // ---- bass
+  // ---- bass. The last bar of each group walks up into the next, which is
+  // what stops four bars of one note sounding like a stuck record.
   if (I >= 1 && T.bass[pos]) {
-    const walk = bar === 3 && pos >= 12 ? T.scale[(pos - 12) % T.scale.length] : 0;
+    const walk = lastBar && pos >= 12 ? deg(T, (pos - 12) % 4) : 0;
     bass(note(chord + walk), t, bus, I >= 2 ? 0.34 : 0.24);
   }
 
@@ -198,11 +405,18 @@ function playStep(s, t) {
     });
   }
 
-  // ---- lead
-  if (I >= 2 && pos % T.arpEvery === T.arpEvery - 1) {
-    const d = T.arp[((s / T.arpEvery) | 0) % T.arp.length];
-    arpNote(note(chord + d + 24), t, bus, 0.085, null, s);
-    if (I >= 3) arpNote(note(chord + d + 36), t, bus, 0.035, null, s + 7);
+  // ---- the hook. A written melody on eighth notes, not an arpeggio cycling
+  // forever: this is the part you are supposed to still have in your head
+  // after you stop playing.
+  if (I >= 2 && f.lead && pos % 2 === 0) {
+    const line = f.sec === 'B' ? T.hookB : T.hook;
+    const d = line[hookIndex(bar, pos)];
+    if (d !== null && d !== undefined) {
+      const semi = chord + deg(T, d) + 24;
+      arpNote(note(semi), t, bus, 0.095, null, s);
+      // a fifth below, quietly, so the lead has body rather than volume
+      if (I >= 3) arpNote(note(semi - 5), t, bus, 0.032, null, s + 7);
+    }
   }
 
   // ---- title screen: the pad and an occasional figure, no drums

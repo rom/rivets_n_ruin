@@ -159,7 +159,7 @@ export const LEVELS = [
     turretHp: 5, turretCooldown: 1.20, turretRange: 360,
     interceptorSpeed: 220, interceptorSpawn: 0.98, interceptorHp: 3,
     foes: ['mine', 'lancer', 'weaver'],
-    towers: ['gun', 'flak'], tune: 2 },
+    towers: ['gun', 'flak'], tune: 4 },
 
   { name: 'CUPRUM', subtitle: 'OXIDISED — SALVAGE HULK',
     theme: 'desert', seed: 0xc0ffee, length: 18500,
@@ -167,7 +167,7 @@ export const LEVELS = [
     turretHp: 6, turretCooldown: 1.10, turretRange: 380,
     interceptorSpeed: 236, interceptorSpawn: 0.90, interceptorHp: 4,
     foes: ['mine', 'lancer', 'orbiter', 'weaver'],
-    towers: ['gun', 'flak', 'lance'], tune: 1 },
+    towers: ['gun', 'flak', 'lance', 'rocket'], tune: 2 },
 
   { name: 'PYRITE', subtitle: 'RUNNING HOT — FOUNDRY HULL',
     theme: 'foundry', seed: 0xf00dface, length: 20000,
@@ -175,7 +175,7 @@ export const LEVELS = [
     turretHp: 7, turretCooldown: 1.00, turretRange: 400,
     interceptorSpeed: 252, interceptorSpawn: 0.82, interceptorHp: 4,
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter'],
-    towers: ['gun', 'flak', 'lance', 'mortar'], tune: 2 },
+    towers: ['gun', 'flak', 'lance', 'mortar', 'rocket'], tune: 5 },
 
   { name: 'WOLFRAM', subtitle: 'LIGHT SWALLOWING — SIEGE HULL',
     theme: 'void', seed: 0x0b51d1a, length: 21500,
@@ -183,7 +183,7 @@ export const LEVELS = [
     turretHp: 8, turretCooldown: 0.92, turretRange: 420,
     interceptorSpeed: 266, interceptorSpawn: 0.75, interceptorHp: 5,
     foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech'],
-    towers: ['gun', 'lance', 'mortar', 'warden'], tune: 2 },
+    towers: ['gun', 'lance', 'mortar', 'warden', 'rocket'], tune: 3 },
 
   { name: 'FERRUM', subtitle: 'EATEN THROUGH — DERELICT HULL',
     theme: 'derelict', seed: 0xfe2211, length: 23000,
@@ -191,7 +191,7 @@ export const LEVELS = [
     turretHp: 9, turretCooldown: 0.86, turretRange: 440,
     interceptorSpeed: 280, interceptorSpawn: 0.70, interceptorHp: 5,
     foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech'],
-    towers: ['gun', 'flak', 'mortar', 'warden'], tune: 0 },
+    towers: ['gun', 'flak', 'mortar', 'warden', 'rocket'], tune: 6 },
 
   { name: 'AURUM', subtitle: 'THE PRIZE — ADMIRALTY HULL',
     theme: 'admiralty', seed: 0xa17aa17a, length: 25000,
@@ -199,7 +199,7 @@ export const LEVELS = [
     turretHp: 10, turretCooldown: 0.80, turretRange: 460,
     interceptorSpeed: 294, interceptorSpawn: 0.64, interceptorHp: 6,
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech'],
-    towers: ['gun', 'flak', 'lance', 'mortar', 'warden'], tune: 2 },
+    towers: ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket'], tune: 7 },
 ];
 
 // Clearing a hull upgrades the ship permanently for the rest of the run.
@@ -215,6 +215,17 @@ export const DIFFICULTY = [
   { id: 'ruin',    name: 'RUIN',    enemyDmg: 1.9, bossHp: 1.6, spawn: 0.62, scrape: 1.7, scoreMul: 1.7 },
 ];
 export const DEFAULT_DIFFICULTY = 1;
+
+// What clearing a hull pays beyond the flat completion bonus. Three
+// questions, each about a different way of playing it: did you break the
+// guns, did you keep your ships, did you pick the hull clean.
+export const HULL_BONUS = {
+  towers: 5000,        // x the fraction of the hull's guns destroyed
+  fullSweep: 4000,     // every gun on the hull, on top of the above
+  perLife: 1800,       // per ship still in the hangar
+  haulPct: 0.3,        // of the loot value collected on this hull
+  noLoss: 2500,        // the hull flown without losing a ship
+};
 
 export const LEVEL_UP = {
   shieldMax: 45,
@@ -288,6 +299,18 @@ export const TOWERS = {
     name: 'WARDEN', hpMul: 2.0, score: 420,
     burst: 2, burstGap: 0.18, cooldownMul: 1.4, bulletSpeed: 180, spread: 0.12,
     aura: 150, colour: '#b45ce0',
+  },
+  rocket: {
+    // Launches slow homing missiles. Every other tower is beaten by not
+    // being on its line; this one follows, so it has to be out-turned or
+    // shot down. Missiles are the only enemy ordnance the cannon can
+    // destroy, which is the whole counterplay.
+    name: 'ROCKET', hpMul: 1.5, score: 480,
+    burst: 2, burstGap: 0.46, cooldownMul: 2.6, bulletSpeed: 112, spread: 0.3,
+    seek: 1.45,            // rad/s: outrunnable by turning, not by sitting
+    seekLife: 4.4,         // and it runs out of fuel
+    seekHp: 2,
+    colour: '#ff5fa8',
   },
 };
 
@@ -365,6 +388,20 @@ export const PICKUP = {
   coffinValue: 2500,
   coffinChance: 0.045,   // per destroyed thing
   coffinLife: 13.0,
+
+  // Treasure. Four tiers above the gold bar, rare enough that seeing one is
+  // an event and each is worth breaking formation for. Unlike coins these
+  // are not scattered by every kill: they come from the things that are
+  // hard to kill, and the odds improve with the hull.
+  treasure: {
+    gem:    { value: 900,   coins: 24,  life: 13.0, weight: 46, colour: '#59e6c3', label: 'CUT GEM' },
+    idol:   { value: 2000,  coins: 52,  life: 14.0, weight: 28, colour: '#c08cff', label: 'ALIEN IDOL' },
+    crown:  { value: 4500,  coins: 110, life: 15.0, weight: 18, colour: '#ffd24a', label: 'PIRATE CROWN' },
+    reliquary: { value: 9000, coins: 230, life: 16.0, weight: 8, colour: '#ff6ad5', label: 'RELIQUARY' },
+  },
+  treasureChance: 0.022,       // per destroyed thing, on the first hull
+  treasureHullBonus: 0.006,    // and this much more per hull after it
+  treasureFromBoss: 7,         // bosses and minibosses roll this many times
   // gunspeed: fire interval multiplier per level. Sized past the reachable
   // maximum (3 base + 2 from clearing hulls) so an index can never fall off.
   // Flattening curve: each level is a real gain but the top is ~2.4x base

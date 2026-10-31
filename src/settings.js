@@ -20,6 +20,8 @@ export const DEFS = [
     help: 'Each hull picks its own unless you override it here.' },
   { id: 'difficulty', label: 'DIFFICULTY', kind: 'difficulty', def: 1,
     help: 'Takes effect on the next run. Harder settings score more.' },
+  { id: 'radar', label: 'RADAR STRIP', kind: 'bool', def: true,
+    help: 'The map across the top: guns, loot, minibosses, the boss.' },
   { id: 'bloom', label: 'BLOOM', kind: 'bool', def: true,
     help: 'Glow around bright things. Off is cheaper on a slow machine.' },
   { id: 'scanlines', label: 'CRT SCANLINES', kind: 'bool', def: true,
