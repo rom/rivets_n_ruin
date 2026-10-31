@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rivets 'n Ruin</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #05070a; overflow: hidden; }
+  body {
+    display: grid; place-items: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  canvas {
+    display: block;
+    image-rendering: pixelated;
+    background: #05070a;
+    box-shadow: 0 0 0 1px #1b212b, 0 24px 80px -20px #000;
+  }
+  #hint {
+    position: fixed; bottom: 10px; left: 0; right: 0;
+    text-align: center; color: #39424e; font-size: 11px; letter-spacing: .09em;
+    pointer-events: none; user-select: none;
+  }
+</style>
+</head>
+<body>
+  <canvas id="game" width="640" height="360"></canvas>
+  <div id="hint">ARROWS / WASD MOVE &nbsp;·&nbsp; Z / SPACE FIRE &nbsp;·&nbsp; ENTER START &nbsp;·&nbsp; P PAUSE &nbsp;·&nbsp; R RESTART</div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
