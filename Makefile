@@ -15,7 +15,7 @@ NODE        ?= node
 LDFLAGS     := -s -w
 
 .DEFAULT_GOAL := help
-.PHONY: help run build test test-race bench fmt vet check js-check tidy clean dist icons stats
+.PHONY: help run build test test-race bench fmt vet check js-check smoke tidy clean dist icons stats
 
 help: ## Show this help
 	@echo "Rivets 'n Ruin"
@@ -80,7 +80,17 @@ check: ## Everything CI would run: format check, vet, race tests, JS syntax
 	@$(GO) vet ./... && echo "vet      ok"
 	@$(GO) test -race -count=1 ./... >/dev/null && echo "go test  ok (race)"
 	@$(MAKE) -s js-check
+	@$(MAKE) -s smoke
 	@echo "all checks passed"
+
+SMOKE_PORT ?= 8399
+
+smoke: build ## Launch the game and assert it actually renders and scrolls
+	@./$(BUILD_DIR)/$(BINARY) -addr 127.0.0.1:$(SMOKE_PORT) -data $(BUILD_DIR)/smoke.json & \
+	pid=$$!; \
+	trap "kill $$pid 2>/dev/null" EXIT; \
+	sleep 1.5; \
+	$(NODE) tools/smoke.cjs http://127.0.0.1:$(SMOKE_PORT)/
 
 tidy: ## Tidy go.mod
 	$(GO) mod tidy

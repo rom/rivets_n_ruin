@@ -210,7 +210,7 @@ export function update(game, dt) {
     updateParticles(dt);
     advance(playerShots, dt);
     advance(enemyShots, dt);
-    updateCamera(game.cam, game.player, dt);
+    updateCamera(game.cam, game.player, game.level.length, dt);
     if (game.stateT > 1.15) {
       if (game.player.lives <= 0) {
         game.state = 'gameover';
@@ -242,7 +242,7 @@ export function update(game, dt) {
   advance(enemyShots, dt);
   updateParticles(dt);
   collide(game);
-  updateCamera(game.cam, p, dt);
+  updateCamera(game.cam, p, game.level.length, dt);
 
   // two-way objective: the far end turns you around, the near end finishes you
   if (!game.returning && p.x > game.level.length - APRON * 0.55) {
