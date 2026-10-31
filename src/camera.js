@@ -13,9 +13,12 @@ export function updateCamera(cam, player, levelLen, dt, lockX = null) {
   // which is what makes a bidirectional scroller feel like one.
   const want = clamp(
     player.x - VIEW_W / 2 + player.facing * CAM.lead,
-    0, levelLen - VIEW_W,
+    0, Math.max(0, levelLen - VIEW_W),
   );
   cam.x += (want - cam.x) * smooth(CAM.lerp, dt);
+  // Backstop. Nothing downstream can recover from a NaN camera, and the cost
+  // of checking is a comparison per frame.
+  if (!Number.isFinite(cam.x)) cam.x = clamp(want, 0, Math.max(0, levelLen - VIEW_W));
   cam.x = clamp(cam.x, 0, levelLen - VIEW_W);
   if (cam.shake > 0) cam.shake = Math.max(0, cam.shake - dt * 42);
 }

@@ -1,5 +1,5 @@
 import {
-  VIEW_W, VIEW_H, FIELD_H, HUD_H, SHIP, LEVELS, LEVEL_UP, COL, clamp,
+  VIEW_W, VIEW_H, FIELD_H, HUD_H, SHIP, LEVELS, LEVEL_UP, THEMES, COL, clamp,
 } from './config.js';
 import { netState } from './net.js';
 import { PICKUP } from './config.js';
@@ -74,6 +74,10 @@ export function drawHud(ctx, game, audio = {}) {
   // --- score
   text(ctx, 'SCORE', 252, y0 + 6);
   text(ctx, String(game.score).padStart(8, '0'), 252, y0 + 18, COL.hudBright);
+  if (game.coins || game.coffins) {
+    const haul = (game.coins || 0) + (game.coffins ? '+' + game.coffins : '');
+    text(ctx, String(haul), 252 + 56, y0 + 6, '#ffd24a', FONT);
+  }
 
   // --- hull progress, with the turnaround baked in
   const spec = game.level.spec;
@@ -222,37 +226,76 @@ function drawScreen(ctx, game) {
     return;
   }
 
-  // Between hulls: show what the ship just gained, then carry on.
+  // Between hulls: the refit, and a look at what you are flying into. The
+  // next hull being bigger is the headline, so it is shown as a drawn
+  // comparison rather than a number — you should see the step up.
   if (game.state === 'levelclear') {
+    const cur = spec0(game);
     const next = game.specs[game.levelIndex + 1];
     const p = game.player;
-    text(ctx, spec0(game).name + ' CLEARED', cx, 30, COL.coolHi, FONT_BIG, 'center');
+    const curTheme = THEMES[cur.theme] || THEMES.steel;
+    const nextTheme = THEMES[next.theme] || THEMES.steel;
+
+    text(ctx, cur.name + ' CLEARED', cx, 20, COL.coolHi, FONT_BIG, 'center');
     text(ctx, 'SCORE ' + String(game.score).padStart(8, '0')
-      + '    TIME ' + game.time.toFixed(1) + 'S', cx, 58, COL.hudText, FONT, 'center');
+      + '    TIME ' + game.time.toFixed(1) + 'S'
+      + (game.coins ? '    COINS ' + game.coins : ''), cx, 48, COL.hudText, FONT, 'center');
 
-    text(ctx, 'REFIT COMPLETE', cx, 84, COL.warmHi, FONT, 'center');
-    // The refit is already applied by the time this draws, so these are the
-    // ship's real new numbers; the +N is what this hull just bought you.
-    const rows = [
-      ['HULL PLATING', p.shieldMax + ' SHIELD', '+' + LEVEL_UP.shieldMax],
-      ['THRUSTERS', Math.round((p.accelMul - 1) * 100) + '% ACCEL  +' + p.maxVXBonus + ' TOP SPEED',
-        '+' + Math.round((LEVEL_UP.accelMul - 1) * 100) + '%'],
-      ['CANNON', '+' + p.bulletBonus + ' MUZZLE   ' + p.gunCap + ' MOUNTS', '+' + LEVEL_UP.gunCap],
-      ['ARMOURY', 'GUNSPEED ' + p.gunSpeed + '   GUNBLAZE ' + p.gunBlaze, '+1 EACH'],
-      ['HANGAR', p.lives + ' SHIPS', '+' + LEVEL_UP.lives],
+    // --- the hulls, to scale against each other
+    const BX = 110;
+    const BW = VIEW_W - BX * 2;
+    const longest = Math.max(cur.length, next.length);
+    const grow = Math.min(1, (game.stateT - 0.3) / 0.9);   // animates in
+
+    const row = (y, spec, theme, frac, label, dim) => {
+      const w = Math.max(6, Math.round(BW * (spec.length / longest) * frac));
+      ctx.globalAlpha = dim ? 0.45 : 1;
+      ctx.fillStyle = '#0a0d13';
+      ctx.fillRect(BX, y, BW, 13);
+      ctx.fillStyle = theme.mid;
+      ctx.fillRect(BX, y, w, 13);
+      ctx.fillStyle = theme.rimDark;
+      ctx.fillRect(BX, y, w, 2);
+      ctx.fillRect(BX, y + 11, w, 2);
+      ctx.fillStyle = theme.rivet;
+      for (let rx = BX + 5; rx < BX + w - 3; rx += 12) ctx.fillRect(rx, y + 5, 2, 2);
+      ctx.fillStyle = theme.edgeHi;
+      ctx.fillRect(BX + w - 2, y, 2, 13);
+      ctx.globalAlpha = 1;
+      text(ctx, label, BX, y - 10, dim ? COL.hudLine : COL.hudBright, FONT);
+      text(ctx, (spec.length / 1000).toFixed(1) + 'K', BX + BW + 6, y + 2,
+        dim ? COL.hudLine : COL.coolHi, FONT);
+    };
+
+    row(86, cur, curTheme, 1, 'FLOWN: ' + cur.name, true);
+    row(126, next, nextTheme, grow, 'NEXT: ' + next.name, false);
+
+    const longer = Math.round(next.length - cur.length);
+    text(ctx, '+' + longer.toLocaleString() + ' PX OF HULL   ·   ' + next.subtitle,
+      cx, 148, COL.warmHi, FONT, 'center');
+
+    // --- what is new about it
+    const newFoes = (next.foes || []).filter((f) => !(cur.foes || []).includes(f));
+    const bits = [
+      'TURRETS ' + cur.turretHp + ' \u2192 ' + next.turretHp + ' HP',
+      'TRAFFIC +' + Math.round((cur.interceptorSpawn / next.interceptorSpawn - 1) * 100) + '%',
     ];
-    rows.forEach(([k, v, d], i) => {
-      const ry = 106 + i * 14;
-      text(ctx, k, 128, ry, COL.hudText, FONT);
-      text(ctx, v, 250, ry, COL.coolHi, FONT);
-      text(ctx, d, 462, ry, '#5fe08a', FONT);
-    });
+    if (newFoes.length) bits.push('NEW: ' + newFoes.join(', ').toUpperCase());
+    text(ctx, bits.join('   ·   '), cx, 166, COL.hudText, FONT, 'center');
 
-    text(ctx, 'NEXT HULL: ' + next.name, cx, 186, COL.warmHi, FONT, 'center');
-    text(ctx, next.subtitle, cx, 200, COL.hudText, FONT, 'center');
-    text(ctx, 'TUNE ' + (TUNES[next.tune] ? TUNES[next.tune].name : tuneName()), cx, 216, COL.hudLine, FONT, 'center');
+    // --- the refit, compact
+    text(ctx, 'REFIT COMPLETE', cx, 190, COL.warmHi, FONT, 'center');
+    const refit = [
+      p.shieldMax + ' SHIELD',
+      Math.round((p.accelMul - 1) * 100) + '% ACCEL',
+      '+' + p.maxVXBonus + ' SPEED',
+      p.gunCap + ' MOUNTS',
+      p.lives + ' SHIPS',
+    ];
+    text(ctx, refit.join('   ·   '), cx, 206, '#5fe08a', FONT, 'center');
+
     ctx.globalAlpha = pulse;
-    text(ctx, 'ENTER TO LAUNCH', cx, 240, COL.warmHi, FONT, 'center');
+    text(ctx, 'ENTER TO LAUNCH', cx, 232, COL.warmHi, FONT, 'center');
     ctx.globalAlpha = 1;
     return;
   }

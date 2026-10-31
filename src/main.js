@@ -1,4 +1,5 @@
 import { VIEW_W, VIEW_H } from './config.js';
+import { fitCanvas, applyTransform, reportFrame } from './display.js';
 import { initInput, tapped, endFrame } from './input.js';
 import { startLoop } from './loop.js';
 import { makeGame, update, syncBest } from './game.js';
@@ -14,14 +15,12 @@ import { LEVELS } from './config.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false });
-ctx.imageSmoothingEnabled = false;
 
-function fit() {
-  let s = Math.min(window.innerWidth / VIEW_W, (window.innerHeight - 40) / VIEW_H);
-  s = s >= 1 ? Math.floor(s) : s;            // integer upscale keeps pixels square
-  canvas.style.width = Math.round(VIEW_W * s) + 'px';
-  canvas.style.height = Math.round(VIEW_H * s) + 'px';
-}
+// The canvas backing store tracks the window and the device pixel ratio, and
+// the context carries a matching transform, so everything — sprites, strokes
+// and especially text — is rasterised at display resolution rather than
+// drawn into 640x360 and blown up. See display.js.
+function fit() { fitCanvas(canvas, ctx); }
 window.addEventListener('resize', fit);
 fit();
 
@@ -40,6 +39,7 @@ window.addEventListener('pointerdown', wakeAudio, { once: false });
 // before the level is built. The game starts regardless: a mod that will not
 // load, or a backend that is down, costs you the stock hull and nothing more.
 const mod = await loadModFromURL().catch(() => null);
+let lastFrameAt = performance.now();
 const game = makeGame(mod ? { seed: mod.seed, name: mod.name.toUpperCase() } : null);
 setTune(LEVELS[0].tune);
 let paused = false;
@@ -97,9 +97,17 @@ startLoop(
     update(game, dt);
   },
   () => {
+    const t0 = performance.now();
+    applyTransform(ctx);   // a resize resets context state; re-establish it
     drawWorld(ctx, game);
     drawHud(ctx, game, { muted: isMuted(), audio: ready() });
     if (game.quitting) drawQuitPrompt(ctx, game);
     else if (paused) drawPaused(ctx);
+    // Frame-to-frame interval, not draw time: canvas2d records lazily, so
+    // the real cost of a resolution shows up as a longer frame, not a longer
+    // draw call.
+    const now = performance.now();
+    reportFrame(now - lastFrameAt, canvas, ctx);
+    lastFrameAt = now;
   },
 );

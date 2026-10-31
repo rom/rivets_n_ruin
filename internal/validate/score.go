@@ -36,7 +36,7 @@ const (
 	PointsIntercept = 100
 
 	// Interceptors spawn on spawnEvery * (0.75..1.35); TANTALUM is fastest.
-	FastestSpawnInterval = 0.98 * 0.75
+	FastestSpawnInterval = 0.64 * 0.75
 
 	// Generous allowance for turret count on any one hull.
 	MaxTurretsPerHull = 45
@@ -53,17 +53,22 @@ const (
 // hull's boss plus the most its destructible sections can pay out. Every
 // hull ends in a fight, so leaving these out rejects every finished run.
 var BossRewards = []int{
-	6000 + 3*400,  // THE WARDEN: core + three pods
-	9000,          // DRAYLINE: no sections
-	14000 + 4*600, // THE RIVETER: core + four plates
+	6800,  // THE WARDEN
+	9000,  // DRAYLINE
+	16400, // THE RIVETER
+	20400, // COLDFORGE
+	26600, // SLAGHEART
+	32000, // NIGHTFALL
+	44500, // THE SEXTON
+	66600, // GILTHAMMER
 }
 
 // BossPickupDrops is how many pickups a boss can shed: one per section
 // destroyed plus a payload on death.
-var BossPickupDrops = []int{3 + 4, 0 + 4, 4 + 4}
+var BossPickupDrops = []int{6, 4, 8, 6, 6, 4, 9, 10}
 
 // HullLengths mirrors LEVELS[].length in src/config.js.
-var HullLengths = []float64{12000, 14500, 17000}
+var HullLengths = []float64{12000, 14500, 17000, 18500, 20000, 21500, 23000, 25000}
 
 // NumLevels is how many hulls a full campaign runs.
 func NumLevels() int { return len(HullLengths) }

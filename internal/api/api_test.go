@@ -368,19 +368,38 @@ func TestRateLimiterRejectsAFlood(t *testing.T) {
 	}
 }
 
-// Guard the physics constant the validator depends on.
-func TestValidatorConstantsTrackTheGame(t *testing.T) {
-	if validate.BaseMaxVX != 310 {
-		t.Errorf("validate.BaseMaxVX is %v but src/config.js SHIP.maxVX is 310 — update both together", validate.BaseMaxVX)
-	}
-	if validate.HullLengths[0] != 12000 {
-		t.Errorf("validate.HullLengths[0] is %v but src/config.js LEVELS[0].length is 12000", validate.HullLengths[0])
+// Guard the validator's internal consistency. Whether it matches the client
+// is checked by test/parity.test.mjs, which reads this file and compares it
+// against src/config.js directly — a Go test cannot see the JavaScript.
+func TestValidatorIsSelfConsistent(t *testing.T) {
+	if validate.BaseMaxVX <= 0 {
+		t.Errorf("BaseMaxVX is %v", validate.BaseMaxVX)
 	}
 	if len(validate.BossRewards) != validate.NumLevels() {
-		t.Errorf("validate has %d boss reward entries for %d hulls — src/config.js BOSSES must match LEVELS",
-			len(validate.BossRewards), validate.NumLevels())
+		t.Errorf("%d boss rewards for %d hulls", len(validate.BossRewards), validate.NumLevels())
 	}
-	if validate.NumLevels() != 3 {
-		t.Errorf("validate has %d hulls but src/config.js LEVELS has 3", validate.NumLevels())
+	if len(validate.BossPickupDrops) != validate.NumLevels() {
+		t.Errorf("%d boss drop counts for %d hulls", len(validate.BossPickupDrops), validate.NumLevels())
+	}
+	for i := 1; i < validate.NumLevels(); i++ {
+		if validate.HullLengths[i] <= validate.HullLengths[i-1] {
+			t.Errorf("hull %d (%v) is not longer than hull %d (%v)",
+				i, validate.HullLengths[i], i-1, validate.HullLengths[i-1])
+		}
+		if validate.BossRewards[i] <= validate.BossRewards[i-1] {
+			t.Errorf("boss %d pays no more than boss %d", i, i-1)
+		}
+	}
+	// A full campaign must fit under the ceiling, or every finished run 422s.
+	full := 0
+	for _, r := range validate.BossRewards {
+		full += r
+	}
+	s := validate.Submission{
+		Points: full * 3, TimeSec: 1800, Turrets: 200,
+		Completed: true, Levels: validate.NumLevels(),
+	}
+	if err := validate.Score(s); err != nil {
+		t.Errorf("a maximal legitimate campaign is rejected: %v", err)
 	}
 }

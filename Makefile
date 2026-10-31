@@ -15,7 +15,7 @@ NODE        ?= node
 LDFLAGS     := -s -w
 
 .DEFAULT_GOAL := help
-.PHONY: help run build test test-race bench fmt vet check js-check smoke tidy clean dist icons stats
+.PHONY: help run build test test-race test-js coverage bench fmt vet check js-check smoke tidy clean dist icons stats
 
 help: ## Show this help
 	@echo "Rivets 'n Ruin"
@@ -40,6 +40,23 @@ test: ## Run the Go tests
 
 test-race: ## Run the Go tests under the race detector
 	$(GO) test -race -count=1 ./...
+
+test-js: ## Run the client-side tests
+	@$(NODE) --test test/*.test.mjs
+
+coverage: ## Coverage for both sides; prints a combined summary
+	@echo "— go —"
+	@$(GO) test ./... -coverprofile=$(BUILD_DIR)/go.cover -covermode=atomic >/dev/null 2>&1 || true
+	@mkdir -p $(BUILD_DIR)
+	@$(GO) test ./... -coverprofile=$(BUILD_DIR)/go.cover -covermode=atomic 2>&1 | grep -E 'coverage:|no test files' || true
+	@$(GO) tool cover -func=$(BUILD_DIR)/go.cover | tail -1
+	@echo
+	@echo "— javascript —"
+	@$(NODE) --test --experimental-test-coverage test/*.test.mjs 2>&1 \
+		| sed -n '/start of coverage report/,/end of coverage report/p' \
+		| grep -E '^# (src/|all files)' || true
+	@echo
+	@echo "html go report: $(GO) tool cover -html=$(BUILD_DIR)/go.cover"
 
 bench: ## Run benchmarks, if any
 	$(GO) test -run '^$$' -bench . -benchmem ./...
@@ -80,6 +97,7 @@ check: ## Everything CI would run: format check, vet, race tests, JS syntax
 	@$(GO) vet ./... && echo "vet      ok"
 	@$(GO) test -race -count=1 ./... >/dev/null && echo "go test  ok (race)"
 	@$(MAKE) -s js-check
+	@$(NODE) --test test/*.test.mjs >/dev/null && echo "js test  ok"
 	@$(MAKE) -s smoke
 	@echo "all checks passed"
 
