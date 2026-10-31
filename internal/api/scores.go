@@ -15,6 +15,7 @@ type submitScoreReq struct {
 	Turrets   int     `json:"turrets"`
 	Deaths    int     `json:"deaths"`
 	Completed bool    `json:"completed"`
+	Levels    int     `json:"levels"`
 }
 
 func (s *Server) submitScore(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +31,7 @@ func (s *Server) submitScore(w http.ResponseWriter, r *http.Request) {
 
 	if err := validate.Score(validate.Submission{
 		Points: req.Points, TimeSec: req.TimeSec, Turrets: req.Turrets,
-		Deaths: req.Deaths, Completed: req.Completed,
+		Deaths: req.Deaths, Completed: req.Completed, Levels: req.Levels,
 	}); err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -45,7 +46,7 @@ func (s *Server) submitScore(w http.ResponseWriter, r *http.Request) {
 	sc := &model.Score{
 		PlayerID: p.ID, ModID: req.ModID, Points: req.Points,
 		TimeSec: req.TimeSec, Turrets: req.Turrets, Deaths: req.Deaths,
-		Completed: req.Completed,
+		Completed: req.Completed, Levels: req.Levels,
 	}
 	if err := s.store.AddScore(sc); err != nil {
 		writeErr(w, statusFor(err), err.Error())

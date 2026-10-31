@@ -1,9 +1,10 @@
 import {
-  VIEW_W, VIEW_H, FIELD_H, HUD_H, SHIP, LEVEL_LEN, COL, clamp,
+  VIEW_W, VIEW_H, FIELD_H, HUD_H, SHIP, LEVELS, LEVEL_UP, COL, clamp,
 } from './config.js';
 import { netState } from './net.js';
 import { PICKUP } from './config.js';
 import { tint } from './pickups.js';
+import { tuneName, TUNES } from './music.js';
 import { activeMod } from './mods.js';
 
 const FONT = 'bold 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
@@ -44,9 +45,9 @@ export function drawHud(ctx, game, audio = {}) {
   for (let i = 0; i < Math.max(0, p.lives); i++) {
     ctx.fillStyle = COL.cool;
     ctx.beginPath();
-    ctx.moveTo(94 + i * 10, y0 + 28);
-    ctx.lineTo(99 + i * 10, y0 + 19);
-    ctx.lineTo(104 + i * 10, y0 + 28);
+    ctx.moveTo(93 + i * 8, y0 + 28);
+    ctx.lineTo(97 + i * 8, y0 + 20);
+    ctx.lineTo(101 + i * 8, y0 + 28);
     ctx.closePath();
     ctx.fill();
   }
@@ -74,11 +75,14 @@ export function drawHud(ctx, game, audio = {}) {
   text(ctx, String(game.score).padStart(8, '0'), 252, y0 + 18, COL.hudBright);
 
   // --- hull progress, with the turnaround baked in
-  text(ctx, game.returning ? 'RETURN RUN' : 'OUTBOUND', 318, y0 + 6, game.returning ? COL.warmHi : COL.hudText);
+  const spec = game.level.spec;
+  text(ctx, (game.returning ? '< ' : '> ') + spec.name
+    + '  ' + (game.levelIndex + 1) + '/' + game.specs.length,
+    318, y0 + 6, game.returning ? COL.warmHi : COL.cool);
   const bx = 318, bw = VIEW_W - bx - 10;
   ctx.fillStyle = '#1a212b';
   ctx.fillRect(bx, y0 + 20, bw, 7);
-  const prog = clamp(p.x / LEVEL_LEN, 0, 1);
+  const prog = clamp(p.x / game.level.length, 0, 1);
   ctx.fillStyle = game.returning ? '#3a2d1a' : '#16242b';
   ctx.fillRect(bx, y0 + 20, Math.round(bw * prog), 7);
   ctx.fillStyle = game.returning ? COL.warmHi : COL.cool;
@@ -153,6 +157,9 @@ function drawBoard(ctx, x, y, title, rows = 8) {
   });
 }
 
+// The hull just cleared, which is one behind the index after advancing.
+const spec0 = (game) => game.specs[game.levelIndex];
+
 function drawScreen(ctx, game) {
   ctx.fillStyle = 'rgba(4,6,10,0.80)';
   ctx.fillRect(0, 0, VIEW_W, FIELD_H);
@@ -168,15 +175,18 @@ function drawScreen(ctx, game) {
 
     const mod = activeMod();
     if (mod) {
-      text(ctx, 'MOD: ' + mod.name.toUpperCase() + ' BY ' + mod.author.toUpperCase(), cx, 92, COL.warmHi, FONT, 'center');
+      text(ctx, 'MOD: ' + mod.name.toUpperCase() + ' BY ' + mod.author.toUpperCase(), cx, 78, COL.warmHi, FONT, 'center');
     }
 
-    text(ctx, 'ARROWS / WASD  THRUST     Z / SPACE  FIRE     M  MUTE', cx, 112, COL.hudText, FONT, 'center');
+    text(ctx, LEVELS.map((l) => l.name).join('  ·  '), cx, 92, COL.cool, FONT, 'center');
+    text(ctx, 'ARROWS / WASD  THRUST    Z / SPACE  FIRE    M  MUTE    T  TUNE', cx, 112, COL.hudText, FONT, 'center');
     text(ctx, 'REVERSE THRUST FLIPS THE SHIP — THE HULL SCROLLS BOTH WAYS', cx, 126, COL.hudText, FONT, 'center');
 
     if (net.online && net.player) {
-      text(ctx, 'PILOT ' + net.player.name.toUpperCase() + '   [N] RENAME', cx, 148, COL.cool, FONT, 'center');
+      text(ctx, 'PILOT ' + net.player.name.toUpperCase() + '   [N] RENAME', cx, 146, COL.cool, FONT, 'center');
     }
+    text(ctx, 'TUNE ' + tuneName() + '   BEST ' + String(game.best).padStart(8, '0'),
+      cx, 158, COL.hudLine, FONT, 'center');
 
     ctx.globalAlpha = pulse;
     text(ctx, 'PRESS ENTER TO LAUNCH', cx, 168, COL.warmHi, FONT, 'center');
@@ -186,21 +196,56 @@ function drawScreen(ctx, game) {
     return;
   }
 
+  // Between hulls: show what the ship just gained, then carry on.
+  if (game.state === 'levelclear') {
+    const next = game.specs[game.levelIndex + 1];
+    const p = game.player;
+    text(ctx, spec0(game).name + ' CLEARED', cx, 30, COL.coolHi, FONT_BIG, 'center');
+    text(ctx, 'SCORE ' + String(game.score).padStart(8, '0')
+      + '    TIME ' + game.time.toFixed(1) + 'S', cx, 58, COL.hudText, FONT, 'center');
+
+    text(ctx, 'REFIT COMPLETE', cx, 84, COL.warmHi, FONT, 'center');
+    // The refit is already applied by the time this draws, so these are the
+    // ship's real new numbers; the +N is what this hull just bought you.
+    const rows = [
+      ['HULL PLATING', p.shieldMax + ' SHIELD', '+' + LEVEL_UP.shieldMax],
+      ['THRUSTERS', Math.round((p.accelMul - 1) * 100) + '% ACCEL  +' + p.maxVXBonus + ' TOP SPEED',
+        '+' + Math.round((LEVEL_UP.accelMul - 1) * 100) + '%'],
+      ['CANNON', '+' + p.bulletBonus + ' MUZZLE   ' + p.gunCap + ' MOUNTS', '+' + LEVEL_UP.gunCap],
+      ['ARMOURY', 'GUNSPEED ' + p.gunSpeed + '   GUNBLAZE ' + p.gunBlaze, '+1 EACH'],
+      ['HANGAR', p.lives + ' SHIPS', '+' + LEVEL_UP.lives],
+    ];
+    rows.forEach(([k, v, d], i) => {
+      const ry = 106 + i * 14;
+      text(ctx, k, 128, ry, COL.hudText, FONT);
+      text(ctx, v, 250, ry, COL.coolHi, FONT);
+      text(ctx, d, 462, ry, '#5fe08a', FONT);
+    });
+
+    text(ctx, 'NEXT HULL: ' + next.name, cx, 186, COL.warmHi, FONT, 'center');
+    text(ctx, next.subtitle, cx, 200, COL.hudText, FONT, 'center');
+    text(ctx, 'TUNE ' + (TUNES[next.tune] ? TUNES[next.tune].name : tuneName()), cx, 216, COL.hudLine, FONT, 'center');
+    ctx.globalAlpha = pulse;
+    text(ctx, 'ENTER TO LAUNCH', cx, 240, COL.warmHi, FONT, 'center');
+    ctx.globalAlpha = 1;
+    return;
+  }
+
   if (game.state === 'gameover') {
     text(ctx, 'HULL LOST', cx, 34, COL.danger, FONT_BIG, 'center');
   } else {
-    text(ctx, 'DOCKED', cx, 34, COL.coolHi, FONT_BIG, 'center');
-    text(ctx, 'FULL RUN — OUT AND BACK', cx, 60, COL.cool, FONT, 'center');
+    text(ctx, 'CAMPAIGN COMPLETE', cx, 34, COL.coolHi, FONT_BIG, 'center');
+    text(ctx, 'ALL THREE HULLS — OUT AND BACK', cx, 60, COL.cool, FONT, 'center');
   }
 
-  const infoY = game.state === 'complete' ? 80 : 68;
+  const infoY = game.state === 'victory' ? 80 : 68;
   text(ctx, 'SCORE ' + String(game.score).padStart(8, '0'), cx, infoY, COL.hudBright, FONT, 'center');
   text(ctx, 'TIME ' + game.time.toFixed(1) + 'S    GUNS BROKEN ' + game.turretsKilled
     + '    LOSSES ' + game.deaths, cx, infoY + 14, COL.hudText, FONT, 'center');
   drawRankLine(ctx, cx, infoY + 32);
 
   ctx.globalAlpha = pulse;
-  text(ctx, game.state === 'complete' ? 'ENTER TO RUN IT AGAIN' : 'ENTER TO FLY AGAIN',
+  text(ctx, game.state === 'victory' ? 'ENTER TO RUN IT AGAIN' : 'ENTER TO FLY AGAIN',
     cx, infoY + 52, COL.warmHi, FONT, 'center');
   ctx.globalAlpha = 1;
 

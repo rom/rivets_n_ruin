@@ -1,3 +1,6 @@
 # runtime state
 data/
 *.tmp
+
+# build output
+build/

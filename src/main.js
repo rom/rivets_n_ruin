@@ -1,15 +1,16 @@
 import { VIEW_W, VIEW_H } from './config.js';
 import { initInput, tapped, endFrame } from './input.js';
 import { startLoop } from './loop.js';
-import { makeGame, update } from './game.js';
+import { makeGame, update, syncBest } from './game.js';
 import { drawWorld } from './render.js';
 import { drawHud, drawPaused } from './hud.js';
 import { unlock, toggleMute, isMuted, ready } from './audio.js';
 import { startMusic, stopMusic, musicRunning } from './music.js';
 import { sfxUi } from './sfx.js';
 import { initNet, rename, refreshTop, refreshPresence, netState } from './net.js';
+import { nextTune, tuneName, setTune } from './music.js';
 import { loadModFromURL } from './mods.js';
-import { LEVEL_SEED } from './config.js';
+import { LEVELS } from './config.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false });
@@ -39,12 +40,14 @@ window.addEventListener('pointerdown', wakeAudio, { once: false });
 // before the level is built. The game starts regardless: a mod that will not
 // load, or a backend that is down, costs you the stock hull and nothing more.
 const mod = await loadModFromURL().catch(() => null);
-const game = makeGame(mod ? mod.seed : LEVEL_SEED);
+const game = makeGame(mod ? { seed: mod.seed, name: mod.name.toUpperCase() } : null);
+setTune(LEVELS[0].tune);
 let paused = false;
 
 // Backend comes up behind the game, never in front of it.
 initNet().then((ok) => {
   if (!ok) console.info('backend unreachable — scores stay local');
+  else syncBest(game);   // adopt the account's best if it beats this browser's
 });
 
 // Keep the title screen's board and pilot count fresh while nobody is flying,
@@ -53,7 +56,7 @@ initNet().then((ok) => {
 setInterval(() => {
   if (game.state === 'play' || game.state === 'dying') return;
   if (!netState().online) {
-    initNet();
+    initNet().then((ok) => { if (ok) syncBest(game); });
     return;
   }
   refreshTop(mod ? mod.id : '');
@@ -76,6 +79,11 @@ function promptRename() {
 startLoop(
   (dt) => {
     if (tapped('mute')) { const m = toggleMute(); if (!m) sfxUi(); }
+    if (tapped('tune')) {
+      sfxUi();
+      const i = nextTune();
+      game.toast = { text: 'TUNE  ' + tuneName(), kind: 'gunspeed', t: 1.8 };
+    }
     if (tapped('rename') && game.state === 'title' && netState().online) {
       sfxUi();
       promptRename();

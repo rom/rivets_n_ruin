@@ -15,6 +15,7 @@ const S = {
   checked: false,
   player: null,        // { id, name, token }
   top: [],
+  best: 0,
   flying: [],
   stats: null,
   rank: null,
@@ -85,6 +86,11 @@ function suggestName() {
   return `${pick(a)}${pick(b)}${Math.floor(Math.random() * 90 + 10)}`;
 }
 
+// The server's record of your best, pulled on connect. This is what makes
+// a high score survive a cleared localStorage or a different machine: the
+// pilot identity owns it, the browser only caches it.
+export const serverBest = () => S.best;
+
 export async function initNet() {
   S.checked = true;
   const health = await call('/api/health');
@@ -100,6 +106,8 @@ export async function initNet() {
     if (!me) {
       const created = await register(suggestName());
       if (!created) return false;
+    } else if (me.player) {
+      S.best = me.player.best || 0;
     }
   }
   await Promise.all([refreshTop(), refreshPresence(), refreshStats()]);
@@ -143,14 +151,15 @@ export async function refreshStats() {
   return S.stats;
 }
 
-export async function submitRun({ modId = '', points, timeSec, turrets, deaths, completed }) {
+export async function submitRun({ modId = '', points, timeSec, turrets, deaths, completed, levels = 1 }) {
   if (!S.player) return null;
   const data = await call('/api/scores', {
     method: 'POST', auth: true,
-    body: { modId, points, timeSec, turrets, deaths, completed },
+    body: { modId, points, timeSec, turrets, deaths, completed, levels },
   });
   if (data) {
     S.rank = data.rank || null;
+    if (data.score && data.score.points > S.best) S.best = data.score.points;
     refreshTop(modId);   // deliberately not awaited
     refreshStats();      // so "N of M" reports the real player count
   }

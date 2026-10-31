@@ -141,18 +141,18 @@ function collect(game, p) {
       }
       break;
     case 'gunspeed':
-      if (pl.gunSpeed < PICKUP.gunLevels) {
+      if (pl.gunSpeed < pl.gunCap) {
         pl.gunSpeed++;
-        label = 'GUNSPEED  ' + pl.gunSpeed + '/' + PICKUP.gunLevels;
+        label = 'GUNSPEED  ' + pl.gunSpeed + '/' + pl.gunCap;
       } else {
         game.score += 300;
         label = 'GUNSPEED  MAX';
       }
       break;
     case 'gunblaze':
-      if (pl.gunBlaze < PICKUP.gunLevels) {
+      if (pl.gunBlaze < pl.gunCap) {
         pl.gunBlaze++;
-        label = 'GUNBLAZE  ' + pl.gunBlaze + '/' + PICKUP.gunLevels;
+        label = 'GUNBLAZE  ' + pl.gunBlaze + '/' + pl.gunCap;
       } else {
         game.score += 300;
         label = 'GUNBLAZE  MAX';

@@ -12,6 +12,8 @@ const MAP = {
   KeyR: 'restart',
   KeyM: 'mute',
   KeyN: 'rename',
+  KeyT: 'tune',
+  BracketRight: 'tune',
 };
 
 export function initInput(target = window) {

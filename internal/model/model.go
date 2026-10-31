@@ -31,6 +31,7 @@ type Score struct {
 	Turrets   int       `json:"turrets"`
 	Deaths    int       `json:"deaths"`
 	Completed bool      `json:"completed"`
+	Levels    int       `json:"levels"` // hulls reached this run
 	Created   time.Time `json:"created"`
 }
 

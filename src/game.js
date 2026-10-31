@@ -1,5 +1,6 @@
 import {
-  SHIP, TURRET, INTERCEPTOR, LEVEL_LEN, LEVEL_SEED, APRON, VIEW_W, clamp,
+  SHIP, INTERCEPTOR, LEVELS, LEVEL_UP, PICKUP, APRON, VIEW_W,
+  FIELD_TOP, FIELD_BOT, clamp,
 } from './config.js';
 import { buildLevel, obstaclesNear } from './level.js';
 import { makeCamera, updateCamera, kick } from './camera.js';
@@ -15,39 +16,53 @@ import {
   sfxPickup, sfxPlayerHit, sfxHullAbsorb, sfxDeath, sfxRespawn,
   sfxTurnaround, sfxComplete, sfxGameOver, sfxUi,
 } from './sfx.js';
-import { setIntensity } from './music.js';
-import { submitRun, heartbeat } from './net.js';
+import { setIntensity, setTune } from './music.js';
+import { submitRun, heartbeat, serverBest } from './net.js';
 import { activeModId } from './mods.js';
 
-export function makeGame(seed = LEVEL_SEED) {
-  const level = buildLevel(seed);
+export function makeGame(modSpec = null) {
+  // A mod overrides the first hull's seed; the rest of the campaign is
+  // unchanged, so a mod is a variant opening rather than a whole new game.
+  const specs = modSpec
+    ? [{ ...LEVELS[0], ...modSpec }, ...LEVELS.slice(1)]
+    : LEVELS;
+  const level = buildLevel(specs[0]);
   const game = {
     level,
     cam: makeCamera(),
     player: makePlayer(),
-    state: 'title',        // title | play | dying | gameover | complete
+    state: 'title',        // title | play | dying | levelclear | gameover | victory
     stateT: 0,
+    specs,
+    levelIndex: 0,
     score: 0,
     turretsKilled: 0,
     deaths: 0,
     submitted: false,
     spawnCd: 1.2,
     flash: 0,
-    time: 0,
+    time: 0,        // clock for the current hull, shown on the clear screen
+    runTime: 0,     // clock for the whole campaign, which is what gets submitted
     toast: null,
     returning: false,      // outbound leg done, now fly the hull back
     banner: null,
     best: Number(localStorage.getItem('rnr.best') || 0),
     onPickup: (kind) => sfxPickup(kind),
   };
-  game.cam.x = clamp(game.player.x - VIEW_W / 2 + SHIP.w, 0, LEVEL_LEN - VIEW_W);
+  game.cam.x = clamp(game.player.x - VIEW_W / 2 + SHIP.w, 0, level.length - VIEW_W);
   return game;
 }
 
+// Full restart: back to the first hull with a factory-standard ship.
 function reset(game) {
+  if (game.levelIndex !== 0) {
+    game.levelIndex = 0;
+    game.level = buildLevel(game.specs[0]);
+  }
+  setTune(game.specs[0].tune);
   for (const t of game.level.turrets) {
     t.dead = false;
-    t.hp = TURRET.hp;
+    t.hp = game.level.spec.turretHp;
     t.cd = Math.random() * 0.8;
     t.burstLeft = 0;
     t.angle = t.dir * Math.PI / 2;
@@ -61,6 +76,7 @@ function reset(game) {
   game.returning = false;
   game.flash = 0;
   game.time = 0;
+  game.runTime = 0;
   game.banner = null;
   game.toast = null;
   resetEnemies();
@@ -68,7 +84,53 @@ function reset(game) {
   playerShots.clear();
   enemyShots.clear();
   particles.clear();
-  game.cam.x = clamp(game.player.x - VIEW_W / 2 + SHIP.w, 0, LEVEL_LEN - VIEW_W);
+  game.cam.x = clamp(game.player.x - VIEW_W / 2 + SHIP.w, 0, game.level.length - VIEW_W);
+}
+
+// Clearing a hull carries the pilot forward: same ship, upgraded, same score
+// and lives. Only the hull is new. This is the run's power curve meeting its
+// difficulty curve.
+function applyRefit(game) {
+  const p = game.player;
+
+  p.shieldMax += LEVEL_UP.shieldMax;
+  p.shield = p.shieldMax;
+  p.accelMul *= LEVEL_UP.accelMul;
+  p.maxVXBonus += LEVEL_UP.maxVXAdd;
+  p.maxVYBonus += LEVEL_UP.maxVYAdd;
+  p.bulletBonus += LEVEL_UP.bulletSpeedAdd;
+  p.gunCap = Math.min(PICKUP.speedScale.length - 1, p.gunCap + LEVEL_UP.gunCap);
+  p.gunSpeed = Math.min(p.gunCap, p.gunSpeed + LEVEL_UP.gunSpeed);
+  p.gunBlaze = Math.min(p.gunCap, p.gunBlaze + LEVEL_UP.gunBlaze);
+  p.lives = Math.min(PICKUP.maxLives, p.lives + LEVEL_UP.lives);
+}
+
+// Then ENTER loads the hull itself.
+function loadNextHull(game) {
+  const p = game.player;
+  game.levelIndex++;
+  game.level = buildLevel(game.specs[game.levelIndex]);
+  setTune(game.specs[game.levelIndex].tune);
+
+  p.x = 180;
+  p.y = (FIELD_TOP + FIELD_BOT) / 2;
+  p.vx = 0; p.vy = 0;
+  p.facing = 1;
+  p.flip = 0;
+  p.invuln = SHIP.invuln;
+  p.alive = true;
+
+  game.returning = false;
+  game.submitted = false;
+  game.time = 0;          // per-hull clock restarts; runTime keeps going
+  game.spawnCd = 1.2;
+  game.toast = null;
+  resetEnemies();
+  resetPickups();
+  playerShots.clear();
+  enemyShots.clear();
+  particles.clear();
+  game.cam.x = clamp(p.x - VIEW_W / 2 + SHIP.w, 0, game.level.length - VIEW_W);
 }
 
 function banner(game, text, sub = '', life = 2.4) {
@@ -83,10 +145,11 @@ function reportRun(game) {
   submitRun({
     modId: activeModId(),
     points: game.score,
-    timeSec: Number(game.time.toFixed(2)),
+    timeSec: Number(game.runTime.toFixed(2)),
+    levels: game.levelIndex + 1,
     turrets: game.turretsKilled,
     deaths: game.deaths,
-    completed: game.state === 'complete',
+    completed: game.state === 'victory',   // only a full campaign counts as completed
   });
 }
 
@@ -95,6 +158,7 @@ function reportRun(game) {
 // about to give out.
 function scoreIntensity(game) {
   if (game.state !== 'play' && game.state !== 'dying') return 0;
+  if (game.levelIndex > 0 && game.returning) return 3;
   if (game.returning || game.player.shield < 30) return 3;
   return 2;
 }
@@ -112,7 +176,22 @@ export function update(game, dt) {
     if (game.toast.t <= 0) game.toast = null;
   }
 
-  if (game.state === 'title' || game.state === 'gameover' || game.state === 'complete') {
+  // Between hulls: ENTER carries the upgraded ship onto the next one.
+  if (game.state === 'levelclear') {
+    if (tapped('start') || tapped('fire')) {
+      sfxUi();
+      loadNextHull(game);
+      game.state = 'play';
+      game.stateT = 0;
+      const spec = game.specs[game.levelIndex];
+      banner(game, spec.name, spec.subtitle, 3.0);
+    }
+    updateParticles(dt);
+    endFrame();
+    return;
+  }
+
+  if (game.state === 'title' || game.state === 'gameover' || game.state === 'victory') {
     if (tapped('start') || tapped('fire')) {
       sfxUi();
       reset(game);
@@ -137,11 +216,8 @@ export function update(game, dt) {
         game.state = 'gameover';
         game.stateT = 0;
         sfxGameOver();
+        recordBest(game);
         reportRun(game);
-        if (game.score > game.best) {
-          game.best = game.score;
-          localStorage.setItem('rnr.best', String(game.score));
-        }
       } else {
         respawn(game.player, game);
         sfxRespawn();
@@ -155,6 +231,7 @@ export function update(game, dt) {
 
   // ---------------------------------------------------------------- playing
   game.time += dt;
+  game.runTime += dt;
   const p = game.player;
 
   updatePlayer(p, game, dt);
@@ -168,28 +245,54 @@ export function update(game, dt) {
   updateCamera(game.cam, p, dt);
 
   // two-way objective: the far end turns you around, the near end finishes you
-  if (!game.returning && p.x > LEVEL_LEN - APRON * 0.55) {
+  if (!game.returning && p.x > game.level.length - APRON * 0.55) {
     game.returning = true;
     banner(game, 'TURN AND BURN', 'RUN THE HULL BACK TO THE DOCK', 2.8);
     game.score += 2500;
     sfxTurnaround();
   } else if (game.returning && p.x < APRON * 0.55) {
-    game.state = 'complete';
+    // Award the bonus BEFORE anything reads the score. This used to report
+    // the run to the backend first, so every submitted completion was short
+    // by its own completion bonus.
+    game.score += 5000 + Math.max(0, Math.round((260 - game.time) * 25));
     game.stateT = 0;
     sfxComplete();
-    reportRun(game);
-    game.score += 5000 + Math.max(0, Math.round((260 - game.time) * 25));
-    if (game.score > game.best) {
-      game.best = game.score;
-      localStorage.setItem('rnr.best', String(game.score));
+
+    if (game.levelIndex < game.specs.length - 1) {
+      game.state = 'levelclear';     // more hull to fly; the run continues
+      game.banner = null;            // don't let TURN AND BURN sit over the panel
+      applyRefit(game);              // so the refit panel shows real numbers
+    } else {
+      game.state = 'victory';        // campaign over: now it counts
+      recordBest(game);
+      reportRun(game);
     }
   }
 
   // Tell the backend we are out here. Self-throttling to one beat every 5s.
-  heartbeat(activeModId(), p.x / LEVEL_LEN, game.score);
+  heartbeat(activeModId(), (game.levelIndex + p.x / game.level.length) / game.specs.length, game.score);
 
   if (p.shield <= 0 && p.alive) die(game);
   endFrame();
+}
+
+// The best score lives in two places on purpose: the backend owns it (so it
+// follows the pilot across browsers and survives a cleared localStorage) and
+// localStorage caches it (so it still shows when the backend is unreachable).
+// Whichever is higher wins.
+export function syncBest(game) {
+  const remote = serverBest();
+  if (remote > game.best) {
+    game.best = remote;
+    try { localStorage.setItem('rnr.best', String(remote)); } catch { /* private mode */ }
+  }
+}
+
+function recordBest(game) {
+  if (game.score > game.best) {
+    game.best = game.score;
+    try { localStorage.setItem('rnr.best', String(game.score)); } catch { /* private mode */ }
+  }
 }
 
 function die(game) {

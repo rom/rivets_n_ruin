@@ -370,10 +370,13 @@ func TestRateLimiterRejectsAFlood(t *testing.T) {
 
 // Guard the physics constant the validator depends on.
 func TestValidatorConstantsTrackTheGame(t *testing.T) {
-	if validate.MaxVX != 310 {
-		t.Errorf("validate.MaxVX is %v but src/config.js SHIP.maxVX is 310 — update both together", validate.MaxVX)
+	if validate.BaseMaxVX != 310 {
+		t.Errorf("validate.BaseMaxVX is %v but src/config.js SHIP.maxVX is 310 — update both together", validate.BaseMaxVX)
 	}
-	if validate.LevelLen != 12000 {
-		t.Errorf("validate.LevelLen is %v but src/config.js LEVEL_LEN is 12000", validate.LevelLen)
+	if validate.HullLengths[0] != 12000 {
+		t.Errorf("validate.HullLengths[0] is %v but src/config.js LEVELS[0].length is 12000", validate.HullLengths[0])
+	}
+	if validate.NumLevels() != 3 {
+		t.Errorf("validate has %d hulls but src/config.js LEVELS has 3", validate.NumLevels())
 	}
 }

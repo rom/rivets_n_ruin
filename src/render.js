@@ -1,5 +1,5 @@
 import {
-  VIEW_W, VIEW_H, FIELD_H, FIELD_TOP, FIELD_BOT, LEVEL_LEN, SHIP, COL, clamp,
+  VIEW_W, VIEW_H, FIELD_H, FIELD_TOP, FIELD_BOT, SHIP, COL, clamp,
 } from './config.js';
 import { interceptors } from './enemies.js';
 import { playerShots, enemyShots } from './projectiles.js';
@@ -39,7 +39,7 @@ export function drawWorld(ctx, game) {
   const sh = game.cam.shake;
   const ox = sh > 0 ? (Math.random() - 0.5) * sh : 0;
   const oy = sh > 0 ? (Math.random() - 0.5) * sh : 0;
-  const camX = clamp(Math.round(game.cam.x + ox), 0, LEVEL_LEN - VIEW_W);
+  const camX = clamp(Math.round(game.cam.x + ox), 0, game.level.length - VIEW_W);
   const camY = Math.round(oy);
 
   ctx.save();

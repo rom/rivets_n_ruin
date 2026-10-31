@@ -9,9 +9,74 @@ export const RIM = 16;                   // structural girder along each hull ed
 export const FIELD_TOP = RIM;            // 16
 export const FIELD_BOT = FIELD_H - RIM;  // 308
 
-export const LEVEL_LEN = 12000;          // length of the dreadnought's dorsal hull, px
-export const LEVEL_SEED = 0x5ca1ab1e;
 export const APRON = 560;                // clear launch/landing zone at each end
+
+// Three hulls, named for metals — Uridium's stage-naming ritual. Each is
+// longer, denser and better defended than the last. Everything that scales
+// difficulty lives here, so the curve can be read in one place.
+export const LEVELS = [
+  {
+    name: 'ARGENTUM',
+    subtitle: 'SILVER CLASS — PATROL HULL',
+    seed: 0x5ca1ab1e,
+    length: 12000,
+    gapScale: 1.0,        // multiplier on the space between obstacle groups
+    clearChance: 0.13,    // how often a stretch is left empty
+    turretHp: 3,
+    turretCooldown: 1.75,
+    turretRange: 300,
+    interceptorSpeed: 172,
+    interceptorSpawn: 1.5,
+    interceptorHp: 2,
+    tune: 0,
+  },
+  {
+    name: 'OSMIUM',
+    subtitle: 'DENSEST ALLOY AFLOAT — LINE HULL',
+    seed: 0x051f1ed,
+    length: 14500,
+    gapScale: 0.82,
+    clearChance: 0.08,
+    turretHp: 4,
+    turretCooldown: 1.45,
+    turretRange: 330,
+    interceptorSpeed: 196,
+    interceptorSpawn: 1.2,
+    interceptorHp: 3,
+    tune: 1,
+  },
+  {
+    name: 'TANTALUM',
+    subtitle: 'CORROSION PROOF — FLAGSHIP HULL',
+    seed: 0x7a07a1,
+    length: 17000,
+    gapScale: 0.68,
+    clearChance: 0.05,
+    turretHp: 5,
+    turretCooldown: 1.2,
+    turretRange: 360,
+    interceptorSpeed: 220,
+    interceptorSpawn: 0.98,
+    interceptorHp: 3,
+    tune: 2,
+  },
+];
+
+// Clearing a hull upgrades the ship permanently for the rest of the run.
+// These stack, so arriving at TANTALUM you are flying a markedly different
+// craft from the one that launched at ARGENTUM — which is the point: the
+// difficulty curve is met with a power curve, not just better flying.
+export const LEVEL_UP = {
+  shieldMax: 45,
+  accelMul: 1.09,
+  maxVXAdd: 24,
+  maxVYAdd: 18,
+  bulletSpeedAdd: 50,
+  gunSpeed: 1,     // free levels granted
+  gunBlaze: 1,
+  gunCap: 1,       // and the ceiling rises with them
+  lives: 1,
+};
 
 export const DT = 1 / 120;               // fixed physics step
 export const MAX_FRAME = 0.25;
@@ -85,11 +150,20 @@ export const PICKUP = {
   shieldCeiling: 220,    // and stops here
   maxLives: 6,
 
-  gunLevels: 3,          // gunspeed and gunblaze each cap here
-  // gunspeed: fire interval multiplier per level
-  speedScale: [1.0, 0.76, 0.58, 0.44],
+  gunLevels: 3,          // base cap; LEVEL_UP.gunCap raises it each hull
+  // gunspeed: fire interval multiplier per level. Sized past the reachable
+  // maximum (3 base + 2 from clearing hulls) so an index can never fall off.
+  speedScale: [1.0, 0.76, 0.58, 0.44, 0.34, 0.27, 0.22],
   // gunblaze: extra barrel angles (radians, mirrored) per level
-  blazeAngles: [[], [0.13], [0.13, 0.26], [0.13, 0.26, 0.4]],
+  blazeAngles: [
+    [],
+    [0.13],
+    [0.13, 0.26],
+    [0.13, 0.26, 0.4],
+    [0.10, 0.20, 0.31, 0.43],
+    [0.09, 0.18, 0.28, 0.38, 0.50],
+    [0.08, 0.16, 0.25, 0.34, 0.44, 0.56],
+  ],
 };
 
 export const CAM = {
