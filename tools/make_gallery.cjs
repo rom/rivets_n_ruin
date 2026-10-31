@@ -137,6 +137,26 @@ const OUT = path.join(__dirname, '..', 'docs');
   await page.waitForTimeout(1600);
   await shot('scene-refit.png');
 
+  // --- the armourer and the settings screen
+  await page.evaluate(() => {
+    const g = window.game;
+    g.coins = 4200; g.state = 'levelclear'; g.stateT = 2; g.levelIndex = 2;
+  });
+  await page.waitForTimeout(300);
+  await page.keyboard.press('KeyE');
+  await page.waitForTimeout(400);
+  await shot('shop.png');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+
+  await page.evaluate(() => { window.game.state = 'title'; window.game.stateT = 0.5; });
+  await page.waitForTimeout(200);
+  await page.keyboard.press('KeyO');
+  await page.waitForTimeout(400);
+  await shot('settings.png');
+  await page.keyboard.press('KeyO');
+  await page.waitForTimeout(200);
+
   // --- the title, with the hull selector
   await page.evaluate(() => {
     localStorage.setItem('rnr.unlocked', '5');

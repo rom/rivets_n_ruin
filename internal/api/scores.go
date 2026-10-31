@@ -59,6 +59,22 @@ func (s *Server) submitScore(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"score": sc, "rank": rank})
 }
 
+// topRuns lists the best individual runs, without folding to one per
+// player. Same query parameters as /top.
+func (s *Server) topRuns(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	top, err := s.store.TopRuns(store.TopQuery{
+		ModID:  q.Get("mod"),
+		Window: model.ParseWindow(q.Get("window")),
+		Limit:  intParam(r, "limit", 10),
+	})
+	if err != nil {
+		writeErr(w, statusFor(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"top": top})
+}
+
 func (s *Server) topScores(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	top, err := s.store.Top(store.TopQuery{

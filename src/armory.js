@@ -32,7 +32,7 @@ export function fireSecondary(game) {
   if (!o) return false;
 
   p.ammo[kind]--;
-  p.secondaryCd = spec.cooldown;
+  p.secondaryCd = spec.cooldown * (p.reloadMul || 1);
   o.kind = kind;
   o.x = p.x;
   o.y = p.y;

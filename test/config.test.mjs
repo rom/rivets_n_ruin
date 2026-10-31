@@ -7,16 +7,34 @@ const HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
 // A bad colour string is valid JavaScript and canvas silently ignores it, so
 // nothing else in the toolchain can catch a typo'd hex value. This can.
+// Slots that name a routine rather than a colour.
+const NON_COLOUR = new Set(['name', 'surface', 'shape']);
+
 test('every theme colour is a valid hex string', () => {
   for (const [name, theme] of Object.entries(THEMES)) {
     for (const [slot, value] of Object.entries(theme)) {
-      if (slot === 'name') continue;
+      if (NON_COLOUR.has(slot)) continue;
       const values = Array.isArray(value) ? value : [value];
       for (const v of values) {
         assert.match(v, HEX, `THEMES.${name}.${slot} = ${JSON.stringify(v)}`);
       }
     }
   }
+});
+
+test('every theme names a surface and an obstacle shape', () => {
+  const surfaces = new Set();
+  const shapes = new Set();
+  for (const [name, theme] of Object.entries(THEMES)) {
+    assert.ok(theme.surface, `THEMES.${name} has no surface`);
+    assert.ok(theme.shape, `THEMES.${name} has no shape`);
+    surfaces.add(theme.surface);
+    shapes.add(theme.shape);
+  }
+  // The whole point of the rework is that hulls stop looking alike, so a
+  // duplicate surface is a regression rather than a saving.
+  assert.equal(surfaces.size, Object.keys(THEMES).length, 'two themes share a surface');
+  assert.equal(shapes.size, Object.keys(THEMES).length, 'two themes share an obstacle shape');
 });
 
 test('every theme defines every slot the renderer reads', () => {

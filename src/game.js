@@ -14,6 +14,7 @@ import { updateParticles, explode, sparks, particles } from './particles.js';
 import { updatePickups, resetPickups, pickups } from './pickups.js';
 import { updateFoes, resetFoes, foes, hitFoe, spawnFoeForLevel, SPEC as FOE_SPEC } from './foes.js';
 import { updateOrdnance, resetOrdnance, ordnance } from './armory.js';
+import { resetShop, applyMods } from './shop.js';
 import { tapped, endFrame } from './input.js';
 import {
   sfxPickup, sfxPlayerHit, sfxHullAbsorb, sfxDeath, sfxRespawn,
@@ -43,6 +44,8 @@ export function makeGame(modSpec = null) {
     deaths: 0,
     coins: 0,
     coffins: 0,
+    mods: {},
+    bought: {},
     submitted: false,
     spawnCd: 1.2,
     foeCd: 3.0,
@@ -93,11 +96,13 @@ function reset(game) {
   }
   game.player = makePlayer();
   for (let i = 0; i < at; i++) applyRefit(game);   // the ship you would have
+  applyMods(game);
   game.score = 0;
   game.turretsKilled = 0;
   game.deaths = 0;
   game.coins = 0;
   game.coffins = 0;
+  resetShop(game);
   game.submitted = false;
   game.spawnCd = 1.2;
   game.foeCd = 3.0;

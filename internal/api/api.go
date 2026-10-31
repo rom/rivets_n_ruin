@@ -49,6 +49,7 @@ func (s *Server) Routes() http.Handler {
 
 	mux.HandleFunc("POST /api/scores", s.submitScore)
 	mux.HandleFunc("GET /api/scores/top", s.topScores)
+	mux.HandleFunc("GET /api/scores/runs", s.topRuns)
 
 	mux.HandleFunc("GET /api/mods", s.listMods)
 	mux.HandleFunc("POST /api/mods", s.createMod)

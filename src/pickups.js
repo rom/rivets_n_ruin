@@ -137,8 +137,9 @@ export function updatePickups(game, dt) {
     const dx = pl.x - p.x;
     const dy = pl.y - p.y;
     const d = Math.hypot(dx, dy);
-    if (d < PICKUP.magnet && d > 0.01) {
-      const pull = (1 - d / PICKUP.magnet) * PICKUP.magnetPull * dt;
+    const magnet = PICKUP.magnet * (pl.magnetMul || 1);
+    if (d < magnet && d > 0.01) {
+      const pull = (1 - d / magnet) * PICKUP.magnetPull * dt;
       p.x += (dx / d) * pull;
       p.baseY += (dy / d) * pull;
     }
@@ -162,8 +163,8 @@ function collect(game, p) {
 
   switch (p.kind) {
     case 'coin':
-      game.score += PICKUP.coinValue;
-      game.coins = (game.coins || 0) + 1;
+      game.score += PICKUP.coinValue * (pl.coinMul || 1);
+      game.coins = (game.coins || 0) + (pl.coinMul || 1);
       return;                       // no toast: coins are constant background
     case 'coffin':
       game.score += PICKUP.coffinValue;

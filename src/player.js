@@ -180,7 +180,7 @@ function impact(p, game, speed, hx, hy, nx, ny) {
   sfxScrape(speed);
   if (p.scrapeCd > 0 || p.invuln > 0) return;
   p.scrapeCd = SHIP.scrapeCd;
-  const dmg = SHIP.grindDamage + speed * SHIP.impactDamage;
+  const dmg = (SHIP.grindDamage + speed * SHIP.impactDamage) * (p.scrapeMul || 1);
   p.shield -= dmg;
   kick(game.cam, 2.5 + speed * 0.02);
   game.flash = Math.max(game.flash, Math.min(0.5, 0.12 + speed * 0.0012));
@@ -191,8 +191,11 @@ export function respawn(p, game) {
   p.vx = 0; p.vy = 0;
   // Losing a ship costs every weapon addon picked up since the last refit.
   // The guns go back to whatever the ship was built with.
-  p.gunSpeed = p.gunSpeedBase;
-  p.gunBlaze = p.gunBlazeBase;
+  // A Reclaimer mod buys back one level of each, which is the difference
+  // between a death being a setback and being the end of the run.
+  const keep = p.keepGunOnDeath || 0;
+  p.gunSpeed = Math.max(p.gunSpeedBase, Math.min(p.gunSpeed, p.gunSpeedBase + keep));
+  p.gunBlaze = Math.max(p.gunBlazeBase, Math.min(p.gunBlaze, p.gunBlazeBase + keep));
   p.ammo = { bomb: 0, grenade: 0, missile: 0 };
   p.shield = p.shieldMax;
   p.invuln = SHIP.invuln;

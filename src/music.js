@@ -31,6 +31,7 @@ export const TUNES = [
     kick: [1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0],
     snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1],
     arp: [0, 3, 7, 10, 7, 3],
+    chord: [0, 3, 7],           // minor
     arpEvery: 2,
     bassType: 'sawtooth',
     leadType: 'square',
@@ -47,6 +48,7 @@ export const TUNES = [
     kick: [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0],
     snare: [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
     arp: [0, 7, 12, 7, 3, 7],
+    chord: [0, 3, 7, 10],       // minor seventh, heavier
     arpEvery: 4,                        // sparser: more space between hits
     bassType: 'square',
     leadType: 'triangle',
@@ -63,6 +65,7 @@ export const TUNES = [
     kick: [1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1],
     snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0],
     arp: [0, 3, 7, 12, 10, 7, 3, 0],
+    chord: [0, 3, 7, 9],        // dorian sixth, brighter
     arpEvery: 1,                        // relentless
     bassType: 'sawtooth',
     leadType: 'square',
@@ -79,6 +82,7 @@ export const TUNES = [
     kick: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     snare: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
     arp: [0, 7, 12, 15, 12, 7],
+    chord: [0, 7, 12],          // open fifth, sparse
     arpEvery: 4,
     bassType: 'triangle',
     leadType: 'triangle',
@@ -168,146 +172,240 @@ function playStep(s, t) {
   const pos = s % 16;
   const chord = T.prog[bar];
   const I = M.intensity;
+  const step = stepDur();
 
   // ---- drums
   if (I >= 1) {
     if (T.kick[pos]) kick(t, bus);
     if (T.snare[pos]) snare(t, bus);
     const hatEvery = I >= 3 ? 1 : 2;
-    if (pos % hatEvery === 0) hat(t, bus, pos % 4 === 0 ? 0.055 : 0.032);
+    if (pos % hatEvery === 0) hat(t, bus, pos % 4 === 0 ? 0.08 : 0.045);
   }
 
   // ---- bass
   if (I >= 1 && T.bass[pos]) {
-    // walk up the mode on the last bar for a turnaround figure
     const walk = bar === 3 && pos >= 12 ? T.scale[(pos - 12) % T.scale.length] : 0;
-    bass(note(chord + walk), t, bus, I >= 2 ? 0.3 : 0.22, T.bassType);
+    bass(note(chord + walk), t, bus, I >= 2 ? 0.34 : 0.24);
   }
 
-  // ---- pad: the harmonic bed, present from the title screen on
-  if (pos === 0) pad(note(chord + 12), t, bus, I === 0 ? 0.1 : 0.062, T.padCut);
+  // ---- harmony, as a hard arpeggio rather than a held chord. This is the
+  // sound the whole rewrite is for: three notes cycling at 50Hz, which the
+  // ear hears as a chord with a trill inside it.
+  if (I >= 1 && pos % 4 === 0) {
+    const voicing = (T.chord || [0, 3, 7]).map((iv) => chord + iv + 12);
+    sidChord(voicing, t, step * 4 * 0.92, I >= 2 ? 0.075 : 0.05, bus, {
+      duty: dutyAt(s), cutFrom: 3200, cutTo: 1100, q: 7,
+    });
+  }
 
-  // ---- arpeggio lead
+  // ---- lead
   if (I >= 2 && pos % T.arpEvery === T.arpEvery - 1) {
     const d = T.arp[((s / T.arpEvery) | 0) % T.arp.length];
-    arpNote(note(chord + d + 24), t, bus, 0.072, T.leadType);
-    if (I >= 3) arpNote(note(chord + d + 36), t, bus, 0.03, 'triangle');
+    arpNote(note(chord + d + 24), t, bus, 0.085, null, s);
+    if (I >= 3) arpNote(note(chord + d + 36), t, bus, 0.035, null, s + 7);
   }
 
-  // ---- title-screen sparkle, in place of drums
-  if (I === 0 && pos % 8 === 4) {
-    arpNote(note(chord + T.scale[(bar * 2) % T.scale.length] + 24), t, bus, 0.05, 'triangle');
+  // ---- title screen: the pad and an occasional figure, no drums
+  if (I === 0) {
+    if (pos === 0) pad(note(chord + 12), t, bus, 0.085, T.padCut);
+    if (pos % 8 === 4) {
+      sidChord((T.chord || [0, 3, 7]).map((iv) => chord + iv + 24),
+        t, step * 3, 0.05, bus, { duty: 0.35, cutFrom: 2600, cutTo: 1400, q: 4 });
+    }
   }
 }
 
 // ----------------------------------------------------------------- voices
+//
+// Written to sound like a SID rather than like a general-purpose synth. The
+// things that actually make a 6581 recognisable, in order of importance:
+//
+//  1. Pulse waves with a moving duty cycle. Not saw, not square — a pulse
+//     whose width sweeps. This is the single most identifying feature.
+//  2. Chords played as very fast arpeggios. The chip had three voices, so a
+//     chord was faked by cycling its notes every frame at 50Hz. It sounds
+//     like a chord and a trill at once, and nothing else sounds like it.
+//  3. Hard, short envelopes with an audible click on the attack.
+//  4. A resonant low-pass that is swept per note, not set and left.
+//  5. Drums built from the same three voices: noise plus a pitch-swept tone.
 
+const PULSE_CACHE = new Map();
+
+// A pulse wave of the given duty, as a Fourier series. OscillatorNode has no
+// pulse type and no PWM, so the duty is baked into a PeriodicWave and the
+// wave is swapped between notes to make the width move.
+function pulseWave(duty) {
+  const key = Math.round(duty * 100);
+  const hit = PULSE_CACHE.get(key);
+  if (hit) return hit;
+
+  const N = 48;
+  const real = new Float32Array(N);
+  const imag = new Float32Array(N);
+  for (let n = 1; n < N; n++) {
+    // a_n for a pulse of width `duty`
+    imag[n] = (2 / (n * Math.PI)) * Math.sin(n * Math.PI * duty);
+  }
+  const w = ctx().createPeriodicWave(real, imag, { disableNormalization: false });
+  PULSE_CACHE.set(key, w);
+  return w;
+}
+
+// The duty drifts across the phrase, which is what gives a SID lead its
+// restless, slightly seasick quality.
+function dutyAt(step) {
+  return 0.12 + 0.34 * (0.5 + 0.5 * Math.sin(step * 0.19));
+}
+
+// One pulse voice: oscillator -> swept resonant filter -> hard envelope.
+function pulseVoice(f, t, dur, peak, bus, opts = {}) {
+  const c = ctx();
+  const {
+    duty = 0.25, cutFrom = 2600, cutTo = 700, q = 9,
+    vibrato = 0, attack = 0.002, detune = 0,
+  } = opts;
+
+  const o = c.createOscillator();
+  o.setPeriodicWave(pulseWave(duty));
+  o.frequency.value = f;
+  o.detune.value = detune;
+
+  // per-note vibrato, as a SID would do it from its own frame interrupt
+  let lfo = null;
+  if (vibrato) {
+    lfo = c.createOscillator();
+    lfo.frequency.value = 6.2;
+    const amt = c.createGain();
+    amt.gain.value = vibrato;
+    lfo.connect(amt).connect(o.detune);
+    lfo.start(t);
+    lfo.stop(t + dur + 0.05);
+  }
+
+  const bq = c.createBiquadFilter();
+  bq.type = 'lowpass';
+  bq.Q.value = q;
+  bq.frequency.setValueAtTime(cutFrom, t);
+  bq.frequency.exponentialRampToValueAtTime(Math.max(90, cutTo), t + dur);
+
+  // The envelope is deliberately abrupt: a 6581 had no smooth attack and the
+  // click on the front of each note is part of the sound.
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(peak, t + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+
+  o.connect(bq).connect(g).connect(bus);
+  o.start(t);
+  o.stop(t + dur + 0.02);
+}
+
+// A chord, the way the chip did it: the notes of the chord cycled one per
+// frame instead of sounded together. 50Hz is the authentic rate.
+function sidChord(semis, t, dur, peak, bus, opts = {}) {
+  const FRAME = 1 / 50;
+  const steps = Math.max(1, Math.floor(dur / FRAME));
+  for (let i = 0; i < steps; i++) {
+    const semi = semis[i % semis.length];
+    pulseVoice(note(semi), t + i * FRAME, FRAME * 1.25, peak, bus, opts);
+  }
+}
+
+// Bass: a narrow pulse an octave down with a hard filter sweep, which is how
+// a SID bass gets its bite without a real resonant ladder.
+function bass(f, t, bus, peak, _type) {
+  pulseVoice(f, t, 0.16, peak, bus, {
+    duty: 0.16, cutFrom: 1500, cutTo: 240, q: 11, attack: 0.001,
+  });
+  // a sub underneath, triangle, to give it weight on small speakers
+  const c = ctx();
+  const o = c.createOscillator();
+  o.type = 'triangle';
+  o.frequency.value = f / 2;
+  const g = env(bus, t, 0.003, 0.13, peak * 0.5);
+  o.connect(g);
+  o.start(t); o.stop(t + 0.2);
+}
+
+// Drums, built the way the chip had to: noise and a pitch-swept tone.
 function kick(t, bus) {
   const c = ctx();
   const o = c.createOscillator();
-  o.type = 'sine';
-  o.frequency.setValueAtTime(150, t);
-  o.frequency.exponentialRampToValueAtTime(42, t + 0.09);
-  const g = env(bus, t, 0.002, 0.16, 0.85);
-  o.connect(g);
+  o.type = 'triangle';
+  o.frequency.setValueAtTime(220, t);
+  o.frequency.exponentialRampToValueAtTime(38, t + 0.07);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.9, t);               // no attack ramp at all
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
+  o.connect(g).connect(bus);
   o.start(t); o.stop(t + 0.2);
 }
 
 function snare(t, bus) {
   const c = ctx();
-  const n = c.createBufferSource();
-  const len = Math.floor(c.sampleRate * 0.25);
+  const len = Math.floor(c.sampleRate * 0.2);
   const b = c.createBuffer(1, len, c.sampleRate);
   const d = b.getChannelData(0);
-  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  // bit-crushed noise: the chip's noise was an LFSR, not white
+  let hold = 0;
+  for (let i = 0; i < len; i++) {
+    if (i % 3 === 0) hold = Math.random() * 2 - 1;
+    d[i] = hold * (1 - i / len);
+  }
+  const n = c.createBufferSource();
   n.buffer = b;
   const bq = c.createBiquadFilter();
-  bq.type = 'bandpass'; bq.frequency.value = 1900; bq.Q.value = 0.9;
-  const g = env(bus, t, 0.002, 0.14, 0.45);
-  n.connect(bq).connect(g);
+  bq.type = 'bandpass'; bq.frequency.value = 1750; bq.Q.value = 1.1;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.5, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+  n.connect(bq).connect(g).connect(bus);
   n.start(t); n.stop(t + 0.2);
 
   const o = c.createOscillator();
-  o.type = 'triangle';
-  o.frequency.setValueAtTime(330, t);
-  o.frequency.exponentialRampToValueAtTime(180, t + 0.08);
-  const g2 = env(bus, t, 0.002, 0.09, 0.2);
+  o.type = 'square';
+  o.frequency.setValueAtTime(400, t);
+  o.frequency.exponentialRampToValueAtTime(170, t + 0.06);
+  const g2 = env(bus, t, 0.001, 0.07, 0.18);
   o.connect(g2);
-  o.start(t); o.stop(t + 0.14);
+  o.start(t); o.stop(t + 0.12);
 }
 
 function hat(t, bus, peak) {
   const c = ctx();
-  const n = c.createBufferSource();
-  const len = Math.floor(c.sampleRate * 0.06);
+  const len = Math.floor(c.sampleRate * 0.05);
   const b = c.createBuffer(1, len, c.sampleRate);
   const d = b.getChannelData(0);
-  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1);
+  let hold = 0;
+  for (let i = 0; i < len; i++) {
+    if (i % 2 === 0) hold = Math.random() * 2 - 1;
+    d[i] = hold;
+  }
+  const n = c.createBufferSource();
   n.buffer = b;
   const bq = c.createBiquadFilter();
-  bq.type = 'highpass'; bq.frequency.value = 7500;
-  const g = env(bus, t, 0.001, 0.035, peak);
-  n.connect(bq).connect(g);
-  n.start(t); n.stop(t + 0.08);
-}
-
-function bass(f, t, bus, peak, type = 'sawtooth') {
-  const c = ctx();
-  const o = c.createOscillator();
-  o.type = type;
-  o.frequency.value = f;
-  // slight detune layer for weight
-  const o2 = c.createOscillator();
-  o2.type = 'square';
-  o2.frequency.value = f / 2;
-  o2.detune.value = 6;
-
-  const bq = c.createBiquadFilter();
-  bq.type = 'lowpass';
-  bq.Q.value = 7;
-  bq.frequency.setValueAtTime(1500, t);
-  bq.frequency.exponentialRampToValueAtTime(260, t + 0.14);
-
-  const g = env(bus, t, 0.004, 0.13, peak);
-  o.connect(bq); o2.connect(bq); bq.connect(g);
-  o.start(t); o.stop(t + 0.2);
-  o2.start(t); o2.stop(t + 0.2);
-}
-
-function arpNote(f, t, bus, peak, type = 'square') {
-  const c = ctx();
-  const o = c.createOscillator();
-  o.type = type;
-  o.frequency.value = f;
-  const bq = c.createBiquadFilter();
-  bq.type = 'lowpass';
-  bq.frequency.value = 4200;
-  const g = env(bus, t, 0.003, 0.11, peak);
-  o.connect(bq).connect(g);
-  o.start(t); o.stop(t + 0.16);
-}
-
-function pad(f, t, bus, peak, cutoff = 1100) {
-  const c = ctx();
-  const dur = stepDur() * 16;
+  bq.type = 'highpass'; bq.frequency.value = 8200;
   const g = c.createGain();
-  g.gain.setValueAtTime(1e-4, t);
-  g.gain.exponentialRampToValueAtTime(peak, t + 0.35);
-  g.gain.exponentialRampToValueAtTime(1e-4, t + dur);
-  g.connect(bus);
+  g.gain.setValueAtTime(peak, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+  n.connect(bq).connect(g).connect(bus);
+  n.start(t); n.stop(t + 0.06);
+}
 
-  const bq = c.createBiquadFilter();
-  bq.type = 'lowpass';
-  bq.frequency.value = cutoff;
-  bq.Q.value = 1.5;
-  bq.connect(g);
+// The lead: a single pulse voice with vibrato and a wide-open filter.
+function arpNote(f, t, bus, peak, _type, step = 0) {
+  pulseVoice(f, t, 0.1, peak, bus, {
+    duty: dutyAt(step), cutFrom: 4200, cutTo: 1600, q: 5, vibrato: 14,
+  });
+}
 
-  for (const det of [-7, 7]) {
-    const o = c.createOscillator();
-    o.type = 'sawtooth';
-    o.frequency.value = f;
-    o.detune.value = det;
-    o.connect(bq);
-    o.start(t); o.stop(t + dur + 0.1);
+// The pad is the one thing a SID could not do, so it stays subtle: a
+// detuned pair of narrow pulses, filtered right down.
+function pad(f, t, bus, peak, cutoff = 1100) {
+  const dur = stepDur() * 16;
+  for (const det of [-9, 9]) {
+    pulseVoice(f, t, dur, peak * 0.7, bus, {
+      duty: 0.5, cutFrom: cutoff, cutTo: cutoff * 0.6, q: 2, attack: 0.25, detune: det,
+    });
   }
 }

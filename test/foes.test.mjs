@@ -100,3 +100,46 @@ test('ordnance is a pickup kind so crates can drop', () => {
     assert.ok(PICKUP[kind] === undefined || true);
   }
 });
+
+// --- gun towers
+test('every tower a hull mounts is implemented, and rosters grow', async () => {
+  const { TOWERS } = await import('../src/config.js');
+  const counts = [];
+  for (const l of LEVELS) {
+    const roster = l.towers || [];
+    assert.ok(roster.length, `${l.name} mounts no towers at all`);
+    for (const kind of roster) {
+      assert.ok(TOWERS[kind], `${l.name} mounts "${kind}", which has no spec`);
+    }
+    counts.push(roster.length);
+  }
+  assert.equal(counts[0], 1, 'the first hull should mount one kind');
+  assert.ok(counts[counts.length - 1] >= 4, 'the last hull should mount most kinds');
+});
+
+test('every tower spec is complete and distinct', async () => {
+  const { TOWERS } = await import('../src/config.js');
+  const names = new Set();
+  for (const [kind, tw] of Object.entries(TOWERS)) {
+    for (const f of ['name', 'hpMul', 'score', 'burst', 'burstGap', 'cooldownMul', 'bulletSpeed', 'colour']) {
+      assert.ok(tw[f] !== undefined, `TOWERS.${kind}.${f} is missing`);
+    }
+    assert.match(tw.colour, /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, `${kind} colour`);
+    assert.ok(!names.has(tw.colour), `${kind} shares a colour with another tower`);
+    names.add(tw.colour);
+  }
+});
+
+test('generated towers carry a kind and a scaled hit-point total', async () => {
+  const { buildLevel } = await import('../src/level.js');
+  const { TOWERS } = await import('../src/config.js');
+  for (const spec of LEVELS) {
+    const lvl = buildLevel(spec);
+    for (const t of lvl.turrets) {
+      assert.ok(t.kind && TOWERS[t.kind], `${spec.name} produced a tower with kind ${t.kind}`);
+      assert.ok((spec.towers || ['gun']).includes(t.kind),
+        `${spec.name} mounted a ${t.kind}, which is not on its roster`);
+      assert.equal(t.hp, Math.round(spec.turretHp * TOWERS[t.kind].hpMul));
+    }
+  }
+});

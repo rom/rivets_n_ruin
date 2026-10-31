@@ -71,6 +71,19 @@ export const musicBus = () => S.musicBus;
 export const ready = () => S.ctx !== null;
 export const isMuted = () => S.muted;
 
+// Applies the current settings to the live graph. Called on any change and
+// once the context exists, so settings made before audio was unlocked still
+// take effect when it is.
+export function applySettings(s) {
+  if (!S.ctx) return;
+  const t = S.ctx.currentTime;
+  const vol = (s.volume ?? 85) / 100;
+  S.master.gain.cancelScheduledValues(t);
+  S.master.gain.setTargetAtTime(S.muted ? 0 : 0.85 * vol, t, 0.02);
+  S.musicBus.gain.setTargetAtTime(s.music === false ? 0 : 0.42, t, 0.03);
+  S.sfxBus.gain.setTargetAtTime(s.sfx === false ? 0 : 0.9, t, 0.03);
+}
+
 export function toggleMute() {
   S.muted = !S.muted;
   localStorage.setItem('rnr.muted', S.muted ? '1' : '0');
