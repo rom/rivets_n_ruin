@@ -62,6 +62,54 @@ export const LEVELS = [
   },
 ];
 
+// Each hull is guarded at its far end. The boss gates the turnaround, so a
+// run is approach -> boss -> escape, and reaching the dock is earned twice.
+export const BOSS = {
+  arenaMargin: 40,      // how far inside the hull end the arena wall sits
+  entryTime: 2.2,       // boss slides in over this long; you cannot be hit yet
+  deathTime: 2.6,       // explosion chain before the way home opens
+  hitFlash: 0.08,
+  contactDamage: 34,
+};
+
+export const BOSSES = [
+  {
+    name: 'THE WARDEN',
+    tag: 'EMPLACED FORTRESS — ARGENTUM',
+    kind: 'warden',
+    coreHp: 34,
+    podHp: 9,
+    score: 6000,
+    podScore: 400,
+    bulletSpeed: 180,
+    burstGap: 0.16,
+    cycle: 2.3,          // seconds between attack cycles
+  },
+  {
+    name: 'DRAYLINE',
+    tag: 'LINE GUNSHIP — OSMIUM',
+    kind: 'drayline',
+    coreHp: 78,
+    score: 9000,
+    bulletSpeed: 205,
+    burstGap: 0.1,
+    cycle: 1.9,
+    sweepSpeed: 128,
+  },
+  {
+    name: 'THE RIVETER',
+    tag: 'FLAGSHIP BATTERY — TANTALUM',
+    kind: 'riveter',
+    coreHp: 120,
+    plateHp: 14,
+    score: 14000,
+    plateScore: 600,
+    bulletSpeed: 225,
+    burstGap: 0.08,
+    cycle: 1.6,
+  },
+];
+
 // Clearing a hull upgrades the ship permanently for the rest of the run.
 // These stack, so arriving at TANTALUM you are flying a markedly different
 // craft from the one that launched at ARGENTUM — which is the point: the
