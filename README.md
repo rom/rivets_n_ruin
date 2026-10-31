@@ -64,6 +64,35 @@ legs scores a time bonus; dying three times ends it.
   scanlines and vignette.
 - **Fully procedural audio** — see below.
 
+## Pickups
+
+Everything you destroy can drop one, so shooting pays beyond score and a long
+run gets genuinely stronger rather than just longer. Turrets drop at 60%,
+interceptors at 17%. Each is worth 50 points on top of its effect.
+
+| Pickup | Colour | Effect |
+| --- | --- | --- |
+| **shields-refill** | cyan | Restores 40 shield |
+| **lifesavers** | pale cyan | +1 ship, to a maximum of 6 |
+| **healthbars** | green | Raises **maximum** shield by 25 (to 220) and grants it |
+| **gunspeed** | yellow | Shorter fire interval — ×1 → ×0.76 → ×0.58 → ×0.44 |
+| **gunblaze** | orange | Adds a mirrored pair of angled barrels per level: 2 → 4 → 6 → 8 shots a volley |
+
+`shields-refill` and `healthbars` are deliberately different: one tops up the
+bar, the other extends it. Both read at a glance because the HUD label switches
+to `SHIELD 125` in green once your ceiling has moved.
+
+Guns cap at level 3 each; collecting at max converts to points instead. **Dying
+costs one level off each gun** — enough to feel, not enough to undo a whole
+run's worth of pickups.
+
+Each pickup carries a glyph as well as a colour, because colour alone fails for
+anyone who can't separate the cyan from the green, and these appear against a
+busy hull at speed. They bob, drift, pull toward you slightly within 38px so a
+near miss at full throttle still counts, and flash for their last three seconds
+before expiring. A drop that would land inside solid hull is relocated to open
+space, so a pickup is never unreachable.
+
 ## Audio
 
 Every sound is synthesised at runtime from oscillators and noise. There are no
@@ -240,6 +269,9 @@ These are deliberate omissions from the vertical slice, not bugs:
 - The hull texture is one 12000×324 offscreen canvas (~15MB). Fine at this
   length; chunked lazy tiles if the level grows much past it.
 - **Score validation is not anti-cheat.** See the backend section above.
+- **Pickup balance is unplayed.** Drop rates, the 40-point refill and the gun
+  curves are first guesses; nobody has judged whether the run gets too strong
+  too fast. They are all in `PICKUP` in `src/config.js`.
 - **No mod browser in-game.** Mods are published over the API and played via
   `/?mod=<id>`; there is no UI for discovering them yet.
 - **Single-process storage.** JSON snapshots, no SQL, no horizontal scaling.

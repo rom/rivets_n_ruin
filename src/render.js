@@ -4,6 +4,8 @@ import {
 import { interceptors } from './enemies.js';
 import { playerShots, enemyShots } from './projectiles.js';
 import { particles } from './particles.js';
+import { pickups, tint } from './pickups.js';
+import { PICKUP } from './config.js';
 
 let scanlines = null;
 let vignette = null;
@@ -55,6 +57,7 @@ export function drawWorld(ctx, game) {
 
   drawTurrets(ctx, game, camX);
   drawInterceptors(ctx, game);
+  drawPickups(ctx);
   drawShots(ctx);
   if (game.player.alive) drawShip(ctx, game.player);
   drawParticles(ctx);
@@ -211,6 +214,80 @@ function drawTurrets(ctx, game, camX) {
     ctx.fillStyle = COL.rivet;
     ctx.fillRect(-7, d * 4, 2, 2);
     ctx.fillRect(5, d * 4, 2, 2);
+    ctx.restore();
+  }
+}
+
+// Each pickup carries a glyph, not just a colour: colour alone fails for
+// anyone who cannot separate the cyan from the green, and these appear
+// against a busy hull at speed.
+function drawPickups(ctx) {
+  for (let i = 0; i < pickups.count; i++) {
+    const p = pickups.items[i];
+    // flash out the last few seconds so an expiring pickup is obvious
+    if (p.life < PICKUP.blinkAt && Math.floor(p.life * 7) % 2 === 0) continue;
+
+    const c = tint(p.kind);
+    const x = Math.round(p.x);
+    const y = Math.round(p.y);
+    const h = PICKUP.size / 2;
+
+    ctx.save();
+    ctx.translate(x, y);
+
+    // casing
+    ctx.fillStyle = '#10141b';
+    ctx.fillRect(-h - 1, -h - 1, PICKUP.size + 2, PICKUP.size + 2);
+    ctx.fillStyle = '#2b323c';
+    ctx.fillRect(-h, -h, PICKUP.size, PICKUP.size);
+    ctx.strokeStyle = c;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(-h + 0.5, -h + 0.5, PICKUP.size - 1, PICKUP.size - 1);
+
+    // a soft pulse so it reads as live, not scenery
+    ctx.globalAlpha = 0.25 + 0.2 * Math.sin(p.t * 5);
+    ctx.fillStyle = c;
+    ctx.fillRect(-h, -h, PICKUP.size, PICKUP.size);
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = c;
+    switch (p.kind) {
+      case 'shield':      // a shield outline
+        ctx.fillRect(-3, -4, 6, 1);
+        ctx.fillRect(-3, -4, 1, 4);
+        ctx.fillRect(2, -4, 1, 4);
+        ctx.fillRect(-2, 0, 4, 1);
+        ctx.fillRect(-1, 1, 2, 2);
+        break;
+      case 'life':        // a ship
+        ctx.beginPath();
+        ctx.moveTo(4, 0); ctx.lineTo(-3, -3); ctx.lineTo(-1, 0); ctx.lineTo(-3, 3);
+        ctx.closePath(); ctx.fill();
+        break;
+      case 'healthbar':   // a bar being extended
+        ctx.fillRect(-4, -1, 5, 3);
+        ctx.fillRect(2, -3, 1, 7);
+        ctx.fillRect(1, 0, 3, 1);
+        break;
+      case 'gunspeed':    // stacked chevrons
+        for (let k = 0; k < 2; k++) {
+          ctx.fillRect(-3 + k * 4, -3, 1, 2);
+          ctx.fillRect(-2 + k * 4, -1, 1, 2);
+          ctx.fillRect(-3 + k * 4, 1, 1, 2);
+        }
+        break;
+      case 'gunblaze':    // a spreading fan
+        ctx.fillRect(-4, -1, 3, 2);
+        ctx.fillRect(0, -4, 2, 1);
+        ctx.fillRect(0, -1, 2, 2);
+        ctx.fillRect(0, 3, 2, 1);
+        ctx.fillRect(3, -5, 1, 1);
+        ctx.fillRect(3, 0, 1, 1);
+        ctx.fillRect(3, 4, 1, 1);
+        break;
+      default:
+        ctx.fillRect(-2, -2, 4, 4);
+    }
     ctx.restore();
   }
 }

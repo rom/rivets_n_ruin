@@ -2,6 +2,8 @@ import {
   VIEW_W, VIEW_H, FIELD_H, HUD_H, SHIP, LEVEL_LEN, COL, clamp,
 } from './config.js';
 import { netState } from './net.js';
+import { PICKUP } from './config.js';
+import { tint } from './pickups.js';
 import { activeMod } from './mods.js';
 
 const FONT = 'bold 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
@@ -25,9 +27,12 @@ export function drawHud(ctx, game, audio = {}) {
   ctx.fillRect(0, y0, VIEW_W, 1);
 
   // --- shield, as segments: readable at a glance mid-dodge
-  text(ctx, 'SHIELD', 8, y0 + 6);
+  // Label carries the max, because healthbars change it and a bar alone
+  // cannot show that its own ceiling moved.
+  text(ctx, p.shieldMax > SHIP.shieldMax ? 'SHIELD ' + p.shieldMax : 'SHIELD', 8, y0 + 6,
+    p.shieldMax > SHIP.shieldMax ? '#5fe08a' : COL.hudText);
   const segs = 10;
-  const filled = Math.ceil(clamp(p.shield / SHIP.shieldMax, 0, 1) * segs);
+  const filled = Math.ceil(clamp(p.shield / p.shieldMax, 0, 1) * segs);
   for (let i = 0; i < segs; i++) {
     const on = i < filled;
     ctx.fillStyle = !on ? '#1a212b' : filled <= 3 ? COL.danger : filled <= 6 ? COL.warmHi : COL.cool;
@@ -55,9 +60,18 @@ export function drawHud(ctx, game, audio = {}) {
   ctx.fillRect(146, y0 + 19, Math.round(46 * spd), 9);
   text(ctx, p.facing > 0 ? '>>' : '<<', 196, y0 + 19, COL.cool);
 
+  // --- gun upgrade levels
+  text(ctx, 'GUNS', 212, y0 + 6);
+  for (let i = 0; i < PICKUP.gunLevels; i++) {
+    ctx.fillStyle = i < p.gunSpeed ? tint('gunspeed') : '#1a212b';
+    ctx.fillRect(212 + i * 6, y0 + 19, 4, 4);
+    ctx.fillStyle = i < p.gunBlaze ? tint('gunblaze') : '#1a212b';
+    ctx.fillRect(212 + i * 6, y0 + 24, 4, 4);
+  }
+
   // --- score
-  text(ctx, 'SCORE', 232, y0 + 6);
-  text(ctx, String(game.score).padStart(8, '0'), 232, y0 + 18, COL.hudBright);
+  text(ctx, 'SCORE', 252, y0 + 6);
+  text(ctx, String(game.score).padStart(8, '0'), 252, y0 + 18, COL.hudBright);
 
   // --- hull progress, with the turnaround baked in
   text(ctx, game.returning ? 'RETURN RUN' : 'OUTBOUND', 318, y0 + 6, game.returning ? COL.warmHi : COL.hudText);
@@ -87,8 +101,19 @@ export function drawHud(ctx, game, audio = {}) {
   const sym = !audio.audio ? 'SND --' : audio.muted ? 'SND OFF' : 'SND ON';
   text(ctx, sym + '  [M]', VIEW_W - 10, y0 + 18, audio.muted ? COL.danger : COL.hudText, FONT, 'right');
 
+  if (game.toast) drawToast(ctx, game.toast);
   if (game.banner) drawBanner(ctx, game.banner);
   if (game.state !== 'play' && game.state !== 'dying') drawScreen(ctx, game);
+}
+
+// Says what the pickup just did. Without this the player sees a flash and
+// has to infer the effect from the HUD.
+function drawToast(ctx, t) {
+  const a = Math.min(1, t.t / 0.4);
+  ctx.globalAlpha = clamp(a, 0, 1);
+  const y = 282 - (1 - Math.min(1, t.t / 1.9)) * 10;
+  text(ctx, t.text, VIEW_W / 2, y, tint(t.kind), FONT, 'center');
+  ctx.globalAlpha = 1;
 }
 
 function drawBanner(ctx, b) {

@@ -39,6 +39,13 @@ const (
 
 	// Generous allowance for turret count across seeds.
 	MaxTurretsPerHull = 40
+
+	// Pickups. At most one drops per kill, and the richest outcome is a
+	// lifesaver collected at maximum lives: its own score plus the 500
+	// consolation bonus.
+	PointsPickup   = 50
+	MaxPickupBonus = 500
+	MaxPerPickup   = PointsPickup + MaxPickupBonus
 )
 
 // MinCompletionSec is the fastest a full out-and-back run can physically be
@@ -71,8 +78,11 @@ func MaxPlausiblePoints(s Submission) int {
 			total += int(bonus)
 		}
 	}
+	kills := MaxTurretsPerHull + int(math.Ceil(s.TimeSec/FastestSpawnInterval)+4)
 	total += PointsTurret * MaxTurretsPerHull
-	total += PointsIntercept * int(math.Ceil(s.TimeSec/FastestSpawnInterval)+4)
+	total += PointsIntercept * (kills - MaxTurretsPerHull)
+	// One pickup per kill at most, each worth up to MaxPerPickup.
+	total += MaxPerPickup * kills
 	return total + 1000 // slack for tuning drift
 }
 

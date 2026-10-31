@@ -23,6 +23,7 @@ func TestScoreAcceptsRealisticRuns(t *testing.T) {
 		{"failed early run", Submission{Points: 300, TimeSec: 12, Turrets: 2}},
 		{"solid completed run", Submission{Points: 14039, TimeSec: 95, Turrets: 11, Completed: true}},
 		{"long grind", Submission{Points: 40000, TimeSec: 600, Turrets: 25, Deaths: 2}},
+		{"pickup-heavy run", Submission{Points: 120000, TimeSec: 300, Turrets: 30, Completed: true}},
 		{"zero everything", Submission{}},
 	}
 	for _, c := range cases {
@@ -69,6 +70,25 @@ func TestCompletionBoundary(t *testing.T) {
 	}
 	if err := Score(Submission{Points: 9000, TimeSec: min + 0.1, Completed: true}); err != nil {
 		t.Fatalf("rejected a completion just over the physical minimum: %v", err)
+	}
+}
+
+// Pickups raise the ceiling; a run that collects every drop must still be
+// accepted, and the ceiling must still be finite.
+func TestPickupsRaiseTheCeiling(t *testing.T) {
+	base := Submission{TimeSec: 120, Completed: true}
+	ceiling := MaxPlausiblePoints(base)
+	if ceiling < 50000 {
+		t.Fatalf("ceiling %d looks too low to admit a pickup-heavy run", ceiling)
+	}
+	if ceiling > 5_000_000 {
+		t.Fatalf("ceiling %d is so loose it validates nothing", ceiling)
+	}
+	if err := Score(Submission{Points: ceiling - 1, TimeSec: 120, Completed: true}); err != nil {
+		t.Fatalf("rejected a run just under the ceiling: %v", err)
+	}
+	if err := Score(Submission{Points: ceiling + 1, TimeSec: 120, Completed: true}); err == nil {
+		t.Fatal("accepted a run just over the ceiling")
 	}
 }
 

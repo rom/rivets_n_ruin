@@ -1,5 +1,5 @@
 import {
-  SHIP, FIELD_TOP, FIELD_BOT, LEVEL_LEN, clamp,
+  SHIP, PICKUP, FIELD_TOP, FIELD_BOT, LEVEL_LEN, clamp,
 } from './config.js';
 import { axisX, axisY, held } from './input.js';
 import { obstaclesNear, pointBlocked } from './level.js';
@@ -18,7 +18,10 @@ export function makePlayer() {
     scrapeCd: 0,
     invuln: SHIP.invuln,
     shield: SHIP.shieldMax,
+    shieldMax: SHIP.shieldMax,   // healthbars raise this
     lives: SHIP.lives,
+    gunSpeed: 0,                 // gunspeed pickups: faster fire
+    gunBlaze: 0,                 // gunblaze pickups: wider spread
     thrustT: 0,
     alive: true,
   };
@@ -67,12 +70,25 @@ export function updatePlayer(p, game, dt) {
   }
 
   if (held('fire') && p.fireCd <= 0 && p.flip <= 0) {
-    p.fireCd = SHIP.fireRate;
-    const vx = p.facing * SHIP.bulletSpeed + p.vx * 0.3;
+    // gunspeed shortens the interval; gunblaze adds mirrored angled barrels
+    p.fireCd = SHIP.fireRate * PICKUP.speedScale[p.gunSpeed];
+
+    const speed = SHIP.bulletSpeed;
+    const inherit = p.vx * 0.3;
+    const mx = p.x + p.facing * 14;
+
     for (const off of [-4, 4]) {
-      fire(playerShots, p.x + p.facing * 14, p.y + off, vx, 0, 1.7, 1, 2);
+      fire(playerShots, mx, p.y + off, p.facing * speed + inherit, 0, 1.7, 1, 2);
     }
-    sparks(p.x + p.facing * 15, p.y, p.facing, 0, 2, '#b4f4ff');
+    for (const a of PICKUP.blazeAngles[p.gunBlaze]) {
+      for (const sign of [-1, 1]) {
+        const ang = sign * a;
+        fire(playerShots, mx, p.y + sign * 2,
+          p.facing * Math.cos(ang) * speed + inherit,
+          Math.sin(ang) * speed, 1.5, 1, 2);
+      }
+    }
+    sparks(p.x + p.facing * 15, p.y, p.facing, 0, 2 + p.gunBlaze, '#b4f4ff');
     sfxShoot();
   }
 }
@@ -133,7 +149,11 @@ function impact(p, game, speed, hx, hy, nx, ny) {
 // Back off to open space, so a respawn never drops you inside a block.
 export function respawn(p, game) {
   p.vx = 0; p.vy = 0;
-  p.shield = SHIP.shieldMax;
+  // Dying costs one level off each gun — enough to feel, not enough to
+  // undo a whole run's worth of pickups.
+  p.gunSpeed = Math.max(0, p.gunSpeed - 1);
+  p.gunBlaze = Math.max(0, p.gunBlaze - 1);
+  p.shield = p.shieldMax;
   p.invuln = SHIP.invuln;
   p.flip = 0;
   p.alive = true;

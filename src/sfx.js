@@ -137,6 +137,25 @@ export function sfxGameOver() {
   tone({ type: 'sawtooth', f0: 110, f1: 55, t: t + 0.5, attack: 0.08, decay: 1.4, peak: 0.2 });
 }
 
+// Each pickup gets its own shape so you know what you grabbed without
+// looking: a rising major third for good news, a wider leap for a new life.
+const PICKUP_ARP = {
+  shield:    [0, 7, 12],
+  life:      [0, 4, 7, 12, 19],
+  healthbar: [0, 5, 12],
+  gunspeed:  [0, 2, 7],
+  gunblaze:  [0, 3, 10],
+};
+
+export function sfxPickup(kind) {
+  if (!ready()) return;
+  const t = now();
+  const semis = PICKUP_ARP[kind] || [0, 7];
+  const type = kind === 'gunblaze' ? 'sawtooth' : 'square';
+  arp(semis, t, kind === 'life' ? 0.2 : 0.14, type, 0.055);
+  noiseHit({ t, attack: 0.002, decay: 0.12, peak: 0.07, filter: 'highpass', f0: 3000 });
+}
+
 export function sfxUi() {
   if (!ready()) return;
   tone({ type: 'square', f0: 660, f1: 990, t: now(), attack: 0.003, decay: 0.07, peak: 0.12, sweep: 'lin' });

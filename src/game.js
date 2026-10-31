@@ -9,9 +9,10 @@ import {
 } from './enemies.js';
 import { playerShots, enemyShots, advance } from './projectiles.js';
 import { updateParticles, explode, sparks, particles } from './particles.js';
+import { updatePickups, resetPickups, pickups } from './pickups.js';
 import { tapped, endFrame } from './input.js';
 import {
-  sfxPlayerHit, sfxHullAbsorb, sfxDeath, sfxRespawn,
+  sfxPickup, sfxPlayerHit, sfxHullAbsorb, sfxDeath, sfxRespawn,
   sfxTurnaround, sfxComplete, sfxGameOver, sfxUi,
 } from './sfx.js';
 import { setIntensity } from './music.js';
@@ -33,9 +34,11 @@ export function makeGame(seed = LEVEL_SEED) {
     spawnCd: 1.2,
     flash: 0,
     time: 0,
+    toast: null,
     returning: false,      // outbound leg done, now fly the hull back
     banner: null,
     best: Number(localStorage.getItem('rnr.best') || 0),
+    onPickup: (kind) => sfxPickup(kind),
   };
   game.cam.x = clamp(game.player.x - VIEW_W / 2 + SHIP.w, 0, LEVEL_LEN - VIEW_W);
   return game;
@@ -59,7 +62,9 @@ function reset(game) {
   game.flash = 0;
   game.time = 0;
   game.banner = null;
+  game.toast = null;
   resetEnemies();
+  resetPickups();
   playerShots.clear();
   enemyShots.clear();
   particles.clear();
@@ -101,6 +106,10 @@ export function update(game, dt) {
   if (game.banner) {
     game.banner.t -= dt;
     if (game.banner.t <= 0) game.banner = null;
+  }
+  if (game.toast) {
+    game.toast.t -= dt;
+    if (game.toast.t <= 0) game.toast = null;
   }
 
   if (game.state === 'title' || game.state === 'gameover' || game.state === 'complete') {
@@ -151,6 +160,7 @@ export function update(game, dt) {
   updatePlayer(p, game, dt);
   updateTurrets(game, dt);
   updateInterceptors(game, dt);
+  updatePickups(game, dt);
   advance(playerShots, dt);
   advance(enemyShots, dt);
   updateParticles(dt);
