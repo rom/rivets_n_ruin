@@ -2,15 +2,15 @@ import {
   VIEW_W, VIEW_H, FIELD_H, HUD_H, SHIP, LEVELS, LEVEL_UP, THEMES, COL, clamp,
 } from './config.js';
 import { netState } from './net.js';
-import { PICKUP, ARMORY, APRON } from './config.js';
+import { PICKUP, ARMORY, APRON, LASER } from './config.js';
 import { tint, pickups, isTreasure } from './pickups.js';
 import { minis } from './miniboss.js';
 import { radarProfile } from './level.js';
 import { tuneName, TUNES } from './music.js';
 import { get as setting, DEFS, display } from './settings.js';
-import { rows as shopRows, MODS } from './shop.js';
-import { drawSplash, drawLaunchBanner, drawLandingBanner,
-  SPLASH_TIME, LAUNCH_TIME, LANDING_TIME, ENDING_TIME } from './sequences.js';
+import { rows as shopRows, MODS, modLevel, modName, maxLevel } from './shop.js';
+import { drawSplash, drawLaunchBanner, drawExitBanner,
+  SPLASH_TIME, LAUNCH_TIME, EXIT_TIME, ENDING_TIME } from './sequences.js';
 import { VERSION } from './config.js';
 import { livingParts, shellUp } from './boss.js';
 import { activeMod } from './mods.js';
@@ -109,9 +109,9 @@ export function drawHud(ctx, game, audio = {}) {
   // --- the hull, and the two running totals the end-of-hull bonus pays on.
   // Where you are is the radar's job; this is how well you are doing it.
   const spec = game.level.spec;
-  text(ctx, (game.returning ? '< ' : '> ') + spec.name
+  text(ctx, '> ' + spec.name
     + '  ' + (game.levelIndex + 1) + '/' + game.specs.length,
-    X.prog, L, game.returning ? COL.warmHi : COL.cool);
+    X.prog, L, game.boss ? COL.warmHi : COL.cool);
 
   const guns = game.level.turrets;
   const broken = guns.reduce((n, t) => n + (t.dead ? 1 : 0), 0);
@@ -144,7 +144,7 @@ export function drawHud(ctx, game, audio = {}) {
   if (game.toast && setting('damageNumbers')) drawToast(ctx, game.toast);
   if (game.banner) drawBanner(ctx, game.banner);
   if (game.state === 'launching') drawLaunchBanner(ctx, game, clamp(game.stateT / LAUNCH_TIME, 0, 1));
-  else if (game.state === 'landing') drawLandingBanner(ctx, game, clamp(game.stateT / LANDING_TIME, 0, 1));
+  else if (game.state === 'exiting') drawExitBanner(ctx, game, clamp(game.stateT / EXIT_TIME, 0, 1));
   else if (game.state !== 'play' && game.state !== 'dying') drawScreen(ctx, game);
 }
 
@@ -382,6 +382,18 @@ export function drawRadar(ctx, game) {
     }
   }
 
+  // --- laser gates, as full-height bars: a wall you cannot fly through is
+  // the one thing on the hull worth seeing before you reach it
+  for (const g of level.gates || []) {
+    const gx = Math.round(at(g.x));
+    ctx.fillStyle = g.dead ? '#3a2a30' : LASER.colour;
+    ctx.fillRect(gx, R.topY, 1, R.h - 2);
+    if (!g.dead) {
+      ctx.fillStyle = '#ffd0d4';
+      ctx.fillRect(gx - 1, g.dir === 1 ? R.topY : botEnd - 3, 3, 3);
+    }
+  }
+
   // --- minibosses, and the ones still waiting further along
   if (game.miniPlan) {
     for (const slot of game.miniPlan) {
@@ -412,7 +424,7 @@ export function drawRadar(ctx, game) {
   ctx.strokeRect(Math.round(vx0) + 0.5, R.y + 1.5, Math.round(vw), R.h - 4);
 
   const px = Math.round(at(p.x));
-  ctx.fillStyle = game.returning ? COL.warmHi : COL.coolHi;
+  ctx.fillStyle = game.boss ? COL.warmHi : COL.coolHi;
   ctx.fillRect(px - 1, R.y + 1, 3, R.h - 2);
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(px, R.y + 1, 1, R.h - 2);
@@ -494,8 +506,11 @@ function drawFit(ctx, game, x, y) {
   }
 
   ry += 6;
-  const owned = Object.keys(MODS).filter((id) => game.mods && game.mods[id]);
-  text(ctx, 'MODS FITTED  ' + owned.length + '/' + Object.keys(MODS).length,
+  const ids = Object.keys(MODS);
+  const owned = ids.filter((id) => modLevel(game, id) > 0);
+  const tiers = owned.reduce((a, id) => a + modLevel(game, id), 0);
+  const allTiers = ids.reduce((a, id) => a + maxLevel(id), 0);
+  text(ctx, 'MODS FITTED  ' + tiers + '/' + allTiers,
     x, ry, owned.length ? COL.warmHi : COL.hudLine, FONT);
   ry += 15;
   if (!owned.length) {
@@ -503,9 +518,10 @@ function drawFit(ctx, game, x, y) {
     return;
   }
   for (const id of owned) {
+    const lvl = modLevel(game, id);
     ctx.fillStyle = '#ffd24a';
-    ctx.fillRect(x, ry + 3, 4, 4);
-    text(ctx, MODS[id].name, x + 9, ry, '#ffd24a', FONT);
+    for (let k = 0; k < lvl; k++) ctx.fillRect(x + k * 6, ry + 3, 4, 4);
+    text(ctx, modName(id, lvl), x + 9 + (lvl - 1) * 6, ry, '#ffd24a', FONT);
     ry += 12;
   }
 }
@@ -527,7 +543,7 @@ function drawScreen(ctx, game) {
 
   if (game.state === 'title') {
     text(ctx, "RIVETS 'N RUIN", cx, 34, COL.hudBright, 'bold 30px ui-monospace, Menlo, monospace', 'center');
-    text(ctx, 'SKIM THE HULL · BREAK THE GUNS · COME BACK ALIVE', cx, 72, COL.cool, FONT, 'center');
+    text(ctx, 'SKIM THE HULL · BREAK THE GUNS · RUN IT THROUGH', cx, 72, COL.cool, FONT, 'center');
 
     const mod = activeMod();
     if (mod) {
@@ -536,7 +552,7 @@ function drawScreen(ctx, game) {
 
     text(ctx, LEVELS.map((l) => l.name).join('  ·  '), cx, 92, COL.cool, FONT, 'center');
     text(ctx, 'ARROWS THRUST  Z FIRE  X ORDNANCE  C CYCLE  M MUTE  T TUNE  Q QUIT', cx, 112, COL.hudText, FONT, 'center');
-    text(ctx, 'REVERSE THRUST FLIPS THE SHIP — THE HULL SCROLLS BOTH WAYS', cx, 126, COL.hudText, FONT, 'center');
+    text(ctx, 'REVERSE THRUST FLIPS THE SHIP — THE GUNS FIRE BOTH WAYS', cx, 126, COL.hudText, FONT, 'center');
 
     if (net.online && net.player) {
       text(ctx, 'PILOT ' + net.player.name.toUpperCase() + '   [N] RENAME', cx, 146, COL.cool, FONT, 'center');
@@ -638,7 +654,7 @@ function drawScreen(ctx, game) {
     text(ctx, 'HULL LOST', cx, 34, COL.danger, FONT_BIG, 'center');
   } else {
     text(ctx, 'CAMPAIGN COMPLETE', cx, 34, COL.coolHi, FONT_BIG, 'center');
-    text(ctx, 'ALL THREE HULLS — OUT AND BACK', cx, 60, COL.cool, FONT, 'center');
+    text(ctx, 'EVERY HULL, END TO END', cx, 60, COL.cool, FONT, 'center');
   }
 
   const infoY = game.state === 'victory' ? 80 : 68;
@@ -744,7 +760,7 @@ function drawEnding(ctx, game) {
     if (r > 0) {
       ctx.globalAlpha = r;
       text(ctx, 'ALL EIGHT HULLS RUN', cx, 24, COL.coolHi, FONT_BIG, 'center');
-      text(ctx, 'OUT AND BACK, EVERY ONE', cx, 52, COL.cool, FONT, 'center');
+      text(ctx, 'END TO END, EVERY ONE', cx, 52, COL.cool, FONT, 'center');
 
       const lines = [
         ['FINAL SCORE', String(game.score).padStart(8, '0')],
@@ -754,6 +770,7 @@ function drawEnding(ctx, game) {
         ['COINS', String(game.coins || 0)],
         ['GOLD BARS', String(game.bars || 0)],
         ['COFFINS', String(game.coffins || 0)],
+        ['TREASURES', String(game.treasures || 0)],
       ];
       lines.forEach(([k, v], i) => {
         const y = 80 + i * 14;
@@ -797,8 +814,13 @@ export function drawShop(ctx, game, sel, note) {
       : r.affordable ? (on ? COL.hudBright : COL.hudText)
         : '#5a3a40';
     text(ctx, r.name, x, y, colour, FONT);
-    if (r.kind === 'mod') text(ctx, 'MOD', x + 150, y, r.affordable ? '#b45ce0' : '#432f4a', FONT);
-    else text(ctx, r.detail, x + 150, y, colour, FONT);
+    // Mods print their own detail too: a tiered one says how many of its
+    // tiers are already fitted, which is the thing you need to decide with.
+    if (r.kind === 'mod') {
+      text(ctx, r.detail, x + 150, y, r.affordable ? '#b45ce0' : '#432f4a', FONT);
+    } else {
+      text(ctx, r.detail, x + 150, y, colour, FONT);
+    }
     text(ctx, !r.available ? 'MAX' : String(r.cost), x + 276, y,
       !r.available ? '#2b3440' : r.affordable ? '#ffd24a' : '#5a3a40', FONT, 'right');
   });

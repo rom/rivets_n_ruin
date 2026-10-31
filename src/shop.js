@@ -8,32 +8,70 @@
 
 import { PICKUP, ARMORY } from './config.js';
 
+// A mod is one or more tiers. Most are a single fitting; the two that
+// change how the whole hull is flown — how far loot reaches and what it is
+// worth — go up to three, each dearer than the last. A pilot who commits to
+// one of those is choosing it over everything else in the shop, which is
+// the only reason a tier list is more interesting than a bigger number.
 export const MODS = {
   magnet: {
-    name: 'LODESTONE', cost: 900,
-    blurb: 'Pickups and coins pull toward you from twice as far.',
+    name: 'LODESTONE',
+    tiers: [
+      { cost: 900, mul: 2, blurb: 'Pickups and coins pull toward you from twice as far.' },
+      { cost: 1800, mul: 3.2, blurb: 'Reach again by half. Loot comes to you across a gap.' },
+      { cost: 3200, mul: 4.8, blurb: 'If it is on your screen, it is already yours.' },
+    ],
   },
   plating: {
-    name: 'ABLATIVE PLATING', cost: 1200,
-    blurb: 'Hull scrapes cost 40% less shield.',
+    name: 'ABLATIVE PLATING',
+    tiers: [{ cost: 1200, blurb: 'Hull scrapes cost 40% less shield.' }],
   },
   autoloader: {
-    name: 'AUTOLOADER', cost: 1000,
-    blurb: 'Ordnance reloads 35% faster.',
+    name: 'AUTOLOADER',
+    tiers: [{ cost: 1000, blurb: 'Ordnance reloads 35% faster.' }],
   },
   scavenger: {
-    name: 'SCAVENGER RIG', cost: 1100,
-    blurb: 'Coins are worth double.',
+    name: 'SCAVENGER RIG',
+    tiers: [
+      { cost: 1100, mul: 2, blurb: 'Coins, bars, coffins and treasure are worth double.' },
+      { cost: 2200, mul: 2.8, blurb: 'Everything you pick up is worth 2.8x.' },
+      { cost: 3800, mul: 3.6, blurb: 'A picked-clean hull pays more than the boss on it.' },
+    ],
   },
   afterburner: {
-    name: 'AFTERBURNER', cost: 1300,
-    blurb: '+40 top speed and quicker acceleration.',
+    name: 'AFTERBURNER',
+    tiers: [{ cost: 1300, blurb: '+40 top speed and quicker acceleration.' }],
   },
   reclaimer: {
-    name: 'RECLAIMER', cost: 1500,
-    blurb: 'Keep one gun level when a ship is lost.',
+    name: 'RECLAIMER',
+    tiers: [{ cost: 1500, blurb: 'Keep one gun level when a ship is lost.' }],
   },
 };
+
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
+
+// How many tiers of a mod are fitted. Stored as a number; `true` from a
+// save written before tiers existed reads as one.
+export const modLevel = (game, id) => {
+  const v = game.mods && game.mods[id];
+  return v === true ? 1 : (Number(v) || 0);
+};
+
+export const maxLevel = (id) => MODS[id].tiers.length;
+
+// The display name, with its tier when a mod has more than one.
+export function modName(id, level) {
+  const m = MODS[id];
+  if (m.tiers.length === 1) return m.name;
+  return m.name + ' ' + ROMAN[Math.max(1, level)];
+}
+
+// What a mod's numeric effect is at the level fitted, or 1 when unfitted.
+function modMul(game, id) {
+  const lvl = modLevel(game, id);
+  if (!lvl) return 1;
+  return MODS[id].tiers[Math.min(lvl, maxLevel(id)) - 1].mul || 1;
+}
 
 // Priced so a careful hull funds roughly one good purchase. Upgrades get
 // dearer each time so the shop cannot simply be drained into one stat.
@@ -53,7 +91,10 @@ export const ITEMS = [
     can: (p) => p.shieldMax < PICKUP.shieldCeiling,
     buy: (p) => { p.shieldMax += 25; p.shield = p.shieldMax; },
     owned: (p) => p.shieldMax, max: () => PICKUP.shieldCeiling },
-  { id: 'magnet', name: 'TRACTOR COILS', base: 600, step: 300,
+  // Not 'magnet': that is the Lodestone mod's id, and a shop row list that
+  // holds two different things under one id hands the wrong one to anything
+  // that looks a row up rather than indexing it.
+  { id: 'coils', name: 'TRACTOR COILS', base: 600, step: 300,
     blurb: 'Pull loot in from further away.',
     can: (p) => (p.magnetLevel || 0) < PICKUP.magnetLevels.length - 1,
     buy: (p) => { p.magnetLevel = (p.magnetLevel || 0) + 1; },
@@ -91,10 +132,18 @@ export function rows(game) {
     available: it.can(p),
   }));
   for (const [id, m] of Object.entries(MODS)) {
-    if (game.mods && game.mods[id]) continue;
+    const lvl = modLevel(game, id);
+    if (lvl >= m.tiers.length) continue;      // fully fitted
+    const tier = m.tiers[lvl];
     out.push({
-      kind: 'mod', id, name: m.name, blurb: m.blurb,
-      cost: m.cost, affordable: false, detail: 'MOD', available: true,
+      kind: 'mod',
+      id,
+      name: modName(id, lvl + 1),
+      blurb: tier.blurb,
+      cost: tier.cost,
+      affordable: false,
+      detail: m.tiers.length > 1 ? `MOD ${lvl}/${m.tiers.length}` : 'MOD',
+      available: true,
     });
   }
   for (const r of out) r.affordable = r.available && game.coins >= r.cost;
@@ -112,7 +161,9 @@ export function buy(game, row) {
 
   if (row.kind === 'mod') {
     game.mods = game.mods || {};
-    game.mods[row.id] = true;
+    const lvl = modLevel(game, row.id);
+    if (lvl >= maxLevel(row.id)) return null;
+    game.mods[row.id] = lvl + 1;
     game.coins -= row.cost;
     applyMods(game);
     return 'FITTED ' + row.name;
@@ -135,11 +186,11 @@ export function applyMods(game) {
   // Coils bought in the shop stack multiplicatively with the Lodestone mod,
   // so a pilot who invests in both barely has to steer for loot at all.
   const coils = PICKUP.magnetLevels[Math.min(p.magnetLevel || 0, PICKUP.magnetLevels.length - 1)];
-  p.magnetMul = coils * (m.magnet ? 2 : 1);
-  p.scrapeMul = m.plating ? 0.6 : 1;
-  p.reloadMul = m.autoloader ? 0.65 : 1;
-  p.coinMul = m.scavenger ? 2 : 1;
-  p.keepGunOnDeath = m.reclaimer ? 1 : 0;
+  p.magnetMul = coils * modMul(game, 'magnet');
+  p.scrapeMul = modLevel(game, 'plating') ? 0.6 : 1;
+  p.reloadMul = modLevel(game, 'autoloader') ? 0.65 : 1;
+  p.coinMul = modMul(game, 'scavenger');
+  p.keepGunOnDeath = modLevel(game, 'reclaimer') ? 1 : 0;
   if (m.afterburner && !p._afterburner) {
     p._afterburner = true;
     p.maxVXBonus += 40;

@@ -36,9 +36,32 @@ export const SPEC = {
   leech:   { hp: 3, speed: 210, score: 260, r: 10, drain: 11, grabR: 15 },
 };
 
+// A deflector bubble, fitted to some attackers on later hulls. Unlike a
+// warder's plate it covers every side: there is no angle to flank it from,
+// only damage to put through it. It is drawn, because an enemy that eats
+// shots for no visible reason is a bug as far as the player is concerned.
+export const SHIELD = {
+  hp: 9,                 // damage it absorbs before the hull is reachable
+  r: 7,                  // how far outside the attacker it sits
+  // Which kinds can carry one, and how likely that is per hull index. The
+  // first hulls field none at all: a shield is a thing the campaign
+  // introduces, not a thing it opens with.
+  kinds: ['orbiter', 'warder', 'bomber', 'splitter', 'leech'],
+  fromLevel: 3,
+  chance: 0.22,          // on the first hull that fields them
+  perLevel: 0.09,        // and this much more each hull after
+  hpPerLevel: 2.5,       // tougher the deeper you go
+};
+
+export function shieldChanceFor(levelIndex) {
+  if (levelIndex < SHIELD.fromLevel) return 0;
+  return Math.min(0.75, SHIELD.chance + SHIELD.perLevel * (levelIndex - SHIELD.fromLevel));
+}
+
 export const foes = makePool(26, () => ({
   kind: 'mine', x: 0, y: 0, baseY: 0, vx: 0, vy: 0,
   hp: 0, t: 0, cd: 0, state: 0, dead: false, flash: 0, facing: -1,
+  shield: 0, shieldMax: 0, shieldFlash: 0,
 }));
 
 export function resetFoes() { foes.clear(); }
@@ -62,6 +85,16 @@ export function spawnFoe(game, kind) {
   f.cd = 0.4 + Math.random() * 0.8;
   f.state = 0;
   f.flash = 0;
+
+  // Deflector, on the kinds that can carry one, from the middle of the
+  // campaign onward.
+  f.shield = 0;
+  f.shieldMax = 0;
+  f.shieldFlash = 0;
+  if (SHIELD.kinds.includes(kind) && Math.random() < shieldChanceFor(game.levelIndex || 0)) {
+    f.shieldMax = Math.round(SHIELD.hp + SHIELD.hpPerLevel * (game.levelIndex || 0));
+    f.shield = f.shieldMax;
+  }
   return f;
 }
 
@@ -80,6 +113,7 @@ export function updateFoes(game, dt) {
     const spec = SPEC[f.kind];
     f.t += dt;
     if (f.flash > 0) f.flash -= dt;
+    if (f.shieldFlash > 0) f.shieldFlash -= dt;
 
     switch (f.kind) {
       case 'mine': {
@@ -253,6 +287,19 @@ export function hitFoe(game, index, sx, sy, dmg) {
   if (foeShielded(f, sx, sy)) {
     sparks(sx, sy, -1, 0, 3, '#8e9aa9');
     return true;      // absorbed by the plate
+  }
+
+  // The deflector takes the hit first, from any angle. Overkill carries
+  // through to the hull so a heavy shot is not wasted on the last point of
+  // it — but the bubble has to be gone before the attacker can die.
+  if (f.shield > 0) {
+    const through = dmg - f.shield;
+    f.shield = Math.max(0, f.shield - dmg);
+    f.shieldFlash = 0.12;
+    sparks(sx, sy, -1, 0, 5, f.shield > 0 ? '#4fd0e8' : '#b4f4ff');
+    sfxEnemyHit();
+    if (through <= 0) return true;
+    dmg = through;
   }
 
   f.hp -= dmg;

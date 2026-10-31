@@ -80,6 +80,8 @@ backend down**; you lose the leaderboard, not the game.
 | The radar: guns, loot, minibosses, the arena | Coins, a bar, a coffin and the four treasures |
 | ![Overview](docs/overview.png) | ![Shop](docs/shop.png) |
 | The hull bonus, the refit and the mods fitted | The armourer between hulls |
+| ![Laser gate](docs/laser.png) | ![Deflector shields](docs/shields.png) |
+| A laser gate: shoot the emitter or go no further | Deflectors, from whole to nearly gone |
 
 ## The hulls
 
@@ -112,15 +114,26 @@ stage-naming ritual.
 | --- | --- | --- | --- | --- |
 | **ARGENTUM** — patrol hull | 12,000px | 3 | 172px/s, every 1.5s | DROSS |
 | **OSMIUM** — line hull | 14,500px | 4 | 196px/s, every 1.2s | QUENCH |
-| **TANTALUM** — flagship hull | 17,000px | 5 | 220px/s, every 0.98s | OVERDRIVE |
-| **CUPRUM** — salvage hulk | 18,500px | 6 | 236px/s, every 0.9s | QUENCH |
-| **PYRITE** — foundry hull | 20,000px | 7 | 252px/s, every 0.82s | OVERDRIVE |
-| **WOLFRAM** — siege hull | 21,500px | 8 | 266px/s, every 0.75s | OVERDRIVE |
-| **FERRUM** — derelict hull | 23,000px | 9 | 280px/s, every 0.7s | DROSS |
-| **AURUM** — admiralty hull | 25,000px | 10 | 294px/s, every 0.64s | OVERDRIVE |
+| **TANTALUM** — flagship hull | 17,000px | 5 | 220px/s, every 0.98s | GANTRY |
+| **CUPRUM** — salvage hulk | 18,500px | 6 | 236px/s, every 0.9s | OVERDRIVE |
+| **PYRITE** — foundry hull | 20,000px | 7 | 252px/s, every 0.82s | CORSAIR |
+| **WOLFRAM** — siege hull | 21,500px | 8 | 266px/s, every 0.75s | VACUUM |
+| **FERRUM** — derelict hull | 23,000px | 9 | 280px/s, every 0.7s | BLACKSTAR |
+| **AURUM** — admiralty hull | 25,000px | 10 | 294px/s, every 0.64s | HAMMERFALL |
 
-On each hull: fly to the far end, **kill what is guarding it**, then run back to
-the dock. Dying out of ships ends the run wherever you are.
+One hull, one direction: fly to the far end, **kill what is guarding it**,
+and the way out opens. The ship then flies itself through — controls locked,
+accelerating, off the right-hand edge — and the next hull is waiting.
+
+It used to send you back down the same hull the other way. That doubled
+every run without adding anything to it: the guns were already broken and
+the loot already collected, so the return leg was a commute. What is left is
+the part that was always the game.
+
+Dying out of ships ends the run wherever you are.
+
+The tune table above is per hull; each one also has its own theme, attacker
+roster, tower roster and laser gates.
 
 ## Gun towers
 
@@ -157,6 +170,28 @@ Homing is implemented as a turn rate on the shot itself (`seek` in
 that accelerated while turning would be unavoidable, and a test asserts its
 speed never changes.
 
+## Laser gates
+
+![A laser gate](docs/laser.png)
+
+A wall of light across the hull, lit by an emitter clamped to the girder
+above or below it. It is the one obstacle in the game that cannot be dodged:
+the ship is *stopped* by it, not merely hurt, so leaning on the throttle
+gets you nothing but a drained shield.
+
+The emitter is the way through, and the only way. Fly to its height, break
+it, and the beam dies with it. Shots pass through the beam on purpose —
+the emitter sits at one end of the very wall that guards it, so a beam that
+stopped bullets would be a wall with no door.
+
+That makes a gate a different kind of cost from everything else on the hull.
+Every other threat is paid for in reflexes; this one is paid for in the
+seconds you spend lined up on a fixed point with the rest of the hull still
+shooting at you. They start on TANTALUM and there are four on AURUM, placed
+deterministically from the hull's own seed and nudged clear of any block, so
+no hull can generate an emitter you cannot reach. A test walks every hull
+and checks exactly that.
+
 ## Attackers
 
 Interceptors teach dodging and turrets teach prioritising. Four more types
@@ -177,6 +212,25 @@ arrive hull by hull, each asking a different question:
 
 Which hull fields which is `LEVELS[].foes` in `src/config.js`. ARGENTUM
 fields none of them — the first hull is turrets and interceptors only.
+
+### Deflector shields
+
+![Shielded attackers](docs/shields.png)
+
+From CUPRUM onward, some attackers arrive inside a deflector: a faceted
+bubble that has to be shot through before the thing inside it can be hurt
+at all. Unlike a warder's frontal plate there is no angle to flank it from
+— only damage to put through it.
+
+It is drawn, and it reports its own state: cyan while it is whole, yellow
+as it wears, orange at the last of it, with an arc above showing what is
+left. An attacker that ate shots for no visible reason would read as a bug
+rather than as a thing to shoot harder.
+
+Overkill carries through to the hull, so a heavy shot is not wasted on the
+last point of a shield — but the bubble has to be gone before the attacker
+can die. The odds start at 22% on CUPRUM and climb to 54% on AURUM, and
+only the five kinds in `SHIELD.kinds` can carry one.
 
 ## Minibosses
 
@@ -381,17 +435,26 @@ the interesting decisions live:
 
 Upgrades worth calling out: **TRACTOR COILS** widens the pull radius on
 everything you collect, in three steps up to ×2.6, and stacks with the
-Lodestone mod for ×5.2 — a fully coiled ship sweeps coins off most of the
-screen, which changes how a hull is flown as much as any gun does.
+Lodestone mod — a fully coiled ship with Lodestone III sweeps loot off most
+of the screen, which changes how a hull is flown as much as any gun does.
 
-| Mod | Effect |
-| --- | --- |
-| **LODESTONE** | Pickups and coins pull from twice as far (stacks with Tractor Coils) |
-| **ABLATIVE PLATING** | Hull scrapes cost 40% less shield |
-| **AUTOLOADER** | Ordnance reloads 35% faster |
-| **SCAVENGER RIG** | Coins are worth double |
-| **AFTERBURNER** | +40 top speed, quicker acceleration |
-| **RECLAIMER** | Keep one gun level when a ship is lost |
+| Mod | Tiers | Effect |
+| --- | --- | --- |
+| **LODESTONE** | I · II · III | Loot pulls from ×2 / ×3.2 / ×4.8 as far (stacks with Tractor Coils) |
+| **SCAVENGER RIG** | I · II · III | Everything you pick up is worth ×2 / ×2.8 / ×3.6 |
+| **ABLATIVE PLATING** | — | Hull scrapes cost 40% less shield |
+| **AUTOLOADER** | — | Ordnance reloads 35% faster |
+| **AFTERBURNER** | — | +40 top speed, quicker acceleration |
+| **RECLAIMER** | — | Keep one gun level when a ship is lost |
+
+The two that change how the whole hull is flown — how far loot reaches and
+what it is worth — go up to three tiers, each dearer than the last
+(900/1800/3200 and 1100/2200/3800). A pilot who takes a mod to III is
+choosing it over everything else in the shop, which is the only reason a
+tier list is more interesting than one bigger number. Scavenger lifts the
+worth of coins, bars, coffins **and** treasure: it used to leave coffins and
+treasure alone, which made the mod worth least exactly where the loot was
+worth most.
 
 There are never enough coins for everything, which is the point — the
 interesting choice is what to go without. A run with Scavenger plays
@@ -438,9 +501,13 @@ read the toast.
 | **RELIQUARY** | 9,000 | 230 coins | the one you tell someone about |
 
 The odds start at 2.2% a kill on ARGENTUM and climb to 6.4% on AURUM, so the
-late game pays for the trouble it causes. A boss rolls seven times, which is
-why flying into its wreck is worth the risk. All of it is `PICKUP.treasure`
-in `src/config.js`.
+late game pays for the trouble it causes. A boss rolls seven times and a
+miniboss four. All of it is `PICKUP.treasure` in `src/config.js`.
+
+**A boss carries a hold, and a hold is not a dice roll.** Every boss sheds
+three to six gold bars and one or two coffins on death; every miniboss one
+to three bars and a coffin. The wreck is worth flying into because of what
+is in it, not because of what might be.
 
 Treasure also shows on the radar as a full-height mark in the lane, which is
 the point of having a radar: seeing a reliquary four thousand pixels back is
@@ -606,6 +673,20 @@ Two details matter, and both were got wrong first:
 A scale that proves too slow is never retried in that session, so it cannot
 oscillate. `test/display.test.mjs` covers the decision table directly,
 including the 144Hz case and the single-slow-frame case.
+
+**Menus are not gameplay, and are not rendered at gameplay's cap.** The cap
+exists to protect the frame rate of a scrolling hull with a few hundred
+sprites on it. A menu is a dim rect and some text over a frozen world. It
+had been inheriting whatever cap gameplay settled on: on a 2560px window
+that meant a 960×540 backing store blown up 2.6× by the browser, and the
+overview, the armourer and the settings page — the three screens made
+almost entirely of text — were the blurriest thing in the game.
+
+They now render at the full window scale, and the frames they produce are
+kept out of the adaptive estimate entirely, so a cheap menu cannot talk the
+scaler into a cap that gameplay then has to live with. Bloom is skipped
+behind a menu too: the world there is under an 80% dim rect, so the glow is
+invisible, and skipping it more than pays for the extra resolution.
 
 On top of the plating and sprites:
 
@@ -909,6 +990,7 @@ src/player.js     ship physics, flip, firing, hull collision response
 src/enemies.js    turret and interceptor behaviour
 src/miniboss.js   the four mid-hull minibosses
 src/bossart.js    eight boss bodies and their destructible sections
+src/gates.js      laser gates: the wall, the emitter, and what breaks it
 src/score.js      difficulty multipliers, and the one way points are awarded
 src/game.js       state machine, collision pairs, run objective
 src/render.js     world drawing
@@ -980,6 +1062,14 @@ Several exist because of bugs that shipped:
   every tune over every chord lands in the audible range, and that no two
   hulls in sequence play the same tune. The music cannot be heard from here,
   so what can be checked is checked.
+- **`test/gates.test.mjs`** walks every hull and asserts no emitter is
+  generated inside a block — a gate whose emitter cannot be shot is a hull
+  that cannot be finished — and that the beam holds the ship at its clear
+  distance with the thrust held down, rather than merely bouncing it, which
+  enough speed would push through.
+- **`test/mods.test.mjs`** asserts no two shop rows share an id. The Tractor
+  Coils upgrade and the Lodestone mod both used `magnet`, so anything that
+  looked a row up by id got whichever came first.
 - **`tools/optimise_gallery.py`** measures the most saturated pixel before
   and after quantising and fails the build if it drops by a quarter. It was
   written after noticing that every README image had been losing most of its
@@ -1003,10 +1093,13 @@ a stale gap list is worse than none, so this is current as of the version in
 below follows from that one fact.
 
 - **Balance is all first guesses.** Eight hulls, eight bosses, four
-  minibosses, eight attacker types, six tower types, four treasure tiers,
-  the coin economy, the armourer's prices, the refit curve, the end-of-hull
-  bonus and the four difficulty settings were all picked by reasoning about
-  them, not by playing them. Whether a run
+  minibosses, eight attacker types, six tower types, laser gates, deflector
+  shields, four treasure tiers, the coin economy, the armourer's prices and
+  mod tiers, the refit curve, the end-of-hull bonus and the four difficulty
+  settings were all picked by reasoning about them, not by playing them.
+  Whether a laser gate is a tense obstacle or an annoying stop, and whether
+  shields make the late hulls interesting or spongy, are exactly the
+  questions a test cannot answer. Whether a run
   outgrows its hull, whether RUIN is hard or merely tedious, and whether
   stopping for a BULWARK is ever worth the coins are open questions. The
   numbers are all data: `LEVELS`, `BOSSES`, `LEVEL_UP`, `PICKUP`, `ARMORY`
@@ -1034,6 +1127,10 @@ below follows from that one fact.
 - **The radar overlaps the playfield.** It fades while you fly under it,
   which works, but the honest fix is a taller HUD — and that would shorten
   the playfield, which changes the game rather than the chrome.
+- **The adaptive scaler still climbs slowly.** Menus are sharp now because
+  they ignore the cap, but gameplay itself takes about twenty seconds of
+  flying to reach the resolution a machine can actually hold. The pacing is
+  deliberately cautious and has never been tuned against real hardware.
 - **Single-process storage.** JSON snapshots, no SQL, no horizontal scaling.
 - **Account recovery needs a password.** A pilot who never set one is only
   the token in `localStorage`: lose it and that identity is gone, though

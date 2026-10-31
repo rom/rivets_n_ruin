@@ -77,7 +77,7 @@ export function updateMinis(game, dt) {
   const p = game.player;
 
   // trigger: the player passes a planned point on the outbound leg
-  if (!game.returning && game.miniPlan) {
+  if (game.miniPlan && !game.boss) {
     for (const slot of game.miniPlan) {
       if (slot.spawned || p.x < slot.x - VIEW_W * 0.55) continue;
       slot.spawned = true;
@@ -208,8 +208,7 @@ export function hitMini(game, index, sx, sy, dmg) {
   addLight(m.x, m.y, 130, 0.4, m.spec.colour);
   sfxExplode(2.2);
   kick(game.cam, 11);
-  spoils(game, m.x, m.y, 'boss');
-  spawnPickup(game, m.x, m.y - 30, 'coffin');
+  spoils(game, m.x, m.y, 'mini');
   return true;
 }
 

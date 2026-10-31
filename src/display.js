@@ -34,7 +34,31 @@ const S = {
   recent: [],          // rolling interval samples backing that estimate
   budget: [],
   cooldown: 0,
+  static: false,       // a menu is up: see setStatic
 };
+
+// --- static mode
+//
+// The adaptive cap exists to protect the frame rate of a scrolling hull with
+// a few hundred sprites on it. A menu has none of that: it is a dim rect and
+// some text over a frozen world, and it does not need protecting.
+//
+// Without this the overview, the armourer and the settings page all rendered
+// at whatever cap gameplay had settled on — on a 2560px window that meant a
+// 960x540 backing store upscaled 2.6x by the browser, which is exactly as
+// blocky as it sounds. They now render at the full window scale, and the
+// frames they produce are kept out of the adaptive estimate entirely, so a
+// cheap menu cannot talk the scaler into a cap that gameplay then has to
+// live with.
+export const isStatic = () => S.static;
+
+export function setStatic(on) {
+  if (S.static === !!on) return false;
+  S.static = !!on;
+  return true;
+}
+
+const targetScale = () => (S.static ? S.wanted : Math.min(S.wanted, S.cap));
 
 export const renderScale = () => S.scale;
 // Bumped whenever the scale changes, so caches keyed on it can invalidate.
@@ -61,7 +85,7 @@ export function fitCanvas(canvas, ctx) {
   const scale = computeScale(cssW, cssH);
 
   S.wanted = scale;
-  const capped = Math.min(scale, S.cap);
+  const capped = targetScale();
   const changed = capped !== S.scale;
   S.scale = capped;
   S.cssW = cssW;
@@ -140,6 +164,12 @@ export function decideScale(st) {
 }
 
 export function reportFrame(ms, canvas, ctx) {
+  // A menu frame says nothing about whether gameplay can hold its rate, in
+  // either direction: it is cheaper to draw and it renders at a different
+  // scale. Measuring it would either talk the cap up on evidence that does
+  // not apply, or down because the resize itself cost a frame.
+  if (S.static) return false;
+
   // Estimate the display period from a low percentile of recent intervals.
   if (ms > 4 && ms < 200) {
     S.recent.push(ms);

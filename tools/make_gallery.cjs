@@ -253,6 +253,53 @@ const OUT = path.join(__dirname, '..', 'docs');
   await page.waitForTimeout(150);
   await shot('treasure.png', { x: 0, y: 0, width: 1400, height: 520 });
 
+  // --- a laser gate, with the ship held against it
+  console.log('laser:');
+  await page.evaluate(async () => {
+    const { buildLevel } = await import('./src/level.js');
+    const fo = await import('./src/foes.js');
+    const g = window.game;
+    g.levelIndex = 5;
+    g.level = buildLevel(g.specs[5]);
+    fo.resetFoes();
+    g.boss = null;
+    const gate = g.level.gates[0];
+    g.player.x = gate.x - 16;
+    g.player.y = 170;
+    g.player.invuln = 1e9;
+    g.cam.x = gate.x - 330;
+  });
+  await clear();
+  await page.waitForTimeout(260);
+  await shot('laser.png', { x: 0, y: 0, width: 1400, height: 620 });
+
+  // --- deflector shields, at four states of wear
+  console.log('shields:');
+  const poseShields = () => page.evaluate(async () => {
+    const fo = await import('./src/foes.js');
+    const g = window.game;
+    const kinds = ['orbiter', 'warder', 'bomber', 'splitter', 'leech'];
+    if (!fo.foes.count) {
+      fo.resetFoes();
+      g.player.x = g.cam.x + 320;
+      g.player.y = 290;
+      g.player.invuln = 1e9;
+      for (const k of kinds) fo.spawnFoe(g, k);
+    }
+    for (let i = 0; i < fo.foes.count; i++) {
+      const f = fo.foes.items[i];
+      f.shieldMax = Math.round(14 - i * 2);
+      f.shield = Math.max(1, Math.round(f.shieldMax * [1, 0.78, 0.5, 0.26, 0.1][i]));
+      f.x = g.cam.x + 90 + i * 110;
+      f.baseY = 120; f.y = 120; f.t = 0.6; f.state = 0; f.shieldFlash = 0;
+    }
+  });
+  await poseShields();
+  await clear();
+  await page.waitForTimeout(150);
+  await poseShields();
+  await shot('shields.png', { x: 0, y: 0, width: 1400, height: 420 });
+
   // --- the overview, with a bonus and mods on it
   console.log('overview:');
   await page.evaluate(async () => {
@@ -264,7 +311,7 @@ const OUT = path.join(__dirname, '..', 'docs');
     g.score = 148250; g.time = 212.4; g.coins = 1840;
     g.player.lives = 3; g.player.shieldMax = 170; g.player.accelMul = 1.26;
     g.player.maxVXBonus = 60; g.player.gunCap = 4; g.player.gunSpeed = 3; g.player.gunBlaze = 2;
-    g.mods = { magnet: true, scavenger: true, afterburner: true };
+    g.mods = { magnet: 3, scavenger: 2, afterburner: 1 };
     g.deathsThisHull = 0;
     g.hullHaul = { coins: 612, bars: 4, coffins: 2, treasures: 3, value: 24150 };
     g.level.turrets.forEach((t, i) => { t.dead = i % 7 !== 0; });

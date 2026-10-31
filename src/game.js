@@ -4,6 +4,7 @@ import {
 } from './config.js';
 import { diff, award } from './score.js';
 import { buildLevel, obstaclesNear } from './level.js';
+import { updateGates, hitGate, gateHit, liveGates } from './gates.js';
 import { makeBoss, updateBoss, hitBoss, bossBeaten, arenaLeft } from './boss.js';
 import { makeCamera, updateCamera, kick } from './camera.js';
 import { makePlayer, updatePlayer, respawn } from './player.js';
@@ -21,7 +22,7 @@ import {
   minis, resetMinis, planMinis, updateMinis, hitMini, hitMinis, miniTargets,
 } from './miniboss.js';
 import { resetShop, applyMods } from './shop.js';
-import { SPLASH_TIME, LAUNCH_TIME, LANDING_TIME, ENDING_TIME, launchPose, landingPose } from './sequences.js';
+import { SPLASH_TIME, LAUNCH_TIME, EXIT_TIME, ENDING_TIME, launchPose, exitPose } from './sequences.js';
 import { tapped, anyTapped, endFrame } from './input.js';
 import {
   sfxCoin, sfxGoldBar, sfxCoffin, sfxTreasure,
@@ -46,7 +47,7 @@ export function makeGame(modSpec = null) {
     cam: makeCamera(),
     player: makePlayer(),
     state: 'splash',       // splash | title | launching | play | dying
-                           // | landing | levelclear | gameover | ending | victory
+                           // | exiting | levelclear | gameover | ending | victory
     stateT: 0,
     specs,
     levelIndex: 0,
@@ -70,7 +71,6 @@ export function makeGame(modSpec = null) {
     time: 0,        // clock for the current hull, shown on the clear screen
     runTime: 0,     // clock for the whole campaign, which is what gets submitted
     toast: null,
-    returning: false,      // outbound leg done, now fly the hull back
     boss: null,            // set once the arena at the far end is entered
     miniPlan: planMinis(level, 0),   // where along this hull minibosses wait
     quitting: false,       // quit confirmation is open
@@ -120,6 +120,11 @@ function reset(game) {
     game.level = buildLevel(game.specs[at]);
   }
   setTune(game.specs[at].tune);
+  for (const g of game.level.gates || []) {
+    g.dead = false;
+    g.hp = g.maxHp;
+    g.flash = 0;
+  }
   for (const t of game.level.turrets) {
     t.dead = false;
     t.hp = game.level.spec.turretHp;
@@ -148,7 +153,6 @@ function reset(game) {
   game.submitted = false;
   game.spawnCd = 1.2;
   game.foeCd = 3.0;
-  game.returning = false;
   game.boss = null;
   game.quitting = false;
   game.flash = 0;
@@ -206,7 +210,6 @@ function loadNextHull(game) {
   p.invuln = SHIP.invuln;
   p.alive = true;
 
-  game.returning = false;
   game.submitted = false;
   game.boss = null;
   game.time = 0;          // per-hull clock restarts; runTime keeps going
@@ -252,8 +255,8 @@ function reportRun(game) {
 // about to give out.
 function scoreIntensity(game) {
   if (game.state !== 'play' && game.state !== 'dying') return 0;
-  if (game.levelIndex > 0 && game.returning) return 3;
-  if (game.returning || game.player.shield < 30) return 3;
+  // The boss fight and a failing shield are the two moments worth a layer.
+  if (game.boss || game.player.shield < 30) return 3;
   return 2;
 }
 
@@ -272,19 +275,20 @@ export function update(game, dt) {
     return;
   }
 
-  // --- launching and landing. The ship is on rails and the controls are
-  // locked, so neither can be flown out of; either can be skipped.
-  if (game.state === 'launching' || game.state === 'landing') {
-    const dur = game.state === 'launching' ? LAUNCH_TIME : LANDING_TIME;
+  // --- launching and the run out through the far end. The ship is on rails
+  // and the controls are locked, so neither can be flown out of; either can
+  // be skipped.
+  if (game.state === 'launching' || game.state === 'exiting') {
+    const dur = game.state === 'launching' ? LAUNCH_TIME : EXIT_TIME;
     const k = clamp(game.stateT / dur, 0, 1);
     const pose = game.state === 'launching'
       ? launchPose(k)
-      : landingPose(k, game.seqFromX);
+      : exitPose(k, game.seqFromX, game.seqFromY);
     const p = game.player;
     p.x = pose.x;
     p.y = pose.y;
     p.vx = 0; p.vy = 0;
-    p.facing = game.state === 'landing' ? -1 : 1;
+    p.facing = 1;
     game.seqThrust = pose.thrust;
     game.seqTilt = pose.tilt;
     if (pose.thrust > 0.15 && Math.random() < dt * 60) {
@@ -369,7 +373,7 @@ export function update(game, dt) {
       reset(game);
       game.state = 'launching';
       game.stateT = 0;
-      banner(game, "RIVETS 'N RUIN", 'RUN THE HULL — AND RUN IT BACK', 2.6);
+      banner(game, "RIVETS 'N RUIN", 'BREAK THE GUNS — RUN THE HULL THROUGH', 2.6);
     }
     updateParticles(dt);
     endFrame();
@@ -407,6 +411,9 @@ export function update(game, dt) {
   const p = game.player;
 
   updatePlayer(p, game, dt);
+  // Gates run immediately after the ship moves, so a beam stops it in the
+  // same frame rather than letting it sit a frame inside the wall.
+  updateGates(game, dt);
   updateTurrets(game, dt);
   updateInterceptors(game, dt);
   updateFoes(game, dt);
@@ -425,7 +432,7 @@ export function update(game, dt) {
     game.boss && !bossBeaten(game.boss) ? arenaLeft(game) : null);
 
   // --- the arena at the far end
-  const inArena = !game.returning && p.x > arenaLeft(game) + 70;
+  const inArena = p.x > arenaLeft(game) + 70;
   if (inArena && !game.boss) {
     game.boss = makeBoss(game);
     banner(game, game.boss.name, game.boss.spec.tag, 3.0);
@@ -439,26 +446,27 @@ export function update(game, dt) {
     if (p.x <= left + 24 && p.vx < 0) p.vx = 0;
   }
 
-  // two-way objective: the boss opens the way back, the dock finishes you
-  if (!game.returning && game.boss && bossBeaten(game.boss)) {
-    game.returning = true;
+  // One objective, one direction: break the boss and the far end opens.
+  // Flying the same hull back the other way doubled its length without
+  // adding anything to it — the guns were already broken and the loot
+  // already collected, so the return leg was a commute.
+  if (game.boss && bossBeaten(game.boss)) {
     game.boss = null;
-    banner(game, 'WAY OPEN — TURN AND BURN', 'RUN THE HULL BACK TO THE DOCK', 3.0);
-    award(game, 2500);
-    sfxTurnaround();
-  } else if (game.returning && p.x < APRON * 0.55) {
     game.seqFromX = p.x;
+    game.seqFromY = p.y;
     // Award the bonuses BEFORE anything reads the score. This used to report
     // the run to the backend first, so every submitted completion was short
     // by its own completion bonus.
+    award(game, 2500);
     award(game, 5000 + Math.max(0, Math.round((260 - game.time) * 25)));
     game.bonus = hullBonus(game);
     for (const line of game.bonus.lines) award(game, line.points);
     game.stateT = 0;
     sfxComplete();
 
-    // Hand over to the landing sequence; it decides what comes next.
-    game.state = 'landing';
+    // The ship flies itself out through the far end; that sequence decides
+    // what comes next.
+    game.state = 'exiting';
     game.banner = null;
   }
 
@@ -503,6 +511,9 @@ function collectSeekable(game) {
   for (const t of game.level.turrets) {
     if (!t.dead && Math.abs(t.x - px) < 420) out.push(t);
   }
+  for (const g of liveGates(game.level)) {
+    if (Math.abs(g.x - px) < 420) out.push({ x: g.x, y: g.y + g.dir * 7 });
+  }
   const b = game.boss;
   if (b && !b.dead && b.entry <= 0) {
     const live = b.parts.filter((pt) => !pt.dead);
@@ -537,6 +548,9 @@ function applyBlasts(game) {
     for (const t of game.level.turrets) {
       if (!t.dead && hit(t.x, t.y)) hitTurret(game, t, bl.dmg);
     }
+    for (const g of game.level.gates || []) {
+      if (!g.dead && hit(g.x, g.y + g.dir * 7)) hitGate(game, g, bl.dmg);
+    }
     const b = game.boss;
     if (b && !b.dead && b.entry <= 0) {
       for (const pt of b.parts) {
@@ -563,7 +577,7 @@ function finishSequence(game) {
     p.invuln = Math.max(p.invuln, 0.8);   // a moment of grace off the pad
     return;
   }
-  // landing
+  // the run out through the far end
   if (game.levelIndex < game.specs.length - 1) {
     game.state = 'levelclear';
     game.banner = null;
@@ -689,6 +703,13 @@ function collide(game) {
     if (!gone && hitMinis(game, s.x, s.y, s.dmg)) gone = true;
 
     if (!gone && game.boss && hitBoss(game, game.boss, s.x, s.y, s.dmg)) gone = true;
+
+    if (!gone) {
+      for (const g of game.level.gates || []) {
+        if (g.dead) continue;
+        if (gateHit(g, s.x, s.y)) { hitGate(game, g, s.dmg); gone = true; break; }
+      }
+    }
 
     if (!gone) {
       for (const t of game.level.turrets) {

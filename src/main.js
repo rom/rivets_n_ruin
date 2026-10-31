@@ -1,5 +1,5 @@
 import { VIEW_W, VIEW_H } from './config.js';
-import { fitCanvas, applyTransform, reportFrame } from './display.js';
+import { fitCanvas, applyTransform, reportFrame, setStatic } from './display.js';
 import { initInput, tapped, endFrame } from './input.js';
 import { startLoop } from './loop.js';
 import { makeGame, update, syncBest } from './game.js';
@@ -24,6 +24,16 @@ const ctx = canvas.getContext('2d', { alpha: false });
 // and especially text — is rasterised at display resolution rather than
 // drawn into 640x360 and blown up. See display.js.
 function fit() { fitCanvas(canvas, ctx); }
+
+// Everything that is a screen rather than a flight: a menu, a prompt, or one
+// of the states whose whole content is drawn over a dimmed world.
+const SCREEN_STATES = new Set([
+  'splash', 'title', 'levelclear', 'gameover', 'ending', 'victory',
+]);
+function isOverlay() {
+  return shopOpen || settingsOpen || paused || game.quitting
+    || SCREEN_STATES.has(game.state);
+}
 window.addEventListener('resize', fit);
 fit();
 
@@ -153,6 +163,11 @@ startLoop(
   },
   () => {
     const t0 = performance.now();
+    // Menus are not gameplay and must not be rendered at gameplay's cap: a
+    // page of text upscaled 2.6x by the browser is the single most visible
+    // thing in the game. Resizing resets the context, so this has to happen
+    // before the transform goes on.
+    if (setStatic(isOverlay())) fit();
     applyTransform(ctx);   // a resize resets context state; re-establish it
     drawWorld(ctx, game);
     drawHud(ctx, game, { muted: isMuted(), audio: ready() });
