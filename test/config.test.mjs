@@ -83,9 +83,32 @@ test('boss difficulty rises monotonically', () => {
   }
 });
 
-test('every boss kind is distinct', () => {
+// Every behaviour the game has must actually appear, and nothing may ask
+// for one that does not exist. The deep campaign reuses them on purpose —
+// a ninth pattern invented to fill a table is a worse boss than a known
+// one at a harder tempo — so the uniqueness claim is about the first pass
+// through, not about the whole list.
+test('every boss behaviour appears, and none is invented', () => {
   const kinds = BOSSES.map((b) => b.kind);
-  assert.equal(new Set(kinds).size, kinds.length, `repeated boss kind in ${kinds.join(', ')}`);
+  const known = new Set(kinds);
+  assert.equal(known.size, 8, `expected eight behaviours, got ${[...known].join(', ')}`);
+  // the opening run of the campaign shows each exactly once
+  const first = kinds.slice(0, known.size);
+  assert.equal(new Set(first).size, first.length,
+    `the first ${known.size} bosses repeat a behaviour: ${first.join(', ')}`);
+});
+
+test('every boss kind has a body drawn for it', async () => {
+  const art = await import('../src/bossart.js');
+  // bossart falls back to the riveter for an unknown kind, which is right
+  // for something unknown and wrong for a kind the config actually ships.
+  const c = document.createElement('canvas').getContext('2d');
+  for (const b of BOSSES) {
+    art.drawBossBody(c, {
+      kind: b.kind, t: 1, flash: 0, parts: [], hp: 1, maxHp: 1,
+      x: 0, y: 0, dead: false, entry: 0, blinkT: 0,
+    });
+  }
 });
 
 // Gun levels index straight into these arrays. The cap can rise by one per

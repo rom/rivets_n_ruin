@@ -28,7 +28,7 @@ import { modLevel } from './shop.js';
 // 26x14 — visibly a bigger machine, without the sprite claiming space the
 // hitbox does not occupy. Wings and fins reach past that, which is what
 // wings do, and they are not what you collide with either.
-export const MARKS = [
+const CORE_MARKS = [
   { nose: 13, tail: -12, half: 7.0, engines: 1, wing: 0, armour: 0, fins: 0, gild: 0 },
   { nose: 14, tail: -12, half: 7.3, engines: 1, wing: 1, armour: 0, fins: 0, gild: 0 },
   { nose: 14, tail: -13, half: 7.6, engines: 2, wing: 1, armour: 1, fins: 0, gild: 0 },
@@ -39,8 +39,35 @@ export const MARKS = [
   { nose: 18, tail: -15, half: 9.0, engines: 4, wing: 4, armour: 3, fins: 2, gild: 2 },
 ];
 
+// Seventeen more airframes for the deep campaign. The first eight are the
+// shape of the game being taught; past that the airframe is near the limit
+// of what it may be without lying about the hitbox, so the later marks add
+// engines, wings and gilding rather than bulk. Every column still only
+// goes one way.
+const DEEP_MARKS = Array.from({ length: 17 }, (_, i) => {
+  const k = i + 1;
+  const last = CORE_MARKS[CORE_MARKS.length - 1];
+  return {
+    nose: Math.min(21, last.nose + Math.ceil(k / 5)),
+    tail: Math.max(-18, last.tail - Math.floor(k / 6)),
+    half: Math.min(10.4, +(last.half + k * 0.08).toFixed(2)),
+    engines: Math.min(6, last.engines + Math.floor(k / 7)),
+    wing: Math.min(7, last.wing + Math.floor(k / 5)),
+    armour: 3,
+    fins: Math.min(3, last.fins + Math.floor(k / 9)),
+    gild: Math.min(3, last.gild + Math.floor(k / 8)),
+  };
+});
+
+export const MARKS = [...CORE_MARKS, ...DEEP_MARKS];
+
 export const markOf = (levelIndex) => MARKS[Math.max(0, Math.min(MARKS.length - 1, levelIndex | 0))];
-const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
+// Up to twenty-five, because the campaign is.
+const ROMAN = [
+  'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII',
+  'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX', 'XXI', 'XXII',
+  'XXIII', 'XXIV', 'XXV',
+];
 export const markName = (levelIndex) =>
   'MARK ' + ROMAN[Math.max(0, Math.min(ROMAN.length - 1, levelIndex | 0))];
 

@@ -33,15 +33,29 @@ export function buildGates(r, spec, length, obstacles) {
   const span = last - first;
   const gates = [];
 
+  // Minimum separation. Two gates a hundred pixels apart are one gate with
+  // a bug in it, which is what the nudge below used to produce when it
+  // walked a gate most of the way into its neighbour's slot.
+  const MIN_GAP = 900;
+  const slot = span / n;
+
   for (let i = 0; i < n; i++) {
-    // Evenly spread, then jittered, so they are not metronomic.
-    let x = Math.round(first + (span * (i + 0.5)) / n + (r() - 0.5) * span * 0.25);
+    // Evenly spread, then jittered inside its own slot, so they are not
+    // metronomic and cannot wander into each other.
+    const centre = first + slot * (i + 0.5);
+    const lo = Math.max(first, centre - slot * 0.35,
+      gates.length ? gates[gates.length - 1].x + MIN_GAP : first);
+    const hi = Math.min(last, centre + slot * 0.35);
+    if (hi <= lo) continue;
+    let x = Math.round(lo + (hi - lo) * r());
     // Nudge off any block: a beam inside solid hull cannot be seen, and an
-    // emitter inside one cannot be shot.
-    for (let tries = 0; tries < 24; tries++) {
+    // emitter inside one cannot be shot. Bounded to this gate's own window,
+    // and wrapped, so it can never arrive on top of the next one.
+    for (let tries = 0; tries < 48; tries++) {
       const blocked = obstacles.some((o) => x > o.x - 30 && x < o.x + o.w + 30);
       if (!blocked) break;
       x += 46;
+      if (x > hi) x = Math.round(lo);
     }
     if (x <= first || x >= last) continue;
     const top = r() < 0.5;

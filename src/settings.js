@@ -22,6 +22,8 @@ export const DEFS = [
     help: 'Takes effect on the next run. Harder settings score more.' },
   { id: 'startHull', label: 'START HULL', kind: 'hull', def: 0,
     help: 'Begin on any hull you have reached. Earlier refits are credited.' },
+  { id: 'demo', label: 'ATTRACT DEMO', kind: 'bool', def: true,
+    help: 'Plays itself after two minutes idle. Any key stops it.' },
   { id: 'radar', label: 'RADAR STRIP', kind: 'bool', def: true,
     help: 'The map across the top: guns, loot, minibosses, the boss.' },
   { id: 'bloom', label: 'BLOOM', kind: 'bool', def: true,

@@ -113,7 +113,10 @@ const OUT = path.join(__dirname, '..', 'docs');
   // --- one strip per hull theme, framed on a stretch with structure in it
   console.log('hulls:');
   const hulls = await page.evaluate(() => window.game.specs.map((s) => s.name));
-  for (let i = 0; i < hulls.length; i++) {
+  // Every third hull past the first eight: twenty-five strips is a scroll,
+  // not a gallery, and the themes repeat on an eight-hull cycle anyway.
+  const SHOWN = hulls.map((_, i) => i).filter((i) => i < 8 || i % 4 === 3);
+  for (const i of SHOWN) {
     await page.evaluate(async (i) => {
       const { buildLevel } = await import('./src/level.js');
       const g = window.game;

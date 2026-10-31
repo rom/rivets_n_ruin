@@ -6,9 +6,14 @@ import (
 )
 
 func TestMinCompletionSec(t *testing.T) {
+	// A hull is flown one way now, not out and back, so the floor for the
+	// first one is roughly half what it was. The band is still a sanity
+	// check on the model rather than a measurement: 12,000px at the
+	// starting top speed cannot be under half a minute, and if it ever
+	// reads over a minute the distance or the speed is wrong.
 	one := MinCompletionSec(1)
-	if one < 60 || one > 120 {
-		t.Fatalf("one-hull minimum %.1fs is outside the plausible 60-120s band", one)
+	if one < 30 || one > 60 {
+		t.Fatalf("one-hull minimum %.1fs is outside the plausible 30-60s band", one)
 	}
 	// More hulls must take strictly longer, even though the ship speeds up.
 	prev := one

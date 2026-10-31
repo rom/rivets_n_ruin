@@ -147,6 +147,7 @@ export function drawHud(ctx, game, audio = {}) {
     drawRadar(ctx, game);
   }
   if (game.boss) drawBossBar(ctx, game.boss);
+  else if (game.lootT > 0) drawLootClock(ctx, game);
   if (game.toast && setting('damageNumbers')) drawToast(ctx, game.toast);
   if (game.banner) drawBanner(ctx, game.banner);
   if (game.state === 'launching') drawLaunchBanner(ctx, game, clamp(game.stateT / LAUNCH_TIME, 0, 1));
@@ -448,6 +449,47 @@ function diamondOutline(ctx, x, y, r) {
   ctx.closePath(); ctx.stroke();
 }
 
+// The window after a boss dies. Its hold is all over the arena and the
+// ship was walled in a second ago, so the clock is on screen rather than
+// left to be discovered by losing the loot.
+function drawLootClock(ctx, game) {
+  const left = Math.max(0, game.lootT);
+  const k = left / 10;
+  const w = 180;
+  const x = Math.round((VIEW_W - w) / 2);
+  const y = 16;
+
+  ctx.fillStyle = '#0a0d13';
+  ctx.fillRect(x - 2, y - 2, w + 4, 20);
+  ctx.fillStyle = '#1d2733';
+  ctx.fillRect(x, y + 10, w, 6);
+  ctx.fillStyle = left < 3 ? COL.danger : '#ffd24a';
+  ctx.fillRect(x, y + 10, Math.round(w * Math.min(1, k)), 6);
+
+  text(ctx, 'WRECK OPEN', x + 2, y, COL.warmHi, FONT);
+  text(ctx, left.toFixed(1) + 'S   ENTER TO GO',
+    x + w - 2, y, left < 3 ? COL.danger : COL.hudText, FONT, 'right');
+}
+
+// The attract badge. It has to be unmistakable — somebody walking up to
+// the machine must know at a glance that this is not their run.
+export function drawDemoBadge(ctx, game) {
+  const t = game.stateT;
+  // Wide enough for both labels: at 168 they overlapped in the middle.
+  const w = 206;
+  const x = Math.round((VIEW_W - w) / 2);
+  ctx.save();
+  ctx.globalAlpha = 0.8 + 0.2 * Math.sin(t * 3);
+  ctx.fillStyle = '#0a0d13';
+  ctx.fillRect(x, FIELD_H - 30, w, 20);
+  ctx.fillStyle = COL.warmHi;
+  ctx.fillRect(x, FIELD_H - 30, w, 1);
+  ctx.fillRect(x, FIELD_H - 11, w, 1);
+  text(ctx, 'ATTRACT MODE', x + 8, FIELD_H - 26, COL.warmHi, FONT);
+  text(ctx, 'ANY KEY TO PLAY', x + w - 8, FIELD_H - 26, COL.hudText, FONT, 'right');
+  ctx.restore();
+}
+
 // What the hull paid, itemised. The number alone tells you nothing about
 // which of the three things you did well, which is the only reason to show
 // a breakdown rather than a total.
@@ -489,9 +531,25 @@ function drawBonus(ctx, game, x, y) {
 // The ship, as it now stands: what the refit built in, and what was bought.
 // Mods were invisible here, so the one screen that is meant to answer "what
 // am I flying" left out the half of the answer you paid coins for.
+// The ship, as it now stands: what the refit built in, and what was
+// bought. Both halves are laid out from OVERVIEW so a test can measure
+// them — the mod list used to grow a row per mod with no bound, and with
+// everything fitted it ran straight through "ENTER TO LAUNCH" and the
+// armourer prompt underneath it.
+export const OVERVIEW = {
+  top: 142,
+  pitch: 11,
+  headGap: 15,
+  colW: 136,          // two columns of mods inside the 272px panel
+  rows: 6,            // per column
+  launch: 318,
+  armourer: 332,
+};
+
 function drawFit(ctx, game, x, y) {
   const p = game.player;
-  const W = 272;   // x + W must stay inside VIEW_W
+  const L = OVERVIEW;
+  const W = L.colW * 2;
   // The airframe has a name, and it changes: the ship you launch on the
   // next hull is a different ship, and the overview is where you are told.
   text(ctx, 'REFIT COMPLETE', x, y, COL.warmHi, FONT);
@@ -504,11 +562,11 @@ function drawFit(ctx, game, x, y) {
     ['GUN SPREAD', p.gunBlaze + '/' + p.gunCap],
     ['SHIPS', String(p.lives)],
   ];
-  let ry = y + 15;
+  let ry = y + L.headGap;
   for (const [k, v] of refit) {
     text(ctx, k, x, ry, COL.hudText, FONT);
     text(ctx, v, x + W, ry, '#5fe08a', FONT, 'right');
-    ry += 12;
+    ry += L.pitch;
   }
 
   ry += 6;
@@ -518,24 +576,37 @@ function drawFit(ctx, game, x, y) {
   const allTiers = ids.reduce((a, id) => a + maxLevel(id), 0);
   text(ctx, 'MODS FITTED  ' + tiers + '/' + allTiers,
     x, ry, owned.length ? COL.warmHi : COL.hudLine, FONT);
-  ry += 15;
+  ry += L.headGap;
   if (!owned.length) {
     text(ctx, 'NONE \u2014 E AT THE ARMOURER', x, ry, COL.hudLine, FONT);
     return;
   }
-  for (const id of owned) {
+
+  // Two columns, and a hard stop: whatever does not fit is counted rather
+  // than drawn over the prompt below.
+  const slots = L.colW && L.rows ? L.rows * 2 : owned.length;
+  const shown = owned.slice(0, owned.length > slots ? slots - 1 : slots);
+  shown.forEach((id, i) => {
     const lvl = modLevel(game, id);
+    const cx0 = x + (i < L.rows ? 0 : L.colW);
+    const cy = ry + (i % L.rows) * L.pitch;
     ctx.fillStyle = '#ffd24a';
-    for (let k = 0; k < lvl; k++) ctx.fillRect(x + k * 6, ry + 3, 4, 4);
-    text(ctx, modName(id, lvl), x + 9 + (lvl - 1) * 6, ry, '#ffd24a', FONT);
-    ry += 12;
+    for (let k = 0; k < lvl; k++) ctx.fillRect(cx0 + k * 5, cy + 3, 3, 4);
+    text(ctx, modName(id, lvl).slice(0, 18), cx0 + 7 + lvl * 5, cy, '#ffd24a', FONT);
+  });
+  if (owned.length > slots) {
+    const i = slots - 1;
+    text(ctx, '+' + (owned.length - shown.length) + ' MORE',
+      x + L.colW, ry + (i % L.rows) * L.pitch, COL.hudLine, FONT);
   }
 }
 
 // The hull just cleared, which is one behind the index after advancing.
 const spec0 = (game) => game.specs[game.levelIndex];
 
-function drawScreen(ctx, game) {
+// Exported so a test can draw the overview with every mod fitted, which
+// is the state its layout used to break in.
+export function drawScreen(ctx, game) {
   if (game.state === 'splash') { drawSplash(ctx, game.stateT); return; }
   if (game.state === 'ending') { drawEnding(ctx, game); return; }
 
@@ -661,13 +732,14 @@ function drawScreen(ctx, game) {
     // --- two columns: what the hull paid, and what the ship now is
     const LX = 24;
     const RX = 338;
-    drawBonus(ctx, game, LX, 142);
-    drawFit(ctx, game, RX, 142);
+    drawBonus(ctx, game, LX, OVERVIEW.top);
+    drawFit(ctx, game, RX, OVERVIEW.top);
 
     ctx.globalAlpha = pulse;
-    text(ctx, 'ENTER TO LAUNCH', cx, 296, COL.warmHi, FONT, 'center');
+    text(ctx, 'ENTER TO LAUNCH', cx, OVERVIEW.launch, COL.warmHi, FONT, 'center');
     ctx.globalAlpha = 1;
-    text(ctx, 'E  ARMOURER     ' + (game.coins || 0) + ' COINS', cx, 310, '#ffd24a', FONT, 'center');
+    text(ctx, 'E  ARMOURER     ' + (game.coins || 0) + ' COINS',
+      cx, OVERVIEW.armourer, '#ffd24a', FONT, 'center');
     return;
   }
 
