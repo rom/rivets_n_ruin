@@ -156,6 +156,41 @@ export function sfxPickup(kind) {
   noiseHit({ t, attack: 0.002, decay: 0.12, peak: 0.07, filter: 'highpass', f0: 3000 });
 }
 
+// Loot has its own escalating family: a coin is a short bright blip that
+// climbs as you chain them, a bar is three rising notes, a coffin is a
+// fanfare. You can hear what you picked up without looking at it.
+let coinChain = 0;
+let coinChainAt = 0;
+
+export function sfxCoin() {
+  if (!ready()) return;
+  const t = now();
+  if (t - coinChainAt > 0.55) coinChain = 0;   // a pause resets the run
+  coinChainAt = t;
+  const step = Math.min(coinChain, 11);
+  coinChain++;
+  if (!throttle('coin', 0.035)) return;
+  const f = 880 * Math.pow(2, step / 12);
+  tone({ type: 'square', f0: f, f1: f * 1.5, t, attack: 0.002, decay: 0.07, peak: 0.075, sweep: 'lin' });
+  tone({ type: 'triangle', f0: f * 2, f1: f * 3, t: t + 0.015, attack: 0.002, decay: 0.05, peak: 0.04, sweep: 'lin' });
+}
+
+export function sfxGoldBar() {
+  if (!ready()) return;
+  const t = now();
+  arp([0, 7, 12], t, 0.17, 'square', 0.045);
+  noiseHit({ t, attack: 0.002, decay: 0.16, peak: 0.07, filter: 'highpass', f0: 4200 });
+}
+
+export function sfxCoffin() {
+  if (!ready()) return;
+  const t = now();
+  duckMusic(0.55, 0.7, 0.35);
+  arp([0, 4, 7, 12, 16, 19], t, 0.2, 'square', 0.06);
+  arp([12, 16, 19, 24], t + 0.03, 0.1, 'triangle', 0.06);
+  tone({ type: 'sawtooth', f0: 110, f1: 110, t, attack: 0.03, decay: 0.8, peak: 0.1 });
+}
+
 export function sfxUi() {
   if (!ready()) return;
   tone({ type: 'square', f0: 660, f1: 990, t: now(), attack: 0.003, decay: 0.07, peak: 0.12, sweep: 'lin' });

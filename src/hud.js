@@ -7,6 +7,9 @@ import { tint } from './pickups.js';
 import { tuneName, TUNES } from './music.js';
 import { get as setting, DEFS, display } from './settings.js';
 import { rows as shopRows, MODS } from './shop.js';
+import { drawSplash, drawLaunchBanner, drawLandingBanner,
+  SPLASH_TIME, LAUNCH_TIME, LANDING_TIME, ENDING_TIME } from './sequences.js';
+import { VERSION } from './config.js';
 import { livingParts, shellUp } from './boss.js';
 import { activeMod } from './mods.js';
 
@@ -128,7 +131,9 @@ export function drawHud(ctx, game, audio = {}) {
   if (game.boss) drawBossBar(ctx, game.boss);
   if (game.toast && setting('damageNumbers')) drawToast(ctx, game.toast);
   if (game.banner) drawBanner(ctx, game.banner);
-  if (game.state !== 'play' && game.state !== 'dying') drawScreen(ctx, game);
+  if (game.state === 'launching') drawLaunchBanner(ctx, game, clamp(game.stateT / LAUNCH_TIME, 0, 1));
+  else if (game.state === 'landing') drawLandingBanner(ctx, game, clamp(game.stateT / LANDING_TIME, 0, 1));
+  else if (game.state !== 'play' && game.state !== 'dying') drawScreen(ctx, game);
 }
 
 // Boss health, across the top of the playfield. Shows the shell separately
@@ -205,6 +210,9 @@ function drawBoard(ctx, x, y, title, rows = 8) {
 const spec0 = (game) => game.specs[game.levelIndex];
 
 function drawScreen(ctx, game) {
+  if (game.state === 'splash') { drawSplash(ctx, game.stateT); return; }
+  if (game.state === 'ending') { drawEnding(ctx, game); return; }
+
   ctx.fillStyle = 'rgba(4,6,10,0.80)';
   ctx.fillRect(0, 0, VIEW_W, FIELD_H);
 
@@ -378,6 +386,94 @@ function drawRankLine(ctx, cx, y) {
 // a row here without touching this function.
 // The shop, between hulls. Coins are the only currency and there are never
 // enough, which is the point: the interesting choice is what to go without.
+// The ending: the ship settles onto the admiralty pad and the run is
+// totalled while it cools. Earned once in a campaign, so it is allowed to
+// take its time — but ENTER skips it.
+function drawEnding(ctx, game) {
+  const t = game.stateT;
+  ctx.fillStyle = '#04060a';
+  ctx.fillRect(0, 0, VIEW_W, FIELD_H);
+  const cx = VIEW_W / 2;
+
+  // starfield drifting past, then the pad rising into frame
+  for (let i = 0; i < 90; i++) {
+    const sx = (i * 97 + t * (10 + (i % 5) * 7)) % VIEW_W;
+    const sy = (i * 53) % FIELD_H;
+    ctx.fillStyle = i % 7 === 0 ? '#dfe6ff' : '#4a5270';
+    ctx.fillRect(VIEW_W - sx, sy, 1, 1);
+  }
+
+  const land = clamp((t - 0.6) / 3.4, 0, 1);
+  const padY = 250 - (1 - land) * 160;
+  ctx.fillStyle = '#1f1a0a';
+  ctx.fillRect(cx - 120, padY, 240, 40);
+  ctx.fillStyle = '#4d4120';
+  ctx.fillRect(cx - 120, padY, 240, 5);
+  ctx.fillStyle = '#c2a44a';
+  for (let i = -112; i < 116; i += 18) ctx.fillRect(cx + i, padY + 10, 6, 4);
+  const blink = (t * 3) % 2 < 1;
+  ctx.fillStyle = blink ? COL.warmHi : '#5a4a1e';
+  ctx.fillRect(cx - 126, padY - 6, 6, 6);
+  ctx.fillRect(cx + 120, padY - 6, 6, 6);
+
+  // the ship coming down
+  const shipY = 70 + land * (padY - 86);
+  ctx.save();
+  ctx.translate(cx, shipY);
+  ctx.scale(1.6, 1.6);
+  ctx.fillStyle = '#6e7b8a';
+  ctx.beginPath();
+  ctx.moveTo(14, 0); ctx.lineTo(3, -4); ctx.lineTo(-6, -7); ctx.lineTo(-12, -5);
+  ctx.lineTo(-11, 0); ctx.lineTo(-12, 5); ctx.lineTo(-6, 7); ctx.lineTo(3, 4);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#aab7c7';
+  ctx.beginPath();
+  ctx.moveTo(13, 0); ctx.lineTo(3, -3); ctx.lineTo(-6, -6); ctx.lineTo(-11, -4);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = COL.coolHi;
+  ctx.fillRect(1, -2, 4, 3);
+  if (land < 1) {
+    // retro-thrust, strongest just before touchdown
+    const flame = 4 + Math.sin(t * 30) * 2 + land * 5;
+    ctx.fillStyle = COL.cool;
+    ctx.fillRect(-3, 7, 6, flame);
+    ctx.fillStyle = COL.coolHi;
+    ctx.fillRect(-1.5, 7, 3, flame * 0.6);
+  }
+  ctx.restore();
+
+  if (land >= 1) {
+    const r = Math.min(1, (t - 4.2) / 0.5);
+    if (r > 0) {
+      ctx.globalAlpha = r;
+      text(ctx, 'ALL EIGHT HULLS RUN', cx, 24, COL.coolHi, FONT_BIG, 'center');
+      text(ctx, 'OUT AND BACK, EVERY ONE', cx, 52, COL.cool, FONT, 'center');
+
+      const lines = [
+        ['FINAL SCORE', String(game.score).padStart(8, '0')],
+        ['TOTAL TIME', game.runTime.toFixed(1) + 'S'],
+        ['GUNS BROKEN', String(game.turretsKilled)],
+        ['SHIPS LOST', String(game.deaths)],
+        ['COINS', String(game.coins || 0)],
+        ['GOLD BARS', String(game.bars || 0)],
+        ['COFFINS', String(game.coffins || 0)],
+      ];
+      lines.forEach(([k, v], i) => {
+        const y = 80 + i * 14;
+        if (t < 4.6 + i * 0.22) return;        // totalled line by line
+        text(ctx, k, cx - 110, y, COL.hudText, FONT);
+        text(ctx, v, cx + 110, y, COL.hudBright, FONT, 'right');
+      });
+
+      if (t > 6.6) {
+        ctx.globalAlpha = r * (0.5 + 0.5 * Math.sin(t * 3));
+        text(ctx, 'ENTER', cx, 286, COL.warmHi, FONT, 'center');
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
 export function drawShop(ctx, game, sel, note) {
   ctx.fillStyle = '#04060a';
   ctx.fillRect(0, 0, VIEW_W, FIELD_H);

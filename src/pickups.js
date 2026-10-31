@@ -10,7 +10,8 @@ import { makePool } from './pool.js';
 import { pointBlocked } from './level.js';
 import { sparks } from './particles.js';
 
-export const KINDS = ['shield', 'life', 'healthbar', 'gunspeed', 'gunblaze', 'coin', 'coffin'];
+export const KINDS = ['shield', 'life', 'healthbar', 'gunspeed', 'gunblaze',
+  'coin', 'goldbar', 'coffin', 'bomb', 'grenade', 'missile'];
 
 // Weighted drop table. Shield refills are the backbone; an extra ship is the
 // rare one, because handing them out freely removes the run's whole tension.
@@ -60,8 +61,9 @@ export function spawnPickup(game, x, y, kind = rollKind()) {
   p.vy = 0;
   p.kind = kind;
   p.life = kind === 'coin' ? PICKUP.coinLife
-    : kind === 'coffin' ? PICKUP.coffinLife
-      : PICKUP.life;
+    : kind === 'goldbar' ? PICKUP.barLife
+      : kind === 'coffin' ? PICKUP.coffinLife
+        : PICKUP.life;
   p.maxLife = p.life;
   p.t = Math.random() * 6;
   return p;
@@ -91,6 +93,14 @@ export function spoils(game, x, y, source) {
   if (source === 'boss') n += 14;
   scatterCoins(game, x, y, n);
 
+  if (Math.random() < PICKUP.barChance * (source === 'boss' ? 6 : 1)) {
+    const bar = spawnPickup(game, x + (Math.random() - 0.5) * 20, y, 'goldbar');
+    if (bar) {
+      const a = Math.random() * Math.PI * 2;
+      bar.vx = Math.cos(a) * 90;
+      bar.vy = Math.sin(a) * 90;
+    }
+  }
   if (Math.random() < PICKUP.coffinChance * (source === 'boss' ? 8 : 1)) {
     spawnPickup(game, x + (Math.random() - 0.5) * 24, y, 'coffin');
   }
@@ -162,12 +172,21 @@ function collect(game, p) {
   if (p.kind !== 'coin' && p.kind !== 'coffin') game.score += PICKUP.score;
 
   switch (p.kind) {
+    case 'goldbar':
+      game.score += PICKUP.barValue * (pl.coinMul || 1);
+      game.coins = (game.coins || 0) + 10 * (pl.coinMul || 1);
+      game.bars = (game.bars || 0) + 1;
+      game.onHaul?.('goldbar');
+      label = 'GOLD BAR  +' + PICKUP.barValue;
+      break;
     case 'coin':
       game.score += PICKUP.coinValue * (pl.coinMul || 1);
       game.coins = (game.coins || 0) + (pl.coinMul || 1);
+      game.onHaul?.('coin');
       return;                       // no toast: coins are constant background
     case 'coffin':
       game.score += PICKUP.coffinValue;
+      game.onHaul?.('coffin');
       game.coffins = (game.coffins || 0) + 1;
       label = 'GOLD COFFIN  +' + PICKUP.coffinValue;
       break;
@@ -225,6 +244,7 @@ function collect(game, p) {
 export function tint(kind) {
   switch (kind) {
     case 'coin': return '#ffd24a';
+    case 'goldbar': return '#ffc93a';
     case 'coffin': return '#ffe88a';
     case 'shield': return '#4fd0e8';
     case 'life': return '#b4f4ff';

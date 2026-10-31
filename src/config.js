@@ -1,5 +1,10 @@
 // Every tunable in one place. Change a number, reload, re-fly.
 
+// Bumped by hand. Shown on the splash and in the backend's health response,
+// so a player reporting a bug and the server they hit can be lined up.
+export const VERSION = '0.9.0';
+export const BUILD = 'RIVETS';
+
 export const VIEW_W = 640;
 export const VIEW_H = 360;
 
@@ -99,36 +104,36 @@ export const BOSS = {
 // behaviour in boss.js; the numbers here are the whole difficulty curve.
 export const BOSSES = [
   { name: 'THE WARDEN', tag: 'EMPLACED FORTRESS — ARGENTUM', kind: 'warden',
-    coreHp: 34, podHp: 9, score: 6000, podScore: 400,
-    bulletSpeed: 180, burstGap: 0.16, cycle: 2.30 },
+    coreHp: 53, podHp: 13, score: 6000, podScore: 400,
+    bulletSpeed: 180, burstGap: 0.128, cycle: 1.75 },
 
   { name: 'DRAYLINE', tag: 'LINE GUNSHIP — OSMIUM', kind: 'drayline',
-    coreHp: 78, score: 9000,
-    bulletSpeed: 205, burstGap: 0.10, cycle: 1.90, sweepSpeed: 128 },
+    coreHp: 121, score: 9000,
+    bulletSpeed: 205, burstGap: 0.080, cycle: 1.44, sweepSpeed: 128 },
 
   { name: 'THE RIVETER', tag: 'FLAGSHIP BATTERY — TANTALUM', kind: 'riveter',
-    coreHp: 120, plateHp: 14, score: 14000, plateScore: 600,
-    bulletSpeed: 225, burstGap: 0.08, cycle: 1.60 },
+    coreHp: 186, plateHp: 20, score: 14000, plateScore: 600,
+    bulletSpeed: 225, burstGap: 0.064, cycle: 1.22 },
 
   { name: 'COLDFORGE', tag: 'MINELAYER — CUPRUM', kind: 'coldforge',
-    coreHp: 165, podHp: 18, score: 19000, podScore: 700,
-    bulletSpeed: 215, burstGap: 0.09, cycle: 1.70, mines: 3 },
+    coreHp: 256, podHp: 25, score: 19000, podScore: 700,
+    bulletSpeed: 215, burstGap: 0.072, cycle: 1.29, mines: 3 },
 
   { name: 'SLAGHEART', tag: 'TWIN REACTOR — PYRITE', kind: 'slagheart',
-    coreHp: 210, plateHp: 22, score: 25000, plateScore: 800,
-    bulletSpeed: 240, burstGap: 0.07, cycle: 1.45 },
+    coreHp: 326, plateHp: 31, score: 25000, plateScore: 800,
+    bulletSpeed: 240, burstGap: 0.056, cycle: 1.10 },
 
   { name: 'NIGHTFALL', tag: 'BLINK FRAME — WOLFRAM', kind: 'nightfall',
-    coreHp: 260, score: 32000,
-    bulletSpeed: 250, burstGap: 0.06, cycle: 1.30, blinkEvery: 2.6 },
+    coreHp: 403, score: 32000,
+    bulletSpeed: 250, burstGap: 0.048, cycle: 0.99, blinkEvery: 2.6 },
 
   { name: 'THE SEXTON', tag: 'HULK TENDER — FERRUM', kind: 'sexton',
-    coreHp: 320, plateHp: 26, score: 40000, plateScore: 900,
-    bulletSpeed: 255, burstGap: 0.06, cycle: 1.20 },
+    coreHp: 496, plateHp: 36, score: 40000, plateScore: 900,
+    bulletSpeed: 255, burstGap: 0.048, cycle: 0.91 },
 
   { name: 'GILTHAMMER', tag: 'ADMIRALTY GUARD — AURUM', kind: 'gilthammer',
-    coreHp: 420, plateHp: 30, score: 60000, plateScore: 1100,
-    bulletSpeed: 270, burstGap: 0.05, cycle: 1.05 },
+    coreHp: 651, plateHp: 42, score: 60000, plateScore: 1100,
+    bulletSpeed: 270, burstGap: 0.040, cycle: 0.80 },
 ];
 
 export const LEVELS = [
@@ -338,6 +343,10 @@ export const PICKUP = {
   coinScatter: 150,      // initial outward speed, px/s
   coinDrag: 2.4,
   coinsPerKill: [2, 5],  // inclusive range
+  // A tier between coins and coffins: uncommon, clearly worth diverting for.
+  barValue: 250,
+  barLife: 10.0,
+  barChance: 0.16,       // per destroyed thing
   coffinValue: 2500,
   coffinChance: 0.045,   // per destroyed thing
   coffinLife: 13.0,

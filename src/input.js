@@ -47,5 +47,8 @@ export function initInput(target = window) {
 export const held = (a) => down.has(a);
 export const tapped = (a) => pressed.has(a);
 export const endFrame = () => pressed.clear();
+// True if any mapped key went down this frame. Used by the splash, which
+// should be dismissable without the player hunting for the right key.
+export const anyTapped = () => pressed.size > 0;
 export const axisX = () => (down.has('right') ? 1 : 0) - (down.has('left') ? 1 : 0);
 export const axisY = () => (down.has('down') ? 1 : 0) - (down.has('up') ? 1 : 0);

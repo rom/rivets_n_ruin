@@ -16,6 +16,8 @@ type submitScoreReq struct {
 	Deaths    int     `json:"deaths"`
 	Completed bool    `json:"completed"`
 	Levels    int     `json:"levels"`
+	RunID     string  `json:"runId"`
+	Sig       string  `json:"sig"`
 }
 
 func (s *Server) submitScore(w http.ResponseWriter, r *http.Request) {
@@ -26,6 +28,28 @@ func (s *Server) submitScore(w http.ResponseWriter, r *http.Request) {
 	var req submitScoreReq
 	if err := readJSON(w, r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, "malformed body: "+err.Error())
+		return
+	}
+
+	// Cross-checks that do not need re-simulation: the run must have been
+	// opened, not already submitted, signed with its own secret, and have
+	// taken at least as long in wall clock as it claims in flight time.
+	// See runs.go for exactly how far this does and does not go.
+	var run *runSession
+	if req.RunID != "" {
+		var err error
+		run, err = s.runs.claim(req.RunID)
+		if err != nil {
+			writeErr(w, http.StatusConflict, err.Error())
+			return
+		}
+		if err := checkRun(run, p.ID, req.Points, req.TimeSec, req.Levels, req.Sig); err != nil {
+			writeErr(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		s.runs.consume(req.RunID) // only now is the run spent
+	} else if s.requireRuns {
+		writeErr(w, http.StatusBadRequest, "a run must be opened before a score can be submitted")
 		return
 	}
 

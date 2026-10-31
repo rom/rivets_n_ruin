@@ -10,18 +10,20 @@ import {
   interceptors, updateTurrets, updateInterceptors, hitInterceptor, hitTurret, resetEnemies,
 } from './enemies.js';
 import { playerShots, enemyShots, advance } from './projectiles.js';
-import { updateParticles, explode, sparks, particles } from './particles.js';
+import { updateParticles, explode, sparks, particles, thrust as thrustPlume } from './particles.js';
 import { updatePickups, resetPickups, pickups } from './pickups.js';
 import { updateFoes, resetFoes, foes, hitFoe, spawnFoeForLevel, SPEC as FOE_SPEC } from './foes.js';
 import { updateOrdnance, resetOrdnance, ordnance } from './armory.js';
 import { resetShop, applyMods } from './shop.js';
-import { tapped, endFrame } from './input.js';
+import { SPLASH_TIME, LAUNCH_TIME, LANDING_TIME, ENDING_TIME, launchPose, landingPose } from './sequences.js';
+import { tapped, anyTapped, endFrame } from './input.js';
 import {
+  sfxCoin, sfxGoldBar, sfxCoffin,
   sfxPickup, sfxPlayerHit, sfxHullAbsorb, sfxDeath, sfxRespawn,
   sfxTurnaround, sfxComplete, sfxGameOver, sfxUi,
 } from './sfx.js';
 import { setIntensity, setTune } from './music.js';
-import { submitRun, heartbeat, serverBest } from './net.js';
+import { submitRun, heartbeat, serverBest, startRun } from './net.js';
 import { activeModId } from './mods.js';
 
 export function makeGame(modSpec = null) {
@@ -35,7 +37,8 @@ export function makeGame(modSpec = null) {
     level,
     cam: makeCamera(),
     player: makePlayer(),
-    state: 'title',        // title | play | dying | levelclear | gameover | victory
+    state: 'splash',       // splash | title | launching | play | dying
+                           // | landing | levelclear | gameover | ending | victory
     stateT: 0,
     specs,
     levelIndex: 0,
@@ -44,6 +47,7 @@ export function makeGame(modSpec = null) {
     deaths: 0,
     coins: 0,
     coffins: 0,
+    bars: 0,
     mods: {},
     bought: {},
     submitted: false,
@@ -64,6 +68,12 @@ export function makeGame(modSpec = null) {
     unlocked: clamp(Number(localStorage.getItem('rnr.unlocked') || 0), 0, LEVELS.length - 1),
     startHull: clamp(Number(localStorage.getItem('rnr.unlocked') || 0), 0, LEVELS.length - 1),
     onPickup: (kind) => sfxPickup(kind),
+    // Loot has its own sound family, escalating with value.
+    onHaul: (kind) => {
+      if (kind === 'coin') sfxCoin();
+      else if (kind === 'goldbar') sfxGoldBar();
+      else sfxCoffin();
+    },
   };
   game.cam.x = clamp(game.player.x - VIEW_W / 2 + SHIP.w, 0, level.length - VIEW_W);
   return game;
@@ -95,6 +105,9 @@ function reset(game) {
     t.angle = t.dir * Math.PI / 2;
   }
   game.player = makePlayer();
+  // Open a run with the server. Fire-and-forget: a backend that is down
+  // costs the leaderboard, never the run.
+  startRun(activeModId());
   for (let i = 0; i < at; i++) applyRefit(game);   // the ship you would have
   applyMods(game);
   game.score = 0;
@@ -102,6 +115,7 @@ function reset(game) {
   game.deaths = 0;
   game.coins = 0;
   game.coffins = 0;
+  game.bars = 0;
   resetShop(game);
   game.submitted = false;
   game.spawnCd = 1.2;
@@ -212,6 +226,54 @@ export function update(game, dt) {
   game.stateT += dt;
   setIntensity(scoreIntensity(game));
 
+  // --- splash. Any key skips it; it is shown once per load, not per run.
+  if (game.state === 'splash') {
+    if (game.stateT > SPLASH_TIME || anyTapped()) {
+      game.state = 'title';
+      game.stateT = 0;
+    }
+    updateParticles(dt);
+    endFrame();
+    return;
+  }
+
+  // --- launching and landing. The ship is on rails and the controls are
+  // locked, so neither can be flown out of; either can be skipped.
+  if (game.state === 'launching' || game.state === 'landing') {
+    const dur = game.state === 'launching' ? LAUNCH_TIME : LANDING_TIME;
+    const k = clamp(game.stateT / dur, 0, 1);
+    const pose = game.state === 'launching'
+      ? launchPose(k)
+      : landingPose(k, game.seqFromX);
+    const p = game.player;
+    p.x = pose.x;
+    p.y = pose.y;
+    p.vx = 0; p.vy = 0;
+    p.facing = game.state === 'landing' ? -1 : 1;
+    game.seqThrust = pose.thrust;
+    game.seqTilt = pose.tilt;
+    if (pose.thrust > 0.15 && Math.random() < dt * 60) {
+      thrustPlume(p.x - p.facing * 13, p.y, -p.facing, 0);
+    }
+    updateCamera(game.cam, p, game.level.length, dt);
+    updateParticles(dt);
+
+    if (k >= 1 || tapped('start') || tapped('fire')) finishSequence(game);
+    endFrame();
+    return;
+  }
+
+  // --- the ending: the last landing, played out.
+  if (game.state === 'ending') {
+    updateParticles(dt);
+    if (game.stateT > ENDING_TIME || tapped('start')) {
+      game.state = 'victory';
+      game.stateT = 0;
+    }
+    endFrame();
+    return;
+  }
+
   // --- quit confirmation. Freezes the simulation while it is up: being shot
   // while deciding whether to leave would be a cheap way to lose a run.
   if (game.quitting) {
@@ -253,7 +315,7 @@ export function update(game, dt) {
     if (tapped('start') || tapped('fire')) {
       sfxUi();
       loadNextHull(game);
-      game.state = 'play';
+      game.state = 'launching';
       game.stateT = 0;
       const spec = game.specs[game.levelIndex];
       banner(game, spec.name, spec.subtitle, 3.0);
@@ -270,7 +332,7 @@ export function update(game, dt) {
     if (tapped('start') || tapped('fire')) {
       sfxUi();
       reset(game);
-      game.state = 'play';
+      game.state = 'launching';
       game.stateT = 0;
       banner(game, "RIVETS 'N RUIN", 'RUN THE HULL — AND RUN IT BACK', 2.6);
     }
@@ -279,7 +341,7 @@ export function update(game, dt) {
     return;
   }
 
-  if (tapped('restart')) { reset(game); game.state = 'play'; game.stateT = 0; }
+  if (tapped('restart')) { reset(game); game.state = 'launching'; game.stateT = 0; }
 
   if (game.state === 'dying') {
     updateParticles(dt);
@@ -349,6 +411,7 @@ export function update(game, dt) {
     game.score += 2500;
     sfxTurnaround();
   } else if (game.returning && p.x < APRON * 0.55) {
+    game.seqFromX = p.x;
     // Award the bonus BEFORE anything reads the score. This used to report
     // the run to the backend first, so every submitted completion was short
     // by its own completion bonus.
@@ -356,15 +419,9 @@ export function update(game, dt) {
     game.stateT = 0;
     sfxComplete();
 
-    if (game.levelIndex < game.specs.length - 1) {
-      game.state = 'levelclear';     // more hull to fly; the run continues
-      game.banner = null;            // don't let TURN AND BURN sit over the panel
-      applyRefit(game);              // so the refit panel shows real numbers
-    } else {
-      game.state = 'victory';        // campaign over: now it counts
-      recordBest(game);
-      reportRun(game);
-    }
+    // Hand over to the landing sequence; it decides what comes next.
+    game.state = 'landing';
+    game.banner = null;
   }
 
   // Extra attacker types, on their own slower cadence so they punctuate the
@@ -376,7 +433,8 @@ export function update(game, dt) {
   }
 
   // Tell the backend we are out here. Self-throttling to one beat every 5s.
-  heartbeat(activeModId(), (game.levelIndex + p.x / game.level.length) / game.specs.length, game.score);
+  heartbeat(activeModId(), (game.levelIndex + p.x / game.level.length) / game.specs.length,
+    game.score, game.levelIndex);
 
   if (p.shield <= 0 && p.alive) die(game);
   endFrame();
@@ -451,6 +509,28 @@ function applyBlasts(game) {
     }
   }
   blasts.length = 0;
+}
+
+// Where each on-rails sequence hands back control.
+function finishSequence(game) {
+  const p = game.player;
+  if (game.state === 'launching') {
+    game.state = 'play';
+    game.stateT = 0;
+    p.invuln = Math.max(p.invuln, 0.8);   // a moment of grace off the pad
+    return;
+  }
+  // landing
+  if (game.levelIndex < game.specs.length - 1) {
+    game.state = 'levelclear';
+    game.banner = null;
+    applyRefit(game);
+  } else {
+    game.state = 'ending';
+    recordBest(game);
+    reportRun(game);
+  }
+  game.stateT = 0;
 }
 
 function recordBest(game) {

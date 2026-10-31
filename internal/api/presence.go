@@ -10,6 +10,8 @@ type heartbeatReq struct {
 	ModID    string  `json:"modId"`
 	Progress float64 `json:"progress"`
 	Score    int     `json:"score"`
+	RunID    string  `json:"runId"`
+	Level    int     `json:"level"`
 }
 
 // heartbeat records that this pilot is currently flying. This is what makes
@@ -31,6 +33,13 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	if req.Progress > 1 {
 		req.Progress = 1
 	}
+	// A heartbeat is also the evidence that a run was actually flown; see
+	// runs.go. Counting it here means the anti-cheat cross-check costs the
+	// client nothing it was not already sending.
+	if req.RunID != "" {
+		s.runs.beat(req.RunID, req.Level)
+	}
+
 	if err := s.store.Heartbeat(model.Presence{
 		PlayerID: p.ID, Name: p.Name, ModID: req.ModID,
 		Progress: req.Progress, Score: req.Score,
