@@ -88,6 +88,11 @@ type rateLimiter struct {
 	burst   float64
 }
 
+const (
+	sweepEvery    = 5 * time.Minute
+	idleBucketTTL = 10 * time.Minute
+)
+
 func newRateLimiter(rate, burst float64) *rateLimiter {
 	if rate <= 0 {
 		rate = 10
@@ -102,17 +107,27 @@ func newRateLimiter(rate, burst float64) *rateLimiter {
 
 // sweep drops idle buckets so a long-running server does not accumulate one
 // entry per IP that ever connected.
+//
+// Split from its timer so the thing being tested is the rule and not the
+// clock: a test of the loop itself can only be a five-minute sleep or a
+// fake clock, and neither tells you whether the right buckets go.
 func (rl *rateLimiter) sweep() {
-	for range time.Tick(5 * time.Minute) {
-		cutoff := time.Now().Add(-10 * time.Minute)
-		rl.mu.Lock()
-		for ip, b := range rl.buckets {
-			if b.last.Before(cutoff) {
-				delete(rl.buckets, ip)
-			}
-		}
-		rl.mu.Unlock()
+	for range time.Tick(sweepEvery) {
+		rl.sweepOnce(time.Now().Add(-idleBucketTTL))
 	}
+}
+
+func (rl *rateLimiter) sweepOnce(cutoff time.Time) int {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	n := 0
+	for ip, b := range rl.buckets {
+		if b.last.Before(cutoff) {
+			delete(rl.buckets, ip)
+			n++
+		}
+	}
+	return n
 }
 
 func (rl *rateLimiter) allow(ip string) bool {

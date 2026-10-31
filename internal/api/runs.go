@@ -6,8 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -41,6 +45,7 @@ import (
 
 const (
 	runTTL         = 8 * time.Hour
+	runSweepEvery  = 15 * time.Minute
 	clockSlackSec  = 25.0 // allows for pauses, load, and a sloppy frame clock
 	minBeatsPerMin = 3.0
 )
@@ -68,17 +73,25 @@ func newRunStore() *runStore {
 	return rs
 }
 
+// Split from its timer for the same reason as the rate limiter's: the
+// rule is testable, a fifteen-minute tick is not.
 func (rs *runStore) sweep() {
-	for range time.Tick(15 * time.Minute) {
-		cut := time.Now().Add(-runTTL)
-		rs.mu.Lock()
-		for id, r := range rs.runs {
-			if r.Started.Before(cut) {
-				delete(rs.runs, id)
-			}
-		}
-		rs.mu.Unlock()
+	for range time.Tick(runSweepEvery) {
+		rs.sweepOnce(time.Now().Add(-runTTL))
 	}
+}
+
+func (rs *runStore) sweepOnce(cut time.Time) int {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	n := 0
+	for id, r := range rs.runs {
+		if r.Started.Before(cut) {
+			delete(rs.runs, id)
+			n++
+		}
+	}
+	return n
 }
 
 func (rs *runStore) open(playerID, modID string) (*runSession, error) {
@@ -228,4 +241,122 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		Secret: base64.RawURLEncoding.EncodeToString(run.Secret),
 		Server: time.Now().UnixMilli(),
 	})
+}
+
+// --- persistence.
+//
+// A campaign is long. Twenty-five hulls cannot be flown in under eighteen
+// minutes at full throttle and in practice take a good deal longer, so a
+// server restart in the middle of one is not a rare event — and it used to
+// void every run in flight. The run disappeared, the submission came back
+// 409 "no such run, or it has expired", and the player lost a campaign to
+// a deploy.
+//
+// That is the same failure as the leaderboard rejecting a legitimate
+// score: the honest player pays for a server-side problem they cannot see.
+// So the open runs are snapshotted with everything else.
+//
+// The secret is written to the file. That is the same trust boundary the
+// rest of the snapshot already sits behind — it holds auth tokens and
+// password hashes — and a run secret is worth strictly less than either.
+
+type runSnapshot struct {
+	ID       string    `json:"id"`
+	PlayerID string    `json:"playerId"`
+	Secret   string    `json:"secret"`
+	ModID    string    `json:"modId,omitempty"`
+	Started  time.Time `json:"started"`
+	Beats    int       `json:"beats"`
+	LastBeat time.Time `json:"lastBeat,omitempty"`
+	MaxLevel int       `json:"maxLevel,omitempty"`
+	Used     bool      `json:"used,omitempty"`
+}
+
+// Export returns the runs worth keeping: ones still inside their TTL.
+// A used or expired run is not resurrected — it would only be a bigger
+// replay window.
+func (rs *runStore) Export() []runSnapshot {
+	cut := time.Now().Add(-runTTL)
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	out := make([]runSnapshot, 0, len(rs.runs))
+	for _, r := range rs.runs {
+		if r.Used || r.Started.Before(cut) {
+			continue
+		}
+		out = append(out, runSnapshot{
+			ID: r.ID, PlayerID: r.PlayerID,
+			Secret:   base64.RawURLEncoding.EncodeToString(r.Secret),
+			ModID:    r.ModID,
+			Started:  r.Started,
+			Beats:    r.Beats,
+			LastBeat: r.LastBeat,
+			MaxLevel: r.MaxLevel,
+		})
+	}
+	return out
+}
+
+// Import restores runs from a snapshot, skipping anything that has expired
+// while the server was down or that cannot be read back. A run that will
+// not load is dropped rather than failing the whole restore: one bad entry
+// must not cost everyone else their campaign.
+func (rs *runStore) Import(snaps []runSnapshot) int {
+	cut := time.Now().Add(-runTTL)
+	n := 0
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	for _, s := range snaps {
+		if s.ID == "" || s.PlayerID == "" || s.Used || s.Started.Before(cut) {
+			continue
+		}
+		secret, err := base64.RawURLEncoding.DecodeString(s.Secret)
+		if err != nil || len(secret) == 0 {
+			continue
+		}
+		rs.runs[s.ID] = &runSession{
+			ID: s.ID, PlayerID: s.PlayerID, Secret: secret, ModID: s.ModID,
+			Started: s.Started, Beats: s.Beats, LastBeat: s.LastBeat,
+			MaxLevel: s.MaxLevel,
+		}
+		n++
+	}
+	return n
+}
+
+// ExportRuns and ImportRuns are the server's side of the same thing, so
+// cmd/server does not need to know the run store exists.
+func (s *Server) ExportRuns() []runSnapshot          { return s.runs.Export() }
+func (s *Server) ImportRuns(snaps []runSnapshot) int { return s.runs.Import(snaps) }
+
+// SaveRuns writes the open runs beside the main snapshot. Same
+// write-to-temp-and-rename as the store, so a crash mid-write cannot leave
+// a truncated file that loses every run instead of none.
+func (s *Server) SaveRuns(path string) error {
+	data, err := json.Marshal(s.ExportRuns())
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// LoadRuns restores them. A missing file is not an error: it is what the
+// first run of a new deployment looks like.
+func (s *Server) LoadRuns(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	var snaps []runSnapshot
+	if err := json.Unmarshal(data, &snaps); err != nil {
+		return 0, err
+	}
+	return s.ImportRuns(snaps), nil
 }

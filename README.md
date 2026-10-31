@@ -1310,6 +1310,18 @@ An in-process store behind a `Store` interface, snapshotted to JSON (written to
 a temp file and renamed, so a crash cannot truncate your data). Periodic saves
 plus a final one on `SIGTERM`.
 
+Open runs are snapshotted alongside it, to `<data>.runs`. A twenty-five-hull
+campaign cannot be flown in under eighteen minutes and in practice takes a
+good deal longer, so a restart in the middle of one is not a rare event — and
+it used to void every run in flight: the run vanished, the submission came
+back `409 no such run, or it has expired`, and the player lost a campaign to a
+deploy. That is the same failure as the leaderboard rejecting an honest score,
+and just as invisible from where they are sitting. A used or expired run is
+not resurrected, a run that expires *while the server is down* is not
+restored, and one unreadable entry is dropped rather than failing the whole
+restore — losing everybody's campaign to one bad record would be a worse bug
+than the one this fixes.
+
 This is right for now and wrong later. It does not survive beyond one process,
 so there is no horizontal scaling; everything is resident in memory; and top
 lists sort on read rather than using an index. At a few hundred thousand scores
@@ -1367,11 +1379,88 @@ thrown — while the screen rendered black. State tests cannot see that.
 ### Tests
 
 `make check` runs everything: gofmt, vet, Go tests under `-race`, the client
-tests, a JS syntax gate, and the browser smoke test.
+tests, a JS syntax gate, and the browser smoke test. `make coverage-gate`
+adds the coverage floor.
 
 Client tests live in `test/` on node's built-in runner. `_setup.mjs` provides
 deliberately inert `localStorage`, canvas and `AudioContext` stubs - anything
 depending on what was actually drawn or heard belongs in the smoke test.
+
+Two of them are not unit tests at all and earn their place anyway:
+
+- **`test/soak.test.mjs`** plays the game headlessly for two simulated
+  minutes with input arriving, and after *every* frame asserts the things
+  that must never stop being true: nothing is `NaN`, no pool has
+  overflowed, the camera is inside the hull, the shield is under its
+  ceiling, no state is wedged. It also flies into every one of the
+  twenty-five hulls. These are failures that do not look like failures from
+  inside any single module — a `NaN` camera renders black while every
+  health signal reads fine, and an unwinnable hull only shows up by flying
+  it.
+- **`test/draw.test.mjs`** executes every draw path in every state, on
+  every hull, with every toggle both ways. It does **not** check that
+  anything was drawn correctly — the canvas is a stub and judging a picture
+  is the smoke test's job. It checks that nothing *throws*, which matters
+  because `startLoop` catches, drops the frame and carries on: a renderer
+  throwing sixty times a second presents as a frozen picture with a healthy
+  score, a moving camera and a plausible frame rate.
+
+### CI
+
+`.github/workflows/ci.yml`, four jobs in parallel rather than one, because
+they fail for different reasons and a single red tick tells you nothing
+about which:
+
+| Job | Gate |
+| --- | --- |
+| **Go** | gofmt, vet, build, `go test -race` |
+| **JavaScript** | the ESM syntax gate, then the client tests |
+| **Coverage** | `make coverage-gate` |
+| **Smoke** | the real browser, reading pixels |
+
+The thresholds live in `tools/coverage.sh`, not in the workflow, so
+`make coverage-gate` gives the same answer on your machine as it does in
+CI. A gate you cannot reproduce locally is one people learn to ignore, and
+then to delete. The floor is **85%** each side; `cmd/server` is excluded
+because it is `main()` — flag parsing, a listener and a signal handler —
+and the only way to cover it is to start the process, which `make smoke`
+already does end to end. Counting it would mean either a permanently
+depressed number or tests that assert nothing in order to raise one.
+
+The gate also prints every function under 60%, so the number comes with a
+list of where to go next rather than just a verdict.
+
+### Client error reporting
+
+The frame loop catches everything, drops the bad frame and carries on.
+That is right — a glitchy frame is recoverable and a dead loop is not —
+but it is also why a renderer that throws every frame goes unnoticed. So
+the exceptions get sent to `POST /api/errors` and into the server log,
+along with uncaught errors and unhandled rejections. Three rules, in order
+of how much they matter:
+
+1. **Reporting cannot affect the game.** Every call is best-effort: it
+   swallows its own failures, never awaits, never throws back into the
+   caller. A reporter that can break the thing it is reporting on is worse
+   than no reporter — tested by breaking the reporter's own internals and
+   asserting the frame loop survives.
+2. **One fault is not a thousand reports.** Identical faults are counted
+   rather than resent, grouped by where they came from rather than by their
+   text — a message that interpolates a changing value (`foe 41 is at NaN`)
+   would otherwise be a new fault every frame. There is a hard per-session
+   cap, and the number dropped is reported too, because hitting the cap is
+   itself a signal.
+3. **Nothing sensitive leaves.** The auth token is the one thing here worth
+   stealing, and a stack frame or a thrown object can easily carry one.
+   Anything that looks like a credential is stripped from both the message
+   and the stack before a report goes anywhere.
+
+Server side it is treated as hostile input from any browser, because it is:
+unauthenticated, bounded batch, truncated strings, a fixed-size ring, and
+the same per-IP rate limiter as everything else under `/api/`. `/api/stats`
+reports *how much* is going wrong but not *what* — the reports carry stack
+traces from other people's machines and there is no admin tier here to put
+them behind. The contents go to the log.
 
 Several exist because of bugs that shipped:
 

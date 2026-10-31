@@ -77,6 +77,18 @@ func main() {
 
 	apiSrv := api.New(st, log, api.Config{RateLimitPerSec: *rlRate, RateBurst: *rlBurst, RequireRuns: *strictRuns})
 
+	// Open runs, restored alongside the store. A campaign takes longer
+	// than a deploy, so without this a restart voided every run in flight
+	// and the player's submission came back "no such run" — the same
+	// failure as the leaderboard rejecting an honest score, and just as
+	// invisible from where they are sitting.
+	runPath := *data + ".runs"
+	if n, err := apiSrv.LoadRuns(runPath); err != nil {
+		log.Warn("could not restore open runs", "path", runPath, "err", err)
+	} else if n > 0 {
+		log.Info("runs restored", "path", runPath, "runs", n)
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiSrv.Routes())
 	mux.Handle("/", noCache(staticLog(log, *verbose, http.FileServer(http.Dir(root)))))
@@ -106,6 +118,9 @@ func main() {
 			case <-t.C:
 				if err := st.Snapshot(*data); err != nil {
 					log.Error("snapshot failed", "err", err)
+				}
+				if err := apiSrv.SaveRuns(runPath); err != nil {
+					log.Error("run snapshot failed", "err", err)
 				}
 			case <-stopSaver:
 				return
@@ -137,7 +152,12 @@ func main() {
 		log.Error("final snapshot failed", "err", err)
 		os.Exit(1)
 	}
-	log.Info("saved", "path", *data)
+	// Open runs too. A restart is the common case this exists for, and a
+	// restart that drops them is exactly as bad as a crash that does.
+	if err := apiSrv.SaveRuns(runPath); err != nil {
+		log.Error("final run snapshot failed", "err", err)
+	}
+	log.Info("saved", "path", *data, "runs", runPath)
 }
 
 // noCache stops the browser serving a stale module after an edit, which is

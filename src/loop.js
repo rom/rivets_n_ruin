@@ -7,7 +7,7 @@ import { DT, MAX_FRAME } from './config.js';
 // accumulator, never the step itself: the simulation still advances in
 // fixed DT increments, so slowing the game cannot change its physics, only
 // how much of it happens per second of wall clock.
-export function startLoop(update, render, rate = null) {
+export function startLoop(update, render, rate = null, onError = null) {
   let last = performance.now() / 1000;
   let acc = 0;
 
@@ -43,6 +43,15 @@ export function startLoop(update, render, rate = null) {
       if (errors <= MAX_LOGGED) {
         console.error('frame error:', err);
         if (errors === MAX_LOGGED) console.error('further frame errors suppressed');
+      }
+      // Suppressing the console output is not the same as suppressing the
+      // fault. A draw path that throws does so every frame, and the loop
+      // swallowing it is exactly why it would otherwise go unnoticed: the
+      // picture freezes while the score, the camera and the frame rate all
+      // still look healthy. The reporter does its own deduplication, so
+      // this is safe to call on every single one.
+      if (onError) {
+        try { onError(err); } catch { /* reporting must not kill the loop */ }
       }
     }
   }

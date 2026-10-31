@@ -5,6 +5,7 @@ import {
 } from './input.js';
 import { demoActions, IDLE_BEFORE_DEMO } from './demo.js';
 import { startLoop } from './loop.js';
+import { installErrorReporting, report } from './errors.js';
 import { makeGame, update, syncBest } from './game.js';
 import { drawWorld } from './render.js';
 import {
@@ -21,7 +22,7 @@ import { nextTune, tuneName, setTune, TUNES } from './music.js';
 import * as settings from './settings.js';
 import { applySettings } from './audio.js';
 import { loadModFromURL } from './mods.js';
-import { LEVELS } from './config.js';
+import { LEVELS, BUILD } from './config.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false });
@@ -134,6 +135,17 @@ for (const ev of ['pagehide', 'beforeunload']) {
 // Backgrounding a tab is the same risk: a phone may never come back to it.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') saveHangar(game);
+});
+
+// Error reporting, installed before anything else can throw. The context
+// is a callback rather than a value so a report carries where the game
+// was at the moment of the fault, not at the moment this was set up.
+installErrorReporting({
+  context: () => ({
+    state: game.state,
+    hull: game.levelIndex + 1,
+    build: BUILD,
+  }),
 });
 
 window.game = game;
@@ -305,4 +317,5 @@ startLoop(
   () => (game.state === 'play' || game.state === 'dying'
     ? (Number(settings.get('gameSpeed')) || 100) / 100
     : 1),
+  (err) => report('frame', err),
 );

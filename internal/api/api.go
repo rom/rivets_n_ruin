@@ -31,6 +31,7 @@ type Server struct {
 	log         *slog.Logger
 	rl          *rateLimiter
 	runs        *runStore
+	errs        *errorRing
 	requireRuns bool
 }
 
@@ -40,6 +41,7 @@ func New(s store.Store, log *slog.Logger, cfg Config) *Server {
 		log:         log,
 		rl:          newRateLimiter(cfg.RateLimitPerSec, cfg.RateBurst),
 		runs:        newRunStore(),
+		errs:        newErrorRing(),
 		requireRuns: cfg.RequireRuns,
 	}
 }
@@ -66,6 +68,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/mods", s.createMod)
 	mux.HandleFunc("GET /api/mods/{id}", s.getMod)
 	mux.HandleFunc("GET /api/mods/{id}/top", s.modTop)
+
+	mux.HandleFunc("POST /api/errors", s.reportErrors)
 
 	mux.HandleFunc("POST /api/presence", s.heartbeat)
 	mux.HandleFunc("GET /api/presence", s.livePresence)
@@ -131,5 +135,13 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.store.Stats())
+	st := s.store.Stats()
+	// How much is going wrong in people's browsers, as a count rather than
+	// the reports themselves: those hold stack traces from other people's
+	// machines, and there is no admin tier here to put them behind. The
+	// contents go to the server log.
+	writeJSON(w, http.StatusOK, struct {
+		store.Stats
+		ClientErrors map[string]any `json:"clientErrors"`
+	}{st, s.errs.summary()})
 }
