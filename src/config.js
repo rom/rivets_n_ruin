@@ -65,6 +65,33 @@ export const INTERCEPTOR = {
   ramDamage: 26,
 };
 
+// Pickups. Dropped by things you destroy, so shooting is rewarded beyond
+// score, and the run has an upgrade curve rather than a flat difficulty line.
+export const PICKUP = {
+  size: 12,
+  life: 11.0,            // seconds on the hull before it expires
+  blinkAt: 3.0,          // starts flashing with this long left
+  magnet: 38,            // soft attraction, so near-misses still count
+  magnetPull: 210,
+  drift: 13,
+  bob: 9,                // vertical bob amplitude, px
+  score: 50,
+
+  dropFromTurret: 0.6,
+  dropFromInterceptor: 0.17,
+
+  shieldRefill: 40,      // shields-refill: restores this much
+  healthBarBonus: 25,    // healthbars: raises MAX shield by this much
+  shieldCeiling: 220,    // and stops here
+  maxLives: 6,
+
+  gunLevels: 3,          // gunspeed and gunblaze each cap here
+  // gunspeed: fire interval multiplier per level
+  speedScale: [1.0, 0.76, 0.58, 0.44],
+  // gunblaze: extra barrel angles (radians, mirrored) per level
+  blazeAngles: [[], [0.13], [0.13, 0.26], [0.13, 0.26, 0.4]],
+};
+
 export const CAM = {
   lead: 116,            // ship sits this far behind centre, so you see where you're going
   lerp: 5.4,
