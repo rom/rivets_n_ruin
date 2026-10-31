@@ -74,10 +74,7 @@ export function drawHud(ctx, game, audio = {}) {
   // --- score
   text(ctx, 'SCORE', 252, y0 + 6);
   text(ctx, String(game.score).padStart(8, '0'), 252, y0 + 18, COL.hudBright);
-  if (game.coins || game.coffins) {
-    const haul = (game.coins || 0) + (game.coffins ? '+' + game.coffins : '');
-    text(ctx, String(haul), 252 + 56, y0 + 6, '#ffd24a', FONT);
-  }
+
 
   // --- hull progress, with the turnaround baked in
   const spec = game.level.spec;
@@ -311,14 +308,19 @@ function drawScreen(ctx, game) {
   text(ctx, 'SCORE ' + String(game.score).padStart(8, '0'), cx, infoY, COL.hudBright, FONT, 'center');
   text(ctx, 'TIME ' + game.time.toFixed(1) + 'S    GUNS BROKEN ' + game.turretsKilled
     + '    LOSSES ' + game.deaths, cx, infoY + 14, COL.hudText, FONT, 'center');
-  drawRankLine(ctx, cx, infoY + 32);
+  if (game.coins || game.coffins) {
+    text(ctx, 'COINS ' + (game.coins || 0)
+      + (game.coffins ? '    GOLD COFFINS ' + game.coffins : ''),
+      cx, infoY + 28, '#ffd24a', FONT, 'center');
+  }
+  drawRankLine(ctx, cx, infoY + 44);
 
   ctx.globalAlpha = pulse;
   text(ctx, game.state === 'victory' ? 'ENTER TO RUN IT AGAIN' : 'ENTER TO FLY AGAIN',
-    cx, infoY + 52, COL.warmHi, FONT, 'center');
+    cx, infoY + 62, COL.warmHi, FONT, 'center');
   ctx.globalAlpha = 1;
 
-  drawBoard(ctx, BOARD_X, infoY + 76, 'TOP PILOTS', 6);
+  drawBoard(ctx, BOARD_X, infoY + 84, 'TOP PILOTS', 5);
 }
 
 // Where that run put you. Blank until the backend answers.
