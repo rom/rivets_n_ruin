@@ -1,7 +1,19 @@
 import './_setup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decideScale, computeScale, TUNING } from '../src/display.js';
+import {
+  decideScale, computeScale, TUNING,
+  setStatic, fitCanvas, renderScale, wantedScale, scaleCap, reportFrame,
+} from '../src/display.js';
+
+// Enough of a canvas for fitCanvas: it sets width/height and style, and
+// asks for a context it then only calls setTransform on.
+function fakeCanvas() {
+  return {
+    width: 0, height: 0, style: {},
+    getContext: () => ({ setTransform() {}, imageSmoothingEnabled: true, imageSmoothingQuality: '' }),
+  };
+}
 
 const many = (v, n = 40) => Array(n).fill(v);
 const base = { cap: 1, failedAt: Infinity, refresh: 16, samples: [], phase: 'up' };
@@ -54,4 +66,65 @@ test('computeScale tracks the window and respects the cap', () => {
   assert.equal(computeScale(6400, 3600, 1), TUNING.MAX_SCALE, 'should cap on a huge window');
   assert.equal(computeScale(320, 180, 1), 1, 'should never go below 1');
   assert.ok(computeScale(1280, 720, 2) >= computeScale(1280, 720, 1), 'higher DPR wants more pixels');
+});
+
+// --- static mode
+//
+// Menus used to render at whatever cap gameplay had settled on. On a 2560px
+// window that meant a 960x540 backing store blown up 2.6x by the browser:
+// the text on the overview, the armourer and the settings page was the most
+// blurred thing in the game, and the one thing made entirely of text.
+
+test('a menu renders at the window scale, not at gameplay\'s cap', () => {
+  const canvas = fakeCanvas();
+  const ctx = canvas.getContext('2d');
+  window.innerWidth = 2560;
+  window.innerHeight = 1480;
+
+  setStatic(false);
+  fitCanvas(canvas, ctx);
+  const want = wantedScale();
+  assert.ok(want > 1.5, `a 2560px window wants more than 1.5x, got ${want}`);
+
+  // Fast frames first, so the scaler has a refresh estimate and climbs...
+  for (let i = 0; i < 3000 && scaleCap() < want; i++) reportFrame(16.6, canvas, ctx);
+  const climbed = scaleCap();
+  assert.ok(climbed > 1, `the cap never climbed off 1 (got ${climbed})`);
+
+  // ...then slow ones, the way a dense hull would produce.
+  for (let i = 0; i < 3000 && scaleCap() >= climbed; i++) reportFrame(90, canvas, ctx);
+  fitCanvas(canvas, ctx);
+  const capped = renderScale();
+  assert.ok(capped < want, `the cap did not come down under load (${capped} of ${want})`);
+
+  assert.equal(setStatic(true), true, 'entering static mode reported no change');
+  fitCanvas(canvas, ctx);
+  assert.equal(renderScale(), want,
+    `a menu rendered at ${renderScale()} when the window wants ${want}`);
+  assert.equal(canvas.width, Math.round(640 * want));
+
+  assert.equal(setStatic(false), true);
+  fitCanvas(canvas, ctx);
+  assert.equal(renderScale(), capped, 'leaving a menu left gameplay at the menu scale');
+});
+
+test('setStatic reports only real changes', () => {
+  setStatic(false);
+  assert.equal(setStatic(false), false);
+  assert.equal(setStatic(true), true);
+  assert.equal(setStatic(true), false);
+  setStatic(false);
+});
+
+test('menu frames are kept out of the adaptive estimate', () => {
+  const canvas = fakeCanvas();
+  const ctx = canvas.getContext('2d');
+  setStatic(true);
+  const before = scaleCap();
+  // frames slow enough to drop any cap, were they being counted
+  for (let i = 0; i < 600; i++) {
+    assert.equal(reportFrame(400, canvas, ctx), false, 'a menu frame resized the canvas');
+  }
+  assert.equal(scaleCap(), before, 'a menu talked the gameplay cap down');
+  setStatic(false);
 });

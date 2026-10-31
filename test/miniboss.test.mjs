@@ -17,7 +17,6 @@ function fakeGame(levelIndex = 0, overrides = {}) {
     score: 0,
     flash: 0,
     state: 'play',
-    returning: false,
     boss: null,
     cam: { x: 0, shake: 0 },
     level: {
@@ -120,8 +119,10 @@ test('a plan slot fires once and only once', () => {
   assert.equal(game.arrivals.length, 1, 'the same slot spawned twice');
 });
 
-test('nothing spawns on the return leg', () => {
-  const game = fakeGame(0, { returning: true });
+// The run is one-way now, so the leg a miniboss must not arrive on is the
+// boss fight: the arena is meant to hold one thing.
+test('nothing new arrives once the boss is up', () => {
+  const game = fakeGame(0, { boss: { dead: false } });
   fly(game, game.miniPlan[0].x, 1);
   assert.equal(minis.count, 0);
 });

@@ -2,6 +2,7 @@ import {
   FIELD_TOP, FIELD_BOT, FIELD_H, RIM, APRON, THEMES, TOWERS, clamp,
 } from './config.js';
 import { mulberry32, rr, ri, hash2 } from './rng.js';
+import { buildGates } from './gates.js';
 
 const BUCKET = 256;
 
@@ -145,6 +146,9 @@ export function buildLevel(spec) {
 
   return {
     obstacles, turrets, buckets,
+    // Laser gates, placed from the same rng so a hull always has the same
+    // walls in the same places.
+    gates: buildGates(r, spec, LEN, obstacles),
     length: LEN,
     spec,
     // Hull texture is rendered per chunk, on demand, at the display scale.

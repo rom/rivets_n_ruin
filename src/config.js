@@ -143,7 +143,7 @@ export const LEVELS = [
     turretHp: 3, turretCooldown: 1.75, turretRange: 300,
     interceptorSpeed: 172, interceptorSpawn: 1.50, interceptorHp: 2,
     foes: [],
-    towers: ['gun'], tune: 0 },
+    towers: ['gun'], lasers: 0, laserHp: 0, tune: 0 },
 
   { name: 'OSMIUM', subtitle: 'DENSEST ALLOY AFLOAT — LINE HULL',
     theme: 'conduit', seed: 0x051f1ed, length: 14500,
@@ -151,7 +151,7 @@ export const LEVELS = [
     turretHp: 4, turretCooldown: 1.45, turretRange: 330,
     interceptorSpeed: 196, interceptorSpawn: 1.20, interceptorHp: 3,
     foes: ['mine'],
-    towers: ['gun'], tune: 1 },
+    towers: ['gun'], lasers: 0, laserHp: 1, tune: 1 },
 
   { name: 'TANTALUM', subtitle: 'CORROSION PROOF — FLAGSHIP HULL',
     theme: 'glacier', seed: 0x7a07a1, length: 17000,
@@ -159,7 +159,7 @@ export const LEVELS = [
     turretHp: 5, turretCooldown: 1.20, turretRange: 360,
     interceptorSpeed: 220, interceptorSpawn: 0.98, interceptorHp: 3,
     foes: ['mine', 'lancer', 'weaver'],
-    towers: ['gun', 'flak'], tune: 4 },
+    towers: ['gun', 'flak'], lasers: 1, laserHp: 2, tune: 4 },
 
   { name: 'CUPRUM', subtitle: 'OXIDISED — SALVAGE HULK',
     theme: 'desert', seed: 0xc0ffee, length: 18500,
@@ -167,7 +167,7 @@ export const LEVELS = [
     turretHp: 6, turretCooldown: 1.10, turretRange: 380,
     interceptorSpeed: 236, interceptorSpawn: 0.90, interceptorHp: 4,
     foes: ['mine', 'lancer', 'orbiter', 'weaver'],
-    towers: ['gun', 'flak', 'lance', 'rocket'], tune: 2 },
+    towers: ['gun', 'flak', 'lance', 'rocket'], lasers: 2, laserHp: 3, tune: 2 },
 
   { name: 'PYRITE', subtitle: 'RUNNING HOT — FOUNDRY HULL',
     theme: 'foundry', seed: 0xf00dface, length: 20000,
@@ -175,7 +175,7 @@ export const LEVELS = [
     turretHp: 7, turretCooldown: 1.00, turretRange: 400,
     interceptorSpeed: 252, interceptorSpawn: 0.82, interceptorHp: 4,
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter'],
-    towers: ['gun', 'flak', 'lance', 'mortar', 'rocket'], tune: 5 },
+    towers: ['gun', 'flak', 'lance', 'mortar', 'rocket'], lasers: 2, laserHp: 4, tune: 5 },
 
   { name: 'WOLFRAM', subtitle: 'LIGHT SWALLOWING — SIEGE HULL',
     theme: 'void', seed: 0x0b51d1a, length: 21500,
@@ -183,7 +183,7 @@ export const LEVELS = [
     turretHp: 8, turretCooldown: 0.92, turretRange: 420,
     interceptorSpeed: 266, interceptorSpawn: 0.75, interceptorHp: 5,
     foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech'],
-    towers: ['gun', 'lance', 'mortar', 'warden', 'rocket'], tune: 3 },
+    towers: ['gun', 'lance', 'mortar', 'warden', 'rocket'], lasers: 3, laserHp: 5, tune: 3 },
 
   { name: 'FERRUM', subtitle: 'EATEN THROUGH — DERELICT HULL',
     theme: 'derelict', seed: 0xfe2211, length: 23000,
@@ -191,7 +191,7 @@ export const LEVELS = [
     turretHp: 9, turretCooldown: 0.86, turretRange: 440,
     interceptorSpeed: 280, interceptorSpawn: 0.70, interceptorHp: 5,
     foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech'],
-    towers: ['gun', 'flak', 'mortar', 'warden', 'rocket'], tune: 6 },
+    towers: ['gun', 'flak', 'mortar', 'warden', 'rocket'], lasers: 3, laserHp: 6, tune: 6 },
 
   { name: 'AURUM', subtitle: 'THE PRIZE — ADMIRALTY HULL',
     theme: 'admiralty', seed: 0xa17aa17a, length: 25000,
@@ -199,7 +199,7 @@ export const LEVELS = [
     turretHp: 10, turretCooldown: 0.80, turretRange: 460,
     interceptorSpeed: 294, interceptorSpawn: 0.64, interceptorHp: 6,
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech'],
-    towers: ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket'], tune: 7 },
+    towers: ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket'], lasers: 4, laserHp: 7, tune: 7 },
 ];
 
 // Clearing a hull upgrades the ship permanently for the rest of the run.
@@ -314,6 +314,20 @@ export const TOWERS = {
   },
 };
 
+// Laser gates: a wall of light with an emitter clamped to one girder. The
+// only obstacle in the game that must be answered rather than dodged.
+export const LASER = {
+  hp: 14,
+  hpPerLevel: 3,
+  score: 900,
+  colour: '#ff4d6d',
+  emitterW: 22,
+  emitterH: 14,
+  shipClear: 15,        // how close the ship gets before the beam stops it
+  burn: 16,             // shield cost per touch
+  burnEvery: 0.28,      // and how often that can happen
+};
+
 export const TURRET = {
   range: 300,
   wake: 430,            // starts tracking this far out
@@ -383,9 +397,11 @@ export const PICKUP = {
   coinsPerKill: [2, 5],  // inclusive range
   // A tier between coins and coffins: uncommon, clearly worth diverting for.
   barValue: 250,
+  barCoins: 10,          // and what it is worth at the armourer
   barLife: 10.0,
   barChance: 0.16,       // per destroyed thing
   coffinValue: 2500,
+  coffinCoins: 60,
   coffinChance: 0.045,   // per destroyed thing
   coffinLife: 13.0,
 
@@ -402,6 +418,15 @@ export const PICKUP = {
   treasureChance: 0.022,       // per destroyed thing, on the first hull
   treasureHullBonus: 0.006,    // and this much more per hull after it
   treasureFromBoss: 7,         // bosses and minibosses roll this many times
+
+  // A boss carries a hold, and a hold is not a dice roll. Killing one always
+  // sheds this much, on top of the ordinary coin scatter and the treasure
+  // rolls — the wreck is worth flying into because of what is in it, not
+  // because of what might be.
+  bossBars: [3, 6],            // inclusive range
+  bossCoffins: [1, 2],
+  miniBars: [1, 3],
+  miniCoffins: [1, 1],
   // gunspeed: fire interval multiplier per level. Sized past the reachable
   // maximum (3 base + 2 from clearing hulls) so an index can never fall off.
   // Flattening curve: each level is a real gain but the top is ~2.4x base

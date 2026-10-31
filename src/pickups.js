@@ -131,10 +131,26 @@ export function scatterCoins(game, x, y, count) {
 
 // Called wherever something is destroyed: coins always, a coffin rarely,
 // and the existing upgrade drops on their own roll.
+// Scatters a fixed number of a kind outward from a wreck, the way coins
+// are scattered. Used for the guaranteed contents of a boss's hold.
+function shed(game, x, y, kind, range) {
+  const [lo, hi] = range;
+  const n = lo + Math.floor(Math.random() * (hi - lo + 1));
+  for (let i = 0; i < n; i++) {
+    const p = spawnPickup(game, x + (Math.random() - 0.5) * 50, y + (Math.random() - 0.5) * 40, kind);
+    if (!p) return;
+    const a = Math.random() * Math.PI * 2;
+    const sp = 60 + Math.random() * 70;
+    p.vx = Math.cos(a) * sp;
+    p.vy = Math.sin(a) * sp;
+  }
+}
+
 export function spoils(game, x, y, source) {
   const [lo, hi] = PICKUP.coinsPerKill;
   let n = lo + Math.floor(Math.random() * (hi - lo + 1));
   if (source === 'turret') n += 2;
+  if (source === 'mini') n += 8;
   if (source === 'boss') n += 14;
   scatterCoins(game, x, y, n);
 
@@ -150,11 +166,19 @@ export function spoils(game, x, y, source) {
     spawnPickup(game, x + (Math.random() - 0.5) * 24, y, 'coffin');
   }
 
+  // The hold. Bosses and minibosses always carry bars and coffins.
+  if (source === 'boss' || source === 'mini') {
+    const boss = source === 'boss';
+    shed(game, x, y, 'goldbar', boss ? PICKUP.bossBars : PICKUP.miniBars);
+    shed(game, x, y, 'coffin', boss ? PICKUP.bossCoffins : PICKUP.miniCoffins);
+  }
+
   // Treasure. Rarer than a coffin and worth more, with the odds improving
   // hull by hull so the late game pays for the trouble it causes. A boss
   // rolls several times, which is why its wreck is worth flying into.
   const odds = PICKUP.treasureChance + PICKUP.treasureHullBonus * (game.levelIndex || 0);
-  const rolls = source === 'boss' ? PICKUP.treasureFromBoss : 1;
+  const rolls = source === 'boss' ? PICKUP.treasureFromBoss
+    : source === 'mini' ? Math.ceil(PICKUP.treasureFromBoss / 2) : 1;
   for (let i = 0; i < rolls; i++) {
     if (Math.random() >= odds) continue;
     const t = spawnPickup(game, x + (Math.random() - 0.5) * 36, y, rollTreasure());
@@ -239,8 +263,12 @@ function collect(game, p) {
   // you know something unusual just happened.
   if (isTreasure(p.kind)) {
     const t = PICKUP.treasure[p.kind];
-    award(game, t.value);
-    haul(game, p.kind, t.value, Math.round(t.coins * (pl.coinMul || 1)));
+    // Scavenger lifts what loot is worth, not just how many coins it yields:
+    // it used to leave coffins and treasure untouched, which made the mod
+    // worth less exactly where the loot was worth most.
+    const mul = pl.coinMul || 1;
+    award(game, Math.round(t.value * mul));
+    haul(game, p.kind, Math.round(t.value * mul), Math.round(t.coins * mul));
     game.onHaul?.(p.kind);
     game.toast = { text: t.label + '  +' + t.value, kind: p.kind, t: 2.4 };
     sparks(p.x, p.y, 0, -1, 18, t.colour);
@@ -249,23 +277,28 @@ function collect(game, p) {
   }
 
   switch (p.kind) {
-    case 'goldbar':
-      award(game, PICKUP.barValue * (pl.coinMul || 1));
-      haul(game, 'goldbar', PICKUP.barValue * (pl.coinMul || 1), 10 * (pl.coinMul || 1));
+    case 'goldbar': {
+      const v = Math.round(PICKUP.barValue * (pl.coinMul || 1));
+      award(game, v);
+      haul(game, 'goldbar', v, Math.round(PICKUP.barCoins * (pl.coinMul || 1)));
       game.onHaul?.('goldbar');
-      label = 'GOLD BAR  +' + PICKUP.barValue;
+      label = 'GOLD BAR  +' + v;
       break;
+    }
     case 'coin':
-      award(game, PICKUP.coinValue * (pl.coinMul || 1));
-      haul(game, 'coin', PICKUP.coinValue * (pl.coinMul || 1), pl.coinMul || 1);
+      award(game, Math.round(PICKUP.coinValue * (pl.coinMul || 1)));
+      haul(game, 'coin', Math.round(PICKUP.coinValue * (pl.coinMul || 1)),
+        Math.max(1, Math.round(pl.coinMul || 1)));
       game.onHaul?.('coin');
       return;                       // no toast: coins are constant background
-    case 'coffin':
-      award(game, PICKUP.coffinValue);
-      haul(game, 'coffin', PICKUP.coffinValue, 0);
+    case 'coffin': {
+      const v = Math.round(PICKUP.coffinValue * (pl.coinMul || 1));
+      award(game, v);
+      haul(game, 'coffin', v, Math.round(PICKUP.coffinCoins * (pl.coinMul || 1)));
       game.onHaul?.('coffin');
-      label = 'GOLD COFFIN  +' + PICKUP.coffinValue;
+      label = 'GOLD COFFIN  +' + v;
       break;
+    }
     case 'shield':
       pl.shield = Math.min(pl.shieldMax, pl.shield + PICKUP.shieldRefill);
       label = 'SHIELDS REFILLED';

@@ -7,11 +7,12 @@ import { particles, lights } from './particles.js';
 import { hash2 } from './rng.js';
 import { hullChunk, warmChunks, CHUNK_W } from './level.js';
 import { get as setting } from './settings.js';
-import { renderScale, scaleGeneration, hullScale } from './display.js';
+import { renderScale, scaleGeneration, hullScale, isStatic } from './display.js';
 import { pickups, tint, isTreasure } from './pickups.js';
 
 import { drawBossBody, drawBossParts } from './bossart.js';
-import { foes, SPEC as FOE_SPEC } from './foes.js';
+import { drawGates } from './gates.js';
+import { foes, SPEC as FOE_SPEC, SHIELD as FOE_SHIELD } from './foes.js';
 import { drawMinis } from './miniboss.js';
 import { drawOrdnance } from './armory.js';
 import { drawPad } from './sequences.js';
@@ -122,6 +123,7 @@ export function drawWorld(ctx, game) {
   ctx.translate(-camX, camY);
 
   drawTurrets(ctx, game, camX);
+  drawGates(ctx, game, camX);
   drawInterceptors(ctx, game);
   drawFoes(ctx);
   drawMinis(ctx);
@@ -138,8 +140,13 @@ export function drawWorld(ctx, game) {
   // superstructure passing in front, scrolling faster than the hull
   if (setting('foreground')) drawForeground(ctx, camX, camY);
 
-  // bloom: re-draw only the bright things small, blur, add back
-  if (setting('bloom')) drawBloom(ctx, game, camX, camY);
+  // bloom: re-draw only the bright things small, blur, add back.
+  //
+  // Skipped behind a menu. The world there is under an 80% dim rect, so the
+  // glow is invisible — and the menu is rendered at the full window scale
+  // rather than gameplay's cap, which makes the full-screen passes the most
+  // expensive thing on the frame for no visible gain.
+  if (setting('bloom') && !isStatic()) drawBloom(ctx, game, camX, camY);
 
   // CRT dressing: vignette and scanlines are pre-combined into one bitmap at
   // device resolution, so this is a single 1:1 blit rather than two
@@ -601,6 +608,44 @@ function drawMissile(ctx, s) {
   ctx.restore();
 }
 
+// A deflector bubble. Drawn as a faceted shell that thins and reddens as
+// it is worn down, because an attacker that eats shots for no visible
+// reason reads as a bug rather than as a thing to shoot harder.
+function drawDeflector(ctx, f, spec) {
+  const k = f.shield / f.shieldMax;
+  const r = spec.r + FOE_SHIELD.r;
+  const hit = f.shieldFlash > 0;
+  const colour = hit ? '#ffffff' : k > 0.6 ? '#4fd0e8' : k > 0.3 ? '#ffd24a' : '#ff7a2f';
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = (hit ? 0.5 : 0.13 + 0.07 * Math.sin(f.t * 5)) * (0.45 + k * 0.55);
+  ctx.fillStyle = colour;
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+  ctx.globalCompositeOperation = 'source-over';
+
+  // the shell itself: six facets, turning, brighter where it is still whole
+  ctx.globalAlpha = hit ? 1 : 0.45 + k * 0.45;
+  ctx.strokeStyle = colour;
+  ctx.lineWidth = hit ? 2.5 : 1.5;
+  ctx.beginPath();
+  for (let i = 0; i <= 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + f.t * 0.7;
+    const px = Math.cos(a) * r;
+    const py = Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+
+  // the remaining strength, as an arc off the top
+  ctx.globalAlpha = 0.9;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(0, 0, r + 3, -Math.PI / 2 - Math.PI * k, -Math.PI / 2 + Math.PI * k);
+  ctx.stroke();
+  ctx.restore();
+}
+
 // Each pickup carries a glyph, not just a colour: colour alone fails for
 // anyone who cannot separate the cyan from the green, and these appear
 // against a busy hull at speed.
@@ -738,6 +783,7 @@ function drawFoes(ctx) {
     const lit = f.flash > 0;
     ctx.save();
     ctx.translate(Math.round(f.x), Math.round(f.y));
+    if (f.shield > 0) drawDeflector(ctx, f, spec);
 
     if (f.kind === 'mine') {
       ctx.fillStyle = lit ? '#ffd24a' : '#3a3038';

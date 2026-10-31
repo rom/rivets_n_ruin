@@ -10,7 +10,9 @@ import { VERSION, BUILD, VIEW_W, FIELD_H, FIELD_TOP, FIELD_BOT, APRON, COL } fro
 
 export const SPLASH_TIME = 3.4;
 export const LAUNCH_TIME = 2.0;
-export const LANDING_TIME = 2.6;
+// The hull does not get flown back any more: breaking the boss opens the far
+// end and the ship runs out through it. This is how long that takes.
+export const EXIT_TIME = 2.4;
 export const ENDING_TIME = 15.0;
 
 // --- the ship's own path through each sequence, as a function of progress.
@@ -28,13 +30,16 @@ export function launchPose(k) {
   };
 }
 
-export function landingPose(k, fromX) {
-  const e = 1 - (1 - k) * (1 - k);            // ease out: arrives slowly
+// Out through the far end, under power. The opposite shape to the landing
+// it replaces: this one accelerates the whole way and leaves the screen.
+export function exitPose(k, fromX, fromY) {
+  const e = k * k;                            // ease in: still accelerating
+  const mid = (FIELD_TOP + FIELD_BOT) / 2;
   return {
-    x: fromX + (APRON * 0.3 - fromX) * e,
-    y: (FIELD_TOP + FIELD_BOT) / 2 + e * 54,  // settles onto the pad
-    thrust: Math.max(0, 1 - k * 1.6),
-    tilt: e * 0.1,
+    x: fromX + e * 1100,
+    y: fromY + (mid - fromY) * Math.min(1, k * 2),   // levels out as it goes
+    thrust: Math.min(1, 0.4 + k * 1.8),
+    tilt: -k * 0.1,
   };
 }
 
@@ -98,7 +103,7 @@ export function drawSplash(ctx, t) {
 
   ctx.font = 'bold 10px ui-monospace, Menlo, monospace';
   ctx.fillStyle = COL.cool;
-  ctx.fillText('SKIM THE HULL · BREAK THE GUNS · COME BACK ALIVE', cx, 218);
+  ctx.fillText('SKIM THE HULL · BREAK THE GUNS · RUN IT THROUGH', cx, 218);
 
   ctx.fillStyle = COL.hudLine;
   ctx.fillText(`${BUILD}  v${VERSION}`, cx, 246);
@@ -130,17 +135,16 @@ export function drawLaunchBanner(ctx, game, k) {
   ctx.globalAlpha = 1;
 }
 
-export function drawLandingBanner(ctx, game, k) {
-  const a = Math.min(1, k * 4);
-  ctx.globalAlpha = Math.max(0, a);
+export function drawExitBanner(ctx, game, k) {
+  ctx.globalAlpha = Math.max(0, Math.min(1, k * 4) * (1 - Math.max(0, (k - 0.75) * 4)));
   ctx.font = 'bold 20px ui-monospace, Menlo, monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   ctx.fillStyle = COL.coolHi;
-  ctx.fillText('DOCKING', VIEW_W / 2, 64);
+  ctx.fillText('WAY CLEAR', VIEW_W / 2, 64);
   ctx.font = 'bold 10px ui-monospace, Menlo, monospace';
-  ctx.fillStyle = COL.hudText;
-  ctx.fillText(['APPROACH', 'GEAR DOWN', 'CLAMPS ON'][Math.min(2, (k * 3) | 0)],
+  ctx.fillStyle = COL.warmHi;
+  ctx.fillText(['GUNS DOWN', 'FULL BURN', 'OUT THE FAR END'][Math.min(2, (k * 3) | 0)],
     VIEW_W / 2, 90);
   ctx.globalAlpha = 1;
 }
