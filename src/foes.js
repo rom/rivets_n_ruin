@@ -23,6 +23,16 @@ export const SPEC = {
   orbiter: { hp: 4, speed: 92, score: 260, r: 12, orbitR: 34, fireEvery: 1.25, bullets: 7 },
   // Frontal shield: only hurt from above, below or behind.
   warder:  { hp: 5, speed: 120, score: 320, r: 13, fireEvery: 1.5, arc: 1.05 },
+  // Fast and erratic. Nothing to out-think, everything to out-aim.
+  weaver:  { hp: 2, speed: 290, score: 180, r: 9, amp: 76, freq: 5.2 },
+  // Breaks into two halves that keep coming. Killing it early is cheaper.
+  splitter:{ hp: 6, speed: 130, score: 300, r: 15, fireEvery: 1.8, children: 2 },
+  // A half-size splitter. Only ever spawned, never rolled for.
+  shard:   { hp: 2, speed: 240, score: 90, r: 8, fireEvery: 2.4 },
+  // Seeds mines along its path, so ignoring it costs you the lane.
+  bomber:  { hp: 5, speed: 108, score: 340, r: 14, dropEvery: 1.15 },
+  // Latches on and drains the shield until it is shot off.
+  leech:   { hp: 3, speed: 210, score: 260, r: 10, drain: 11, grabR: 15 },
 };
 
 export const foes = makePool(26, () => ({
@@ -119,6 +129,65 @@ export function updateFoes(game, dt) {
         break;
       }
 
+      case 'weaver': {
+        f.x += f.facing * spec.speed * dt;
+        f.baseY += clamp(p.y - f.baseY, -70 * dt, 70 * dt);
+        f.y = f.baseY + Math.sin(f.t * spec.freq) * spec.amp;
+        break;
+      }
+
+      case 'splitter':
+      case 'shard': {
+        f.x += f.facing * spec.speed * dt;
+        f.baseY += Math.sin(f.t * 1.3) * 42 * dt;
+        f.y = f.baseY;
+        f.cd -= dt;
+        if (f.cd <= 0 && game.state === 'play') {
+          f.cd = spec.fireEvery;
+          const a = Math.atan2(p.y - f.y, p.x - f.x);
+          fire(enemyShots, f.x, f.y, Math.cos(a) * 185, Math.sin(a) * 185, 4, 9, 2);
+          sfxTurretShot();
+        }
+        break;
+      }
+
+      case 'bomber': {
+        f.x += f.facing * spec.speed * dt;
+        f.baseY += clamp(p.y - f.baseY, -30 * dt, 30 * dt);
+        f.y = f.baseY;
+        f.cd -= dt;
+        if (f.cd <= 0 && game.state === 'play') {
+          f.cd = spec.dropEvery;
+          const m = spawnFoe(game, 'mine');
+          if (m) { m.x = f.x; m.baseY = f.y; m.y = f.y; }
+        }
+        break;
+      }
+
+      case 'leech': {
+        if (f.state === 0) {
+          // close on the ship
+          const dx = p.x - f.x;
+          const dy = p.y - f.y;
+          const d = Math.hypot(dx, dy) || 1;
+          f.x += (dx / d) * spec.speed * dt;
+          f.baseY += (dy / d) * spec.speed * dt;
+          f.y = f.baseY;
+          if (p.alive && d < spec.grabR) { f.state = 1; }
+        } else {
+          // attached: rides along, draining, until shot off
+          f.x = p.x - p.facing * 14;
+          f.y = p.y;
+          f.baseY = p.y;
+          if (p.alive && p.invuln <= 0) {
+            p.shield -= spec.drain * dt;
+            if (Math.random() < dt * 8) sparks(f.x, f.y, 0, -1, 2, '#9ad94e');
+          }
+          if (!p.alive) foes.kill(i);
+        }
+        break;
+      }
+
       default: { // warder
         f.x += f.facing * spec.speed * dt;
         f.baseY += clamp(p.y - f.baseY, -46 * dt, 46 * dt);
@@ -170,8 +239,8 @@ function detonate(game, f, i) {
 export function foeShielded(f, sx, sy) {
   if (f.kind !== 'warder') return false;
   const toward = Math.atan2(sy - f.y, sx - f.x);
-  const facing = f.facing < 0 ? 0 : Math.PI;
-  let d = Math.abs(((toward - facing + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+  const front = f.facing < 0 ? Math.PI : 0;
+  const d = Math.abs(((toward - front + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
   return d < SPEC.warder.arc;
 }
 
@@ -198,7 +267,22 @@ export function hitFoe(game, index, sx, sy, dmg) {
     explode(f.x, f.y, 1.2);
     sfxExplode(1.1);
     spoils(game, f.x, f.y, f.kind);
+    const wasSplitter = f.kind === 'splitter';
+    const sx = f.x;
+    const sy = f.y;
+    const dir = f.facing;
     foes.kill(index);
+    if (wasSplitter) {
+      // halves peel off above and below, so killing it late is worse
+      for (let k = 0; k < SPEC.splitter.children; k++) {
+        const c = spawnFoe(game, 'shard');
+        if (!c) break;
+        c.x = sx;
+        c.baseY = clamp(sy + (k ? 26 : -26), FIELD_TOP + 10, FIELD_BOT - 10);
+        c.y = c.baseY;
+        c.facing = dir;
+      }
+    }
   }
   game.score += spec.score;
   return true;

@@ -13,6 +13,7 @@ import { playerShots, enemyShots, advance } from './projectiles.js';
 import { updateParticles, explode, sparks, particles } from './particles.js';
 import { updatePickups, resetPickups, pickups } from './pickups.js';
 import { updateFoes, resetFoes, foes, hitFoe, spawnFoeForLevel, SPEC as FOE_SPEC } from './foes.js';
+import { updateOrdnance, resetOrdnance, ordnance } from './armory.js';
 import { tapped, endFrame } from './input.js';
 import {
   sfxPickup, sfxPlayerHit, sfxHullAbsorb, sfxDeath, sfxRespawn,
@@ -54,19 +55,35 @@ export function makeGame(modSpec = null) {
     quitting: false,       // quit confirmation is open
     banner: null,
     best: Number(localStorage.getItem('rnr.best') || 0),
+    // The furthest hull ever reached, and the one selected on the title
+    // screen. Progress through an eight-hull campaign should not be lost
+    // every time a run ends.
+    unlocked: clamp(Number(localStorage.getItem('rnr.unlocked') || 0), 0, LEVELS.length - 1),
+    startHull: clamp(Number(localStorage.getItem('rnr.unlocked') || 0), 0, LEVELS.length - 1),
     onPickup: (kind) => sfxPickup(kind),
   };
   game.cam.x = clamp(game.player.x - VIEW_W / 2 + SHIP.w, 0, level.length - VIEW_W);
   return game;
 }
 
-// Full restart: back to the first hull with a factory-standard ship.
-function reset(game) {
-  if (game.levelIndex !== 0) {
-    game.levelIndex = 0;
-    game.level = buildLevel(game.specs[0]);
+// Records the furthest hull reached, so it can be started from next time.
+function recordUnlock(game) {
+  if (game.levelIndex > game.unlocked) {
+    game.unlocked = game.levelIndex;
+    try { localStorage.setItem('rnr.unlocked', String(game.unlocked)); } catch { /* private mode */ }
   }
-  setTune(game.specs[0].tune);
+}
+
+// Starts a run at the selected hull. Hulls before it are credited as flown:
+// arriving at PYRITE in a factory-standard ship would not be a challenge,
+// it would be a joke.
+function reset(game) {
+  const at = clamp(game.startHull, 0, game.specs.length - 1);
+  if (game.levelIndex !== at) {
+    game.levelIndex = at;
+    game.level = buildLevel(game.specs[at]);
+  }
+  setTune(game.specs[at].tune);
   for (const t of game.level.turrets) {
     t.dead = false;
     t.hp = game.level.spec.turretHp;
@@ -75,6 +92,7 @@ function reset(game) {
     t.angle = t.dir * Math.PI / 2;
   }
   game.player = makePlayer();
+  for (let i = 0; i < at; i++) applyRefit(game);   // the ship you would have
   game.score = 0;
   game.turretsKilled = 0;
   game.deaths = 0;
@@ -94,7 +112,7 @@ function reset(game) {
   resetEnemies();
   resetFoes();
   resetPickups();
-  resetFoes();
+  resetOrdnance();
   playerShots.clear();
   enemyShots.clear();
   particles.clear();
@@ -114,8 +132,12 @@ function applyRefit(game) {
   p.maxVYBonus += LEVEL_UP.maxVYAdd;
   p.bulletBonus += LEVEL_UP.bulletSpeedAdd;
   p.gunCap = Math.min(PICKUP.gunCapMax, p.gunCap + LEVEL_UP.gunCap);
-  p.gunSpeed = Math.min(p.gunCap, p.gunSpeed + LEVEL_UP.gunSpeed);
-  p.gunBlaze = Math.min(p.gunCap, p.gunBlaze + LEVEL_UP.gunBlaze);
+  // The refit raises the floor as well as the current level, so a ship lost
+  // on a later hull does not fall back to a factory-standard gun.
+  p.gunSpeedBase = Math.min(p.gunCap, p.gunSpeedBase + LEVEL_UP.gunSpeed);
+  p.gunBlazeBase = Math.min(p.gunCap, p.gunBlazeBase + LEVEL_UP.gunBlaze);
+  p.gunSpeed = Math.max(p.gunSpeed, p.gunSpeedBase);
+  p.gunBlaze = Math.max(p.gunBlaze, p.gunBlazeBase);
   p.lives = Math.min(PICKUP.maxLives, p.lives + LEVEL_UP.lives);
 }
 
@@ -123,6 +145,7 @@ function applyRefit(game) {
 function loadNextHull(game) {
   const p = game.player;
   game.levelIndex++;
+  recordUnlock(game);
   game.level = buildLevel(game.specs[game.levelIndex]);
   setTune(game.specs[game.levelIndex].tune);
 
@@ -142,6 +165,8 @@ function loadNextHull(game) {
   game.toast = null;
   resetEnemies();
   resetPickups();
+  resetFoes();
+  resetOrdnance();
   playerShots.clear();
   enemyShots.clear();
   particles.clear();
@@ -234,6 +259,9 @@ export function update(game, dt) {
   }
 
   if (game.state === 'title' || game.state === 'gameover' || game.state === 'victory') {
+    // Pick a hull: anything up to the furthest ever reached.
+    if (tapped('left') && game.startHull > 0) { game.startHull--; sfxUi(); }
+    if (tapped('right') && game.startHull < game.unlocked) { game.startHull++; sfxUi(); }
     if (tapped('start') || tapped('fire')) {
       sfxUi();
       reset(game);
@@ -281,6 +309,10 @@ export function update(game, dt) {
   updateInterceptors(game, dt);
   updateFoes(game, dt);
   updateBoss(game, dt);
+  // Missiles need something to chase; gather it once rather than per missile.
+  collectSeekable(game);
+  updateOrdnance(game, dt);
+  applyBlasts(game);
   updatePickups(game, dt);
   advance(playerShots, dt);
   advance(enemyShots, dt);
@@ -355,6 +387,65 @@ export function syncBest(game) {
     game.best = remote;
     try { localStorage.setItem('rnr.best', String(remote)); } catch { /* private mode */ }
   }
+}
+
+// Everything a homing missile may lock onto, rebuilt each frame. Turrets
+// are included only when close, so a missile does not fly the length of the
+// hull chasing one it will never reach.
+function collectSeekable(game) {
+  const out = game._seekable || (game._seekable = []);
+  out.length = 0;
+  const px = game.player.x;
+  for (let i = 0; i < interceptors.count; i++) out.push(interceptors.items[i]);
+  for (let i = 0; i < foes.count; i++) out.push(foes.items[i]);
+  for (const t of game.level.turrets) {
+    if (!t.dead && Math.abs(t.x - px) < 420) out.push(t);
+  }
+  const b = game.boss;
+  if (b && !b.dead && b.entry <= 0) {
+    const live = b.parts.filter((pt) => !pt.dead);
+    if (live.length) for (const pt of live) out.push({ x: b.x + pt.dx, y: b.y + pt.dy });
+    else out.push(b);
+  }
+}
+
+// Area damage from bombs, grenades and missiles. Collected during the
+// ordnance update and resolved here, so one blast applies once to each
+// thing in range whatever the iteration order.
+function applyBlasts(game) {
+  const blasts = game.pendingBlast;
+  if (!blasts || !blasts.length) return;
+
+  for (const bl of blasts) {
+    const hit = (x, y) => Math.hypot(x - bl.x, y - bl.y) < bl.r;
+
+    for (let i = interceptors.count - 1; i >= 0; i--) {
+      const e = interceptors.items[i];
+      if (hit(e.x, e.y)) hitInterceptor(game, i, bl.dmg);
+    }
+    for (let i = foes.count - 1; i >= 0; i--) {
+      const f = foes.items[i];
+      // a blast ignores a warder's frontal plate, which is rather the point
+      if (hit(f.x, f.y)) hitFoe(game, i, f.x, f.y - 999, bl.dmg);
+    }
+    for (const t of game.level.turrets) {
+      if (!t.dead && hit(t.x, t.y)) hitTurret(game, t, bl.dmg);
+    }
+    const b = game.boss;
+    if (b && !b.dead && b.entry <= 0) {
+      for (const pt of b.parts) {
+        if (!pt.dead && hit(b.x + pt.dx, b.y + pt.dy)) hitBoss(game, b, b.x + pt.dx, b.y + pt.dy, bl.dmg);
+      }
+      if (hit(b.x, b.y)) hitBoss(game, b, b.x, b.y, bl.dmg);
+    }
+    // You are not immune to your own ordnance, but you take far less of it.
+    const p = game.player;
+    if (p.alive && p.invuln <= 0 && hit(p.x, p.y)) {
+      p.shield -= bl.dmg * 0.3;
+      game.flash = Math.max(game.flash, 0.3);
+    }
+  }
+  blasts.length = 0;
 }
 
 function recordBest(game) {

@@ -2,7 +2,7 @@ import {
   VIEW_W, VIEW_H, FIELD_H, HUD_H, SHIP, LEVELS, LEVEL_UP, THEMES, COL, clamp,
 } from './config.js';
 import { netState } from './net.js';
-import { PICKUP } from './config.js';
+import { PICKUP, ARMORY } from './config.js';
 import { tint } from './pickups.js';
 import { tuneName, TUNES } from './music.js';
 import { livingParts, shellUp } from './boss.js';
@@ -28,84 +28,100 @@ export function drawHud(ctx, game, audio = {}) {
   ctx.fillStyle = COL.hudLine;
   ctx.fillRect(0, y0, VIEW_W, 1);
 
-  // --- shield, as segments: readable at a glance mid-dodge
-  // Label carries the max, because healthbars change it and a bar alone
-  // cannot show that its own ceiling moved.
-  text(ctx, p.shieldMax > SHIP.shieldMax ? 'SHIELD ' + p.shieldMax : 'SHIELD', 8, y0 + 6,
-    p.shieldMax > SHIP.shieldMax ? '#5fe08a' : COL.hudText);
+  // One place for the column positions, so adding a readout is a question of
+  // changing numbers here rather than discovering a collision in a
+  // screenshot. Every block is laid out as label on row 1, value on row 2.
+  const X = {
+    shield: 8, ships: 86, vel: 130, guns: 190,
+    armory: 222, score: 320, prog: 392,
+  };
+  const L = y0 + 6;      // label row
+  const V = y0 + 18;     // value row
+
+  // --- shield. The label carries the max, because healthbars move it and a
+  // bar alone cannot show that its own ceiling changed.
+  const boosted = p.shieldMax > SHIP.shieldMax;
+  text(ctx, boosted ? 'SHIELD ' + p.shieldMax : 'SHIELD', X.shield, L,
+    boosted ? '#5fe08a' : COL.hudText);
   const segs = 10;
   const filled = Math.ceil(clamp(p.shield / p.shieldMax, 0, 1) * segs);
   for (let i = 0; i < segs; i++) {
     const on = i < filled;
     ctx.fillStyle = !on ? '#1a212b' : filled <= 3 ? COL.danger : filled <= 6 ? COL.warmHi : COL.cool;
-    ctx.fillRect(8 + i * 7, y0 + 19, 5, 9);
+    ctx.fillRect(X.shield + i * 7, V + 1, 5, 9);
   }
 
-  // --- lives
-  text(ctx, 'SHIPS', 92, y0 + 6);
+  // --- ships
+  text(ctx, 'SHIPS', X.ships, L);
   for (let i = 0; i < Math.max(0, p.lives); i++) {
     ctx.fillStyle = COL.cool;
     ctx.beginPath();
-    ctx.moveTo(93 + i * 8, y0 + 28);
-    ctx.lineTo(97 + i * 8, y0 + 20);
-    ctx.lineTo(101 + i * 8, y0 + 28);
+    ctx.moveTo(X.ships + i * 7, V + 10);
+    ctx.lineTo(X.ships + 3.5 + i * 7, V + 2);
+    ctx.lineTo(X.ships + 7 + i * 7, V + 10);
     ctx.closePath();
     ctx.fill();
   }
 
-  // --- speed / heading
-  text(ctx, 'VEL', 146, y0 + 6);
-  const spd = Math.abs(p.vx) / SHIP.maxVX;
+  // --- velocity and heading
+  text(ctx, 'VEL', X.vel, L);
+  const spd = Math.abs(p.vx) / (SHIP.maxVX + (p.maxVXBonus || 0));
   ctx.fillStyle = '#1a212b';
-  ctx.fillRect(146, y0 + 19, 46, 9);
+  ctx.fillRect(X.vel, V + 1, 38, 9);
   ctx.fillStyle = COL.hudBright;
-  ctx.fillRect(146, y0 + 19, Math.round(46 * spd), 9);
-  text(ctx, p.facing > 0 ? '>>' : '<<', 196, y0 + 19, COL.cool);
+  ctx.fillRect(X.vel, V + 1, Math.round(38 * clamp(spd, 0, 1)), 9);
+  text(ctx, p.facing > 0 ? '>>' : '<<', X.vel + 42, V, COL.cool);
 
-  // --- gun upgrade levels
-  text(ctx, 'GUNS', 212, y0 + 6);
-  for (let i = 0; i < PICKUP.gunLevels; i++) {
+  // --- gun upgrade levels, two rows of pips
+  text(ctx, 'GUNS', X.guns, L);
+  for (let i = 0; i < p.gunCap; i++) {
     ctx.fillStyle = i < p.gunSpeed ? tint('gunspeed') : '#1a212b';
-    ctx.fillRect(212 + i * 6, y0 + 19, 4, 4);
+    ctx.fillRect(X.guns + i * 5, V + 1, 3, 4);
     ctx.fillStyle = i < p.gunBlaze ? tint('gunblaze') : '#1a212b';
-    ctx.fillRect(212 + i * 6, y0 + 24, 4, 4);
+    ctx.fillRect(X.guns + i * 5, V + 6, 3, 4);
   }
 
-  // --- score
-  text(ctx, 'SCORE', 252, y0 + 6);
-  text(ctx, String(game.score).padStart(8, '0'), 252, y0 + 18, COL.hudBright);
+  // --- armory: three slots, the selected one lit
+  text(ctx, 'ARMORY', X.armory, L);   // key hints live on the title screen
+  ARMORY.order.forEach((kind, i) => {
+    const spec = ARMORY[kind];
+    const n = p.ammo ? (p.ammo[kind] || 0) : 0;
+    const sel = p.secondary === kind;
+    const ax = X.armory + i * 31;
+    ctx.fillStyle = sel ? '#1e2630' : '#13191f';
+    ctx.fillRect(ax, V, 28, 12);
+    if (sel) { ctx.fillStyle = spec.colour; ctx.fillRect(ax, V, 28, 1); }
+    text(ctx, spec.short, ax + 2, V + 2, n ? spec.colour : '#2b3440', FONT);
+    text(ctx, String(n), ax + 26, V + 2, n ? COL.hudBright : '#2b3440', FONT, 'right');
+  });
 
+  // --- score
+  text(ctx, 'SCORE', X.score, L);
+  text(ctx, String(game.score).padStart(8, '0'), X.score, V, COL.hudBright);
 
   // --- hull progress, with the turnaround baked in
   const spec = game.level.spec;
   text(ctx, (game.returning ? '< ' : '> ') + spec.name
     + '  ' + (game.levelIndex + 1) + '/' + game.specs.length,
-    318, y0 + 6, game.returning ? COL.warmHi : COL.cool);
-  const bx = 318, bw = VIEW_W - bx - 10;
+    X.prog, L, game.returning ? COL.warmHi : COL.cool);
+  const bx = X.prog;
+  const bw = VIEW_W - bx - 10;
   ctx.fillStyle = '#1a212b';
-  ctx.fillRect(bx, y0 + 20, bw, 7);
+  ctx.fillRect(bx, V + 2, bw, 7);
   const prog = clamp(p.x / game.level.length, 0, 1);
   ctx.fillStyle = game.returning ? '#3a2d1a' : '#16242b';
-  ctx.fillRect(bx, y0 + 20, Math.round(bw * prog), 7);
+  ctx.fillRect(bx, V + 2, Math.round(bw * prog), 7);
   ctx.fillStyle = game.returning ? COL.warmHi : COL.cool;
-  ctx.fillRect(bx + Math.round(bw * prog) - 1, y0 + 18, 3, 11);
-  for (let i = 0; i <= 4; i++) {
-    ctx.fillStyle = COL.hudLine;
-    ctx.fillRect(bx + Math.round((bw - 1) * (i / 4)), y0 + 28, 1, 3);
-  }
+  ctx.fillRect(bx + Math.round(bw * prog) - 1, V, 3, 11);
 
   const net = netState();
   const flying = net.flying.length;
   if (net.online && flying > 0) {
-    // Other people are on the hull right now. Worth knowing mid-run.
-    text(ctx, flying === 1 ? '1 PILOT FLYING' : flying + ' PILOTS FLYING',
-      VIEW_W - 10, y0 + 6, COL.cool, FONT, 'right');
-  } else {
-    text(ctx, 'BEST ' + String(game.best).padStart(8, '0'), VIEW_W - 10, y0 + 6, COL.hudLine, FONT, 'right');
+    text(ctx, flying === 1 ? '1 FLYING' : flying + ' FLYING', VIEW_W - 10, V + 12, COL.cool, FONT, 'right');
   }
-  // audio state, bottom-right: a muted game should never look like a broken one
+
   const sym = !audio.audio ? 'SND --' : audio.muted ? 'SND OFF' : 'SND ON';
-  text(ctx, sym + '  [M]', VIEW_W - 10, y0 + 18, audio.muted ? COL.danger : COL.hudText, FONT, 'right');
+  text(ctx, sym, VIEW_W - 64, V + 12, audio.muted ? COL.danger : COL.hudLine, FONT, 'right');
 
   if (game.boss) drawBossBar(ctx, game.boss);
   if (game.toast) drawToast(ctx, game.toast);
@@ -113,8 +129,6 @@ export function drawHud(ctx, game, audio = {}) {
   if (game.state !== 'play' && game.state !== 'dying') drawScreen(ctx, game);
 }
 
-// Says what the pickup just did. Without this the player sees a flash and
-// has to infer the effect from the HUD.
 // Boss health, across the top of the playfield. Shows the shell separately
 // from the core, because "my shots are doing nothing" needs an answer on
 // screen rather than only in the sound.
@@ -122,23 +136,21 @@ function drawBossBar(ctx, b) {
   if (b.entry > 0) return;
   const w = 420;
   const x = (VIEW_W - w) / 2;
-
   text(ctx, b.name, VIEW_W / 2, 8, COL.hudBright, FONT, 'center');
-
   ctx.fillStyle = '#10141b';
   ctx.fillRect(x - 2, 21, w + 4, 9);
-
   const frac = Math.max(0, b.hp / b.maxHp);
   ctx.fillStyle = shellUp(b) ? '#3a4250' : frac < 0.34 ? COL.danger : COL.warm;
   ctx.fillRect(x, 23, Math.round(w * frac), 5);
-
   if (shellUp(b)) {
     const alive = livingParts(b).length;
-    const total = b.parts.length;
-    text(ctx, 'ARMOUR HOLDING — ' + alive + '/' + total + ' SECTIONS', VIEW_W / 2, 32, COL.warmHi, FONT, 'center');
+    text(ctx, 'ARMOUR HOLDING — ' + alive + '/' + b.parts.length + ' SECTIONS',
+      VIEW_W / 2, 32, COL.warmHi, FONT, 'center');
   }
 }
 
+// Says what a pickup just did. Without this the player sees a flash and has
+// to infer the effect from the HUD.
 function drawToast(ctx, t) {
   const a = Math.min(1, t.t / 0.4);
   ctx.globalAlpha = clamp(a, 0, 1);
@@ -206,7 +218,7 @@ function drawScreen(ctx, game) {
     }
 
     text(ctx, LEVELS.map((l) => l.name).join('  ·  '), cx, 92, COL.cool, FONT, 'center');
-    text(ctx, 'ARROWS / WASD THRUST   Z/SPACE FIRE   M MUTE   T TUNE   Q QUIT', cx, 112, COL.hudText, FONT, 'center');
+    text(ctx, 'ARROWS THRUST  Z FIRE  X ORDNANCE  C CYCLE  M MUTE  T TUNE  Q QUIT', cx, 112, COL.hudText, FONT, 'center');
     text(ctx, 'REVERSE THRUST FLIPS THE SHIP — THE HULL SCROLLS BOTH WAYS', cx, 126, COL.hudText, FONT, 'center');
 
     if (net.online && net.player) {
@@ -215,11 +227,24 @@ function drawScreen(ctx, game) {
     text(ctx, 'TUNE ' + tuneName() + '   BEST ' + String(game.best).padStart(8, '0'),
       cx, 158, COL.hudLine, FONT, 'center');
 
+    // --- hull select
+    const sel = game.specs[game.startHull];
+    const canLeft = game.startHull > 0;
+    const canRight = game.startHull < game.unlocked;
+    text(ctx, canLeft ? '<' : ' ', cx - 112, 166, canLeft ? COL.cool : '#20262e', FONT_BIG, 'center');
+    text(ctx, canRight ? '>' : ' ', cx + 112, 166, canRight ? COL.cool : '#20262e', FONT_BIG, 'center');
+    text(ctx, sel.name + '   ' + (game.startHull + 1) + '/' + game.specs.length,
+      cx, 170, COL.hudBright, FONT, 'center');
+    text(ctx, game.unlocked > 0
+      ? 'ARROWS SELECT HULL — REACHED ' + game.specs[game.unlocked].name
+      : 'CLEAR A HULL TO UNLOCK THE NEXT',
+      cx, 186, COL.hudText, FONT, 'center');
+
     ctx.globalAlpha = pulse;
-    text(ctx, 'PRESS ENTER TO LAUNCH', cx, 168, COL.warmHi, FONT, 'center');
+    text(ctx, 'PRESS ENTER TO LAUNCH', cx, 204, COL.warmHi, FONT, 'center');
     ctx.globalAlpha = 1;
 
-    drawBoard(ctx, BOARD_X, 196, 'TOP PILOTS', 6);
+    drawBoard(ctx, BOARD_X, 222, 'TOP PILOTS', 4);
     return;
   }
 

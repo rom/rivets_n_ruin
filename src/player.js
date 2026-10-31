@@ -1,10 +1,22 @@
 import {
-  SHIP, PICKUP, FIELD_TOP, FIELD_BOT, clamp,
+  SHIP, PICKUP, ARMORY, FIELD_TOP, FIELD_BOT, clamp,
 } from './config.js';
-import { axisX, axisY, held } from './input.js';
+
+// Cycles to the next ordnance you actually have, so the key is never a
+// no-op while something else is loaded.
+function cycleSecondary(p, dir) {
+  const order = ARMORY.order;
+  const start = order.indexOf(p.secondary);
+  for (let i = 1; i <= order.length; i++) {
+    const next = order[(start + dir * i + order.length * 2) % order.length];
+    if (p.ammo[next] > 0 || i === order.length) { p.secondary = next; return; }
+  }
+}
+import { axisX, axisY, held, tapped } from './input.js';
 import { obstaclesNear, pointBlocked } from './level.js';
 import { playerShots, fire } from './projectiles.js';
 import { sparks, thrust, addLight } from './particles.js';
+import { fireSecondary } from './armory.js';
 import { kick } from './camera.js';
 import { sfxShoot, sfxScrape, sfxFlip } from './sfx.js';
 
@@ -23,6 +35,15 @@ export function makePlayer() {
     gunSpeed: 0,                 // gunspeed pickups: faster fire
     gunBlaze: 0,                 // gunblaze pickups: wider spread
     gunCap: PICKUP.gunLevels,    // clearing a hull raises this
+    // What the guns revert to when a ship is lost. The refit granted by
+    // clearing a hull is part of the ship and survives; everything picked up
+    // since is lost with the hull it was collected on.
+    gunSpeedBase: 0,
+    gunBlazeBase: 0,
+    // Armory. Finite, and lost with the ship like every other addon.
+    ammo: { bomb: 0, grenade: 0, missile: 0 },
+    secondary: 'bomb',
+    secondaryCd: 0,
     // Per-run enhancements live here rather than mutating the shared config
     // objects, so starting a new run really does give you a stock ship.
     accelMul: 1,
@@ -42,6 +63,7 @@ export function updatePlayer(p, game, dt) {
   if (p.fireCd > 0) p.fireCd -= dt;
   if (p.scrapeCd > 0) p.scrapeCd -= dt;
   if (p.invuln > 0) p.invuln -= dt;
+  if (p.secondaryCd > 0) p.secondaryCd -= dt;
 
   // --- horizontal: thrust along facing, hard brake into a flip when reversing
   if (ix !== 0) {
@@ -102,6 +124,13 @@ export function updatePlayer(p, game, dt) {
     addLight(p.x + p.facing * 18, p.y, 26, 0.07, '#b4f4ff');
     sfxShoot();
   }
+
+  // --- armory
+  if (tapped('cycle')) cycleSecondary(p, 1);
+  if (tapped('arm1')) p.secondary = ARMORY.order[0];
+  if (tapped('arm2')) p.secondary = ARMORY.order[1];
+  if (tapped('arm3')) p.secondary = ARMORY.order[2];
+  if (held('secondary')) fireSecondary(game);
 }
 
 function resolveHull(p, game) {
@@ -160,10 +189,11 @@ function impact(p, game, speed, hx, hy, nx, ny) {
 // Back off to open space, so a respawn never drops you inside a block.
 export function respawn(p, game) {
   p.vx = 0; p.vy = 0;
-  // Dying costs one level off each gun — enough to feel, not enough to
-  // undo a whole run's worth of pickups.
-  p.gunSpeed = Math.max(0, p.gunSpeed - 1);
-  p.gunBlaze = Math.max(0, p.gunBlaze - 1);
+  // Losing a ship costs every weapon addon picked up since the last refit.
+  // The guns go back to whatever the ship was built with.
+  p.gunSpeed = p.gunSpeedBase;
+  p.gunBlaze = p.gunBlazeBase;
+  p.ammo = { bomb: 0, grenade: 0, missile: 0 };
   p.shield = p.shieldMax;
   p.invuln = SHIP.invuln;
   p.flip = 0;

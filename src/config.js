@@ -150,42 +150,42 @@ export const LEVELS = [
     gapScale: 0.78, clearChance: 0.07,
     turretHp: 5, turretCooldown: 1.20, turretRange: 360,
     interceptorSpeed: 220, interceptorSpawn: 0.98, interceptorHp: 3,
-    foes: ['mine', 'lancer'], tune: 2 },
+    foes: ['mine', 'lancer', 'weaver'], tune: 2 },
 
   { name: 'CUPRUM', subtitle: 'OXIDISED — SALVAGE HULK',
     theme: 'verdigris', seed: 0xc0ffee, length: 18500,
     gapScale: 0.72, clearChance: 0.06,
     turretHp: 6, turretCooldown: 1.10, turretRange: 380,
     interceptorSpeed: 236, interceptorSpawn: 0.90, interceptorHp: 4,
-    foes: ['mine', 'lancer', 'orbiter'], tune: 1 },
+    foes: ['mine', 'lancer', 'orbiter', 'weaver'], tune: 1 },
 
   { name: 'PYRITE', subtitle: 'RUNNING HOT — FOUNDRY HULL',
     theme: 'pyrite', seed: 0xf00dface, length: 20000,
     gapScale: 0.67, clearChance: 0.05,
     turretHp: 7, turretCooldown: 1.00, turretRange: 400,
     interceptorSpeed: 252, interceptorSpawn: 0.82, interceptorHp: 4,
-    foes: ['lancer', 'orbiter', 'warder'], tune: 2 },
+    foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter'], tune: 2 },
 
   { name: 'WOLFRAM', subtitle: 'LIGHT SWALLOWING — SIEGE HULL',
     theme: 'obsidian', seed: 0x0b51d1a, length: 21500,
     gapScale: 0.63, clearChance: 0.04,
     turretHp: 8, turretCooldown: 0.92, turretRange: 420,
     interceptorSpeed: 266, interceptorSpawn: 0.75, interceptorHp: 5,
-    foes: ['mine', 'orbiter', 'warder'], tune: 2 },
+    foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech'], tune: 2 },
 
   { name: 'FERRUM', subtitle: 'EATEN THROUGH — DERELICT HULL',
     theme: 'rust', seed: 0xfe2211, length: 23000,
     gapScale: 0.59, clearChance: 0.035,
     turretHp: 9, turretCooldown: 0.86, turretRange: 440,
     interceptorSpeed: 280, interceptorSpawn: 0.70, interceptorHp: 5,
-    foes: ['mine', 'lancer', 'orbiter', 'warder'], tune: 0 },
+    foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech'], tune: 0 },
 
   { name: 'AURUM', subtitle: 'THE PRIZE — ADMIRALTY HULL',
     theme: 'aurum', seed: 0xa17aa17a, length: 25000,
     gapScale: 0.55, clearChance: 0.03,
     turretHp: 10, turretCooldown: 0.80, turretRange: 460,
     interceptorSpeed: 294, interceptorSpawn: 0.64, interceptorHp: 6,
-    foes: ['mine', 'lancer', 'orbiter', 'warder'], tune: 2 },
+    foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech'], tune: 2 },
 ];
 
 // Clearing a hull upgrades the ship permanently for the rest of the run.
@@ -307,6 +307,40 @@ export const PICKUP = {
     [0.10, 0.20, 0.31, 0.43],
     [0.09, 0.18, 0.28, 0.38, 0.50],
   ],
+};
+
+// The armory: ordnance you carry a finite amount of, fired separately from
+// the cannon. Each answers a situation the cannon handles badly.
+export const ARMORY = {
+  order: ['bomb', 'grenade', 'missile'],
+  fireKeyRate: 0.28,        // floor on how fast any of them can be thrown
+
+  bomb: {
+    name: 'BOMB', short: 'BMB',
+    // Dropped in place, detonates after a fuse. Clears everything around
+    // you, which is what you want when something got close.
+    fuse: 0.65, blastR: 96, damage: 26, drag: 2.6,
+    ammoPerCrate: 2, maxAmmo: 9, cooldown: 0.75,
+    colour: '#ff7a2f',
+  },
+  grenade: {
+    name: 'GRENADE', short: 'GRN',
+    // Lobbed on an arc and bounces off the hull, so it reaches around
+    // cover the cannon cannot shoot through.
+    speed: 300, gravity: 420, bounce: 0.55, fuse: 1.5,
+    blastR: 70, damage: 20,
+    ammoPerCrate: 3, maxAmmo: 12, cooldown: 0.45,
+    colour: '#9ad94e',
+  },
+  missile: {
+    name: 'MISSILE', short: 'MSL',
+    // Finds its own target. Expensive, and the answer to a boss section you
+    // cannot line up on.
+    speed: 190, accel: 340, maxSpeed: 430, turn: 3.4,
+    seekRange: 420, life: 4.0, blastR: 48, damage: 34,
+    ammoPerCrate: 2, maxAmmo: 8, cooldown: 0.5,
+    colour: '#4fd0e8',
+  },
 };
 
 export const CAM = {

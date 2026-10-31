@@ -15,7 +15,7 @@ NODE        ?= node
 LDFLAGS     := -s -w
 
 .DEFAULT_GOAL := help
-.PHONY: help run build test test-race test-js coverage bench fmt vet check js-check smoke tidy clean dist icons stats
+.PHONY: help run build test test-race test-js coverage bench fmt vet check js-check smoke tidy clean dist icons gallery stats
 
 help: ## Show this help
 	@echo "Rivets 'n Ruin"
@@ -112,6 +112,14 @@ smoke: build ## Launch the game and assert it actually renders and scrolls
 
 tidy: ## Tidy go.mod
 	$(GO) mod tidy
+
+gallery: build ## Regenerate the README images from the live game
+	@./$(BUILD_DIR)/$(BINARY) -addr 127.0.0.1:$(SMOKE_PORT) -data $(BUILD_DIR)/gallery.json & \
+	pid=$$!; \
+	trap "kill $$pid 2>/dev/null" EXIT; \
+	sleep 1.5; \
+	$(NODE) tools/make_gallery.cjs http://127.0.0.1:$(SMOKE_PORT)/
+	@python3 tools/optimise_gallery.py
 
 icons: ## Regenerate favicon.ico and apple-touch-icon.png
 	python3 tools/make_icons.py

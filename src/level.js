@@ -153,7 +153,10 @@ export function pointBlocked(level, x, y) {
 // cache clear rather than a full re-render of the ship.
 
 export const CHUNK_W = 512;
-const MAX_CACHED = 14;
+// Chunk memory grows with the square of the scale, so the cache shrinks as
+// the scale rises. At 1x this holds a comfortable window either side of the
+// camera; at 2x it holds enough to never stall, and no more.
+const cacheLimit = (scale) => Math.max(5, Math.round(16 / (scale * scale)));
 const PLATE_W = 48;
 const PLATE_H = 36;
 
@@ -171,7 +174,7 @@ export function hullChunk(level, i, scale, generation) {
   const canvas = renderChunk(level, i, scale);
   level.chunks.set(i, { canvas, used: ++level.tick });
 
-  if (level.chunks.size > MAX_CACHED) {
+  if (level.chunks.size > cacheLimit(scale)) {
     let oldestKey = null;
     let oldest = Infinity;
     for (const [k, v] of level.chunks) {

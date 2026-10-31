@@ -6,10 +6,11 @@ import { playerShots, enemyShots } from './projectiles.js';
 import { particles, lights } from './particles.js';
 import { hash2 } from './rng.js';
 import { hullChunk, warmChunks, CHUNK_W } from './level.js';
-import { renderScale, scaleGeneration } from './display.js';
+import { renderScale, scaleGeneration, hullScale } from './display.js';
 import { pickups, tint } from './pickups.js';
 import { livingParts, shellUp } from './boss.js';
 import { foes, SPEC as FOE_SPEC } from './foes.js';
+import { drawOrdnance } from './armory.js';
 import { PICKUP } from './config.js';
 
 let scanlines = null;
@@ -121,6 +122,7 @@ export function drawWorld(ctx, game) {
   drawFoes(ctx);
   if (game.boss) drawBoss(ctx, game.boss);
   drawPickups(ctx);
+  drawOrdnance(ctx);
   drawShots(ctx);
   if (game.player.alive) drawShip(ctx, game.player);
   drawParticles(ctx);
@@ -154,7 +156,8 @@ export function drawWorld(ctx, game) {
 // pixels so a chunk lands exactly on the pixel grid and tiles seamlessly —
 // at fractional scales, drawing them in logical units leaves hairline gaps.
 function drawHull(ctx, level, camX, camY) {
-  const scale = renderScale();
+  const scale = hullScale();          // texture caps lower than the rest
+  const view = renderScale();
   const gen = scaleGeneration();
   const first = Math.floor(camX / CHUNK_W);
   const last = Math.floor((camX + VIEW_W - 1) / CHUNK_W);
@@ -164,9 +167,11 @@ function drawHull(ctx, level, camX, camY) {
   for (let i = first; i <= last; i++) {
     if (i < 0 || i * CHUNK_W >= level.length) continue;
     const canvas = hullChunk(level, i, scale, gen);
-    const dx = Math.round((i * CHUNK_W - camX) * scale);
-    const dy = Math.round(camY * scale);
-    ctx.drawImage(canvas, dx, dy);
+    const dx = Math.round((i * CHUNK_W - camX) * view);
+    const dy = Math.round(camY * view);
+    const dw = Math.ceil(canvas.width * (view / scale));
+    const dh = Math.ceil(canvas.height * (view / scale));
+    ctx.drawImage(canvas, dx, dy, dw, dh);
   }
   ctx.restore();
 
@@ -682,6 +687,63 @@ function drawFoes(ctx) {
         const a = (k / 4) * Math.PI * 2;
         ctx.fillRect(Math.cos(a) * spec.r - 1.5, Math.sin(a) * spec.r - 1.5, 3, 3);
       }
+    } else if (f.kind === 'weaver') {
+      // a thin dart, banked into its own weave
+      ctx.scale(f.facing, 1);
+      ctx.rotate(Math.cos(f.t * FOE_SPEC.weaver.freq) * 0.5);
+      ctx.fillStyle = lit ? '#ffd24a' : '#4a3a52';
+      ctx.beginPath();
+      ctx.moveTo(-11, 0); ctx.lineTo(2, -6); ctx.lineTo(10, 0); ctx.lineTo(2, 6);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#b45ce0';
+      ctx.fillRect(-2, -1.5, 7, 3);
+      ctx.fillStyle = '#e8b4ff';
+      ctx.fillRect(6, -1, 3, 2);
+    } else if (f.kind === 'splitter' || f.kind === 'shard') {
+      // a shell with a visible seam it will break along
+      const big = f.kind === 'splitter';
+      const r = big ? 14 : 8;
+      ctx.scale(f.facing, 1);
+      ctx.fillStyle = lit ? '#ffd24a' : '#3b4450';
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#8e9aa9'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke();
+      if (big) {
+        ctx.strokeStyle = '#e8434f'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(-r, 0); ctx.lineTo(r, 0); ctx.stroke();
+      }
+      ctx.fillStyle = '#ffd24a';
+      ctx.fillRect(-2, -2 - (big ? 5 : 3), 4, 4);
+      ctx.fillRect(-2, -2 + (big ? 5 : 3), 4, 4);
+    } else if (f.kind === 'bomber') {
+      // a heavy fuselage with a visible bay underneath
+      ctx.scale(f.facing, 1);
+      ctx.fillStyle = lit ? '#ffd24a' : '#45392c';
+      ctx.beginPath();
+      ctx.moveTo(-15, -4); ctx.lineTo(8, -8); ctx.lineTo(14, 0);
+      ctx.lineTo(8, 8); ctx.lineTo(-15, 4); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#6e5a3e';
+      ctx.fillRect(-11, 4, 16, 5);
+      ctx.fillStyle = '#e8434f';
+      for (let k = 0; k < 3; k++) ctx.fillRect(-9 + k * 6, 6, 3, 3);
+      ctx.fillStyle = '#d9a07a';
+      ctx.fillRect(-15, -4, 4, 8);
+    } else if (f.kind === 'leech') {
+      // organic, with grabbing arms; glows while attached
+      const on = f.state === 1;
+      ctx.fillStyle = lit ? '#ffd24a' : on ? '#5fe08a' : '#2f4a38';
+      ctx.beginPath(); ctx.arc(0, 0, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = on ? '#9ad94e' : '#4a6a52';
+      ctx.lineWidth = 2;
+      for (let k = 0; k < 5; k++) {
+        const a = f.t * 2.4 + (k / 5) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * 8, Math.sin(a) * 8);
+        ctx.lineTo(Math.cos(a) * 15, Math.sin(a) * 15);
+        ctx.stroke();
+      }
+      ctx.fillStyle = on ? '#ffffff' : '#9ad94e';
+      ctx.fillRect(-2, -2, 4, 4);
     } else {
       ctx.scale(f.facing, 1);
       ctx.fillStyle = lit ? '#ffd24a' : '#3f4a3a';

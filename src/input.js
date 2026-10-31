@@ -16,6 +16,9 @@ const MAP = {
   KeyN: 'no',
   KeyY: 'yes',
   KeyQ: 'quit',
+  KeyX: 'secondary', ShiftLeft: 'secondary',
+  KeyC: 'cycle',
+  Digit1: 'arm1', Digit2: 'arm2', Digit3: 'arm3',
   KeyT: 'tune',
   BracketRight: 'tune',
 };
