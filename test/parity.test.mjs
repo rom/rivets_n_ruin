@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  LEVELS, BOSSES, SHIP, LEVEL_UP, PICKUP, HULL_BONUS, DIFFICULTY, ARMORY,
+  LEVELS, BOSSES, SHIP, LEVEL_UP, PICKUP, HULL_BONUS, DIFFICULTY, ARMORY, VERSION,
 } from '../src/config.js';
 import { MODS } from '../src/shop.js';
 import { BODY_KINDS } from '../src/foeart.js';
@@ -413,5 +413,36 @@ test('the README armory table lists every ordnance kind', () => {
     const pretty = name.charAt(0) + name.slice(1).toLowerCase();
     assert.ok(readme.includes(`**${pretty}**`) || readme.includes(`**${name}**`),
       `the armory table does not list ${name}`);
+  }
+});
+
+// --- the changelog
+//
+// A changelog is only worth having if it cannot quietly fall behind the
+// thing it describes. These check the two ways it usually does: a
+// version bump nobody wrote an entry for, and a link reference nobody
+// defined.
+
+test('the changelog has an entry for the current version', () => {
+  const log = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
+  assert.ok(log.includes(`## [${VERSION}]`),
+    `src/config.js says ${VERSION} and CHANGELOG.md has no "## [${VERSION}]" heading — `
+    + 'the version was bumped without an entry');
+});
+
+test('the changelog keeps a place for work that is not released yet', () => {
+  const log = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
+  assert.ok(/^## \[Unreleased\]/m.test(log),
+    'no Unreleased section, so there is nowhere to write the next change down');
+});
+
+test('every changelog link reference is defined', () => {
+  const log = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
+  // [Unreleased]: https://... at the bottom
+  const defined = new Set([...log.matchAll(/^\[([^\]]+)\]:/gm)].map((m) => m[1]));
+  const used = new Set([...log.matchAll(/^## \[([^\]]+)\]/gm)].map((m) => m[1]));
+  for (const label of used) {
+    assert.ok(defined.has(label),
+      `the changelog links to [${label}] in a heading but never defines it`);
   }
 });
