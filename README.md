@@ -1736,7 +1736,9 @@ about which:
 The thresholds live in `tools/coverage.sh`, not in the workflow, so
 `make coverage-gate` gives the same answer on your machine as it does in
 CI. A gate you cannot reproduce locally is one people learn to ignore, and
-then to delete. The floor is **85%** each side; `cmd/server` is excluded
+then to delete. The floor is **86%** Go and **89%** JavaScript — a notch
+under where each actually sits, because a floor set to the exact current
+number turns every unrelated refactor into a coverage failure; `cmd/server` is excluded
 because it is `main()` — flag parsing, a listener and a signal handler —
 and the only way to cover it is to start the process, which `make smoke`
 already does end to end. Counting it would mean either a permanently

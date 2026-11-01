@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/rom/rivets_n_ruin/internal/store"
+	"io"
+	"log/slog"
+	"net/http/httptest"
 )
 
 // --- the public profile
@@ -283,5 +286,75 @@ func TestExpiredRunsAreSwept(t *testing.T) {
 	}
 	if s.runs.get(fresh.ID) == nil {
 		t.Error("a live run was swept with the expired one")
+	}
+}
+
+// --- the rate limiter and the panic net, which sit in front of
+// everything and had only the happy path between them.
+
+func TestClientIPHandlesEveryRemoteAddrShape(t *testing.T) {
+	for addr, want := range map[string]string{
+		"1.2.3.4:5678":   "1.2.3.4",
+		"[::1]:5678":     "::1",
+		"1.2.3.4":        "1.2.3.4", // no port: used as-is rather than dropped
+		"":               "",
+		"unix@/tmp/sock": "unix@/tmp/sock",
+	} {
+		r := httptest.NewRequest("GET", "/api/health", nil)
+		r.RemoteAddr = addr
+		if got := clientIP(r); got != want {
+			t.Errorf("clientIP(%q) = %q, want %q", addr, got, want)
+		}
+	}
+}
+
+func TestRateLimiterRefusesAFlood(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// Deliberately tiny: the suite-wide server uses a huge limit so the
+	// tests do not throttle themselves, which means nothing exercises
+	// the refusal.
+	h := New(store.NewMemory(), log, Config{RateLimitPerSec: 1, RateBurst: 2}).Routes()
+
+	codes := map[int]int{}
+	for i := 0; i < 12; i++ {
+		rec, _ := do(t, h, "GET", "/api/health", "", nil)
+		codes[rec.Code]++
+	}
+	if codes[http.StatusTooManyRequests] == 0 {
+		t.Fatalf("twelve requests against a burst of two were all allowed: %v", codes)
+	}
+	if codes[http.StatusOK] == 0 {
+		t.Errorf("the limiter refused everything, including the first: %v", codes)
+	}
+
+	// And it says how to behave rather than just saying no.
+	var last *httptest.ResponseRecorder
+	for i := 0; i < 12; i++ {
+		last, _ = do(t, h, "GET", "/api/health", "", nil)
+		if last.Code == http.StatusTooManyRequests {
+			break
+		}
+	}
+	if last.Code == http.StatusTooManyRequests && last.Header().Get("Retry-After") == "" {
+		t.Error("a 429 with no Retry-After")
+	}
+}
+
+func TestOneIPCannotThrottleAnother(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h := New(store.NewMemory(), log, Config{RateLimitPerSec: 1, RateBurst: 2}).Routes()
+
+	hit := func(ip string) int {
+		r := httptest.NewRequest("GET", "/api/health", nil)
+		r.RemoteAddr = ip + ":1234"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	for i := 0; i < 10; i++ {
+		hit("10.0.0.1")
+	}
+	if got := hit("10.0.0.2"); got != http.StatusOK {
+		t.Errorf("a second address got %d after the first was throttled; the bucket is global", got)
 	}
 }

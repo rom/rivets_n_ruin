@@ -10,8 +10,12 @@
 
 set -uo pipefail
 
-GO_MIN=${GO_MIN:-85}
-JS_MIN=${JS_MIN:-85}
+# Raised as the suite grew, and deliberately a notch under where it
+# actually sits: a floor set to the exact current number turns every
+# unrelated refactor into a coverage failure, and a floor nobody can
+# move without thinking is a floor people lower.
+GO_MIN=${GO_MIN:-86}
+JS_MIN=${JS_MIN:-89}
 BUILD_DIR=${BUILD_DIR:-build}
 GO=${GO:-go}
 NODE=${NODE:-node}
