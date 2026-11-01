@@ -82,7 +82,12 @@ test('spawnFoe rejects an unknown kind', () => {
 
 // --- armory
 test('every armory entry is ordered and complete', () => {
-  assert.equal(ARMORY.order.length, 3);
+  // Not a fixed count: the list grows. What has to hold is that every
+  // ordered kind has a spec, and that the HUD has a slot for it — which
+  // screens.test.mjs checks from the other side.
+  assert.ok(ARMORY.order.length >= 3, 'the armory has shrunk');
+  assert.equal(new Set(ARMORY.order).size, ARMORY.order.length,
+    'the same ordnance is listed twice');
   for (const kind of ARMORY.order) {
     const spec = ARMORY[kind];
     assert.ok(spec, `${kind} is in the order but has no spec`);

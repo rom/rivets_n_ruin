@@ -1,6 +1,5 @@
 import {
-  SHIP, PICKUP, ARMORY, FIELD_TOP, FIELD_BOT, clamp,
-} from './config.js';
+  SHIP, PICKUP, ARMORY, FIELD_TOP, FIELD_BOT, clamp, REAR, LANCE} from './config.js';
 
 // Cycles to the next ordnance you actually have, so the key is never a
 // no-op while something else is loaded.
@@ -21,6 +20,10 @@ import { diff } from './score.js';
 import { kick } from './camera.js';
 import { sfxShoot, sfxScrape, sfxFlip } from './sfx.js';
 import { get as setting } from './settings.js';
+
+// Built from ARMORY.order rather than written out, so adding ordnance
+// cannot leave one kind undefined in half the places that read it.
+export const emptyAmmo = () => Object.fromEntries(ARMORY.order.map((k) => [k, 0]));
 
 export function makePlayer() {
   return {
@@ -52,7 +55,7 @@ export function makePlayer() {
     gunSpeedBase: 0,
     gunBlazeBase: 0,
     // Armory. Finite, and lost with the ship like every other addon.
-    ammo: { bomb: 0, grenade: 0, missile: 0 },
+    ammo: emptyAmmo(),
     secondary: 'bomb',
     secondaryCd: 0,
     // Per-run enhancements live here rather than mutating the shared config
@@ -154,12 +157,64 @@ export function updatePlayer(p, game, dt) {
     sfxShoot();
   }
 
+  // --- REAR BATTERY. Fires itself, behind you, and only when there is
+  // something back there: a tail gun shooting at nothing is a noise, not
+  // a weapon.
+  if (p.rearGun) {
+    p.rearCd = (p.rearCd || 0) - dt;
+    if (p.rearCd <= 0 && behindYou(game, p)) {
+      p.rearCd = REAR.fireEvery * (p.reloadMul || 1);
+      fire(playerShots, p.x - p.facing * 14, p.y,
+        -p.facing * REAR.bulletSpeed, 0, 1.2, REAR.damage, 2);
+      sparks(p.x - p.facing * 15, p.y, -p.facing, 0, 2, '#b45ce0');
+      sfxShoot();
+    }
+  }
+
+  // --- SPINAL LANCE. Charges on its own clock and then puts a beam
+  // through everything in a line ahead. Nothing to aim: the line is the
+  // ship's own centreline, so the decision is where to be pointing when
+  // it comes round.
+  if (p.lance) {
+    const tier = Math.min(p.lance, LANCE.cycle.length) - 1;
+    p.lanceT = (p.lanceT || 0) + dt;
+    const cycle = LANCE.cycle[tier];
+    if (p.lanceT >= cycle) {
+      p.lanceT = 0;
+      p.lanceFire = LANCE.dwell;
+    }
+    p.lanceFire = Math.max(0, (p.lanceFire || 0) - dt);
+    // Cleared the moment the beam is over, so the next firing bills once
+    // too. Without this the lance damaged exactly one thing per run: the
+    // flag is what stops twenty-six frames of contact being billed
+    // twenty-six times, and nothing was putting it back.
+    if (p.lanceFire <= 0) p.lanceSpent = false;
+    p.lanceCharge = clamp((p.lanceT - (cycle - LANCE.charge)) / LANCE.charge, 0, 1);
+  } else {
+    p.lanceFire = 0;
+    p.lanceCharge = 0;
+    p.lanceSpent = false;
+  }
+
   // --- armory
   if (tapped('cycle')) cycleSecondary(p, 1);
-  if (tapped('arm1')) p.secondary = ARMORY.order[0];
-  if (tapped('arm2')) p.secondary = ARMORY.order[1];
-  if (tapped('arm3')) p.secondary = ARMORY.order[2];
+  ARMORY.order.forEach((kind, i) => {
+    if (i < 3 && tapped('arm' + (i + 1))) p.secondary = kind;
+  });
   if (held('secondary')) fireSecondary(game);
+}
+
+// Is there anything behind the ship worth shooting at? Keeps the rear
+// battery quiet on an empty corridor.
+function behindYou(game, p) {
+  const list = game._seekable;
+  if (!list) return false;
+  for (let i = 0; i < list.length; i++) {
+    const e = list[i];
+    const dx = (e.x - p.x) * p.facing;
+    if (dx < 0 && dx > -REAR.range && Math.abs(e.y - p.y) < 70) return true;
+  }
+  return false;
 }
 
 function resolveHull(p, game) {
@@ -273,7 +328,7 @@ export function respawn(p, game) {
   const keep = p.keepGunOnDeath || 0;
   p.gunSpeed = Math.max(p.gunSpeedBase, Math.min(p.gunSpeed, p.gunSpeedBase + keep));
   p.gunBlaze = Math.max(p.gunBlazeBase, Math.min(p.gunBlaze, p.gunBlazeBase + keep));
-  p.ammo = { bomb: 0, grenade: 0, missile: 0 };
+  p.ammo = emptyAmmo();
   p.shield = p.shieldMax;
   p.invuln = SHIP.invuln;
   p.flip = 0;

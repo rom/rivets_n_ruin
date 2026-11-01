@@ -689,8 +689,31 @@ export const PICKUP = {
 
 // The armory: ordnance you carry a finite amount of, fired separately from
 // the cannon. Each answers a situation the cannon handles badly.
+// The two bought weapons that are not ordnance: a gun on the tail and a
+// beam down the centreline. Both are mods rather than consumables —
+// permanent, visible on the hull, and fired by the ship rather than by
+// you, because a third and fourth thing to aim is not more interesting
+// than the two there already are.
+export const REAR = {
+  fireEvery: 0.55,
+  bulletSpeed: 420,
+  damage: 7,
+  range: 360,           // only bothers when something is actually behind
+};
+
+export const LANCE = {
+  // Charges, then puts a beam through everything in a line. Tier two is
+  // heavier and comes round faster.
+  cycle: [4.2, 2.8],
+  charge: 0.55,
+  dwell: 0.22,
+  damage: [26, 44],
+  halfHeight: 5,
+  colour: '#8fd8ff',
+};
+
 export const ARMORY = {
-  order: ['bomb', 'grenade', 'missile'],
+  order: ['bomb', 'grenade', 'missile', 'mine'],
   fireKeyRate: 0.28,        // floor on how fast any of them can be thrown
 
   bomb: {
@@ -709,6 +732,18 @@ export const ARMORY = {
     blastR: 70, damage: 20,
     ammoPerCrate: 3, maxAmmo: 12, cooldown: 0.45,
     colour: '#9ad94e',
+  },
+  mine: {
+    name: 'SPIKE MINE', short: 'MNE',
+    // Left behind rather than thrown. The cannon points where you are
+    // going; this is the only thing in the armory that answers what is
+    // following you, and the only one you place before you need it.
+    // Arms after a moment so you cannot drop one onto your own nose, then
+    // sits on the hull until something touches it or its timer runs out.
+    arm: 0.5, life: 14.0, drift: 0.9,
+    blastR: 82, damage: 30, trigger: 26,
+    ammoPerCrate: 2, maxAmmo: 10, cooldown: 0.55,
+    colour: '#c08cff',
   },
   missile: {
     name: 'MISSILE', short: 'MSL',

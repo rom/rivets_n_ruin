@@ -47,7 +47,7 @@ function text(ctx, str, x, y, color = COL.hudText, font = FONT, align = 'left') 
 // screens.test.mjs checks the widest thing each one can hold against it.
 export const HUD_X = {
   shield: 8, ships: 94, vel: 142, guns: 202,
-  armory: 234, score: 362, prog: 420,
+  armory: 234, score: 402, prog: 458,
 };
 
 // The armory slots, sized from their own contents rather than guessed:
@@ -764,7 +764,7 @@ export function drawScreen(ctx, game) {
     ctx.globalAlpha = pulse;
     text(ctx, 'ENTER TO LAUNCH', cx, OVERVIEW.launch, COL.warmHi, FONT, 'center');
     ctx.globalAlpha = 1;
-    text(ctx, 'E  ARMOURER     ' + (game.coins || 0) + ' COINS',
+    text(ctx, 'E  ARMOURER     ' + (game.coins || 0) + 'c   ' + (game.bars || 0) + 'b',
       cx, OVERVIEW.armourer, '#ffd24a', FONT, 'center');
     return;
   }
@@ -980,7 +980,8 @@ export function drawShop(ctx, game, sel, note) {
   const cx = VIEW_W / 2;
 
   text(ctx, 'ARMOURER', cx, 12, COL.hudBright, FONT_BIG, 'center');
-  text(ctx, 'COINS ' + (game.coins || 0), cx, 40, '#ffd24a', FONT, 'center');
+  text(ctx, 'COINS ' + (game.coins || 0) + '    GOLD BARS ' + (game.bars || 0),
+    cx, 40, '#ffd24a', FONT, 'center');
 
   const list = shopRows(game);
   const top = 60;
@@ -1007,8 +1008,14 @@ export function drawShop(ctx, game, sel, note) {
     } else {
       text(ctx, r.detail, x + 150, y, colour, FONT);
     }
-    text(ctx, !r.available ? 'MAX' : String(r.cost), x + 276, y,
-      !r.available ? '#2b3440' : r.affordable ? '#ffd24a' : '#5a3a40', FONT, 'right');
+    // The unit, not just the number: 15 next to 2600 reads as a bargain
+    // rather than as a different currency, which is exactly backwards.
+    const price = !r.available ? 'MAX'
+      : r.currency === 'bars' ? r.cost + 'b' : String(r.cost);
+    text(ctx, price, x + 276, y,
+      !r.available ? '#2b3440'
+        : r.affordable ? (r.currency === 'bars' ? '#ffc93a' : '#ffd24a')
+          : '#5a3a40', FONT, 'right');
   });
 
   const cur = list[sel];

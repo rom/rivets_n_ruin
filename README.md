@@ -557,19 +557,25 @@ than the thing the end-of-hull bonus is paid on.
 
 The cannon is a line. Each of these answers a situation a line handles badly,
 so carrying them is a decision rather than a strict upgrade. `X` fires the
-selected one, `C` cycles, `1`–`3` select directly. All three are finite, and
-all three are lost with a ship.
+selected one, `C` cycles, `1`–`3` select the first three directly. All of
+them are finite, and all are lost with a ship.
 
 | | Behaviour | Answers |
 | --- | --- | --- |
 | **Bomb** | Dropped in place, detonates after a fuse, large blast | Something that got close |
 | **Grenade** | Lobbed on an arc, bounces off hull and girders | Something behind cover |
 | **Missile** | Acquires the nearest target and steers at it | Something you cannot line up on |
+| **Spike mine** | Left where you are, arms after half a second, then waits | Something that is *following* you |
+
+The mine is the only one you place before you need it, and the only one
+that does not care which way the nose is pointing. It goes off on contact
+once armed, and burns out on its own after fourteen seconds so a hull does
+not slowly fill with forgotten ones.
 
 Blasts ignore a warder's frontal plate, which is rather the point of them.
-You are not immune to your own ordnance, though you take far less of it.
-
-Crates drop from kills; each refills a couple of rounds, up to a cap.
+You are not immune to your own ordnance, though you take far less of it —
+and that, unlike enemy fire, is not scaled by the hull: it is a mistake
+with a fixed price.
 
 ## The wreck window
 
@@ -635,15 +641,45 @@ of the screen, which changes how a hull is flown as much as any gun does.
 | **CELL REGENERATOR** | I · II | The shield comes back on its own, at 2.5 then 6 a second |
 | **POINT DEFENCE** | — | Shoots down enemy missiles that get close. Automatic |
 | **SIEGE FRAME** | — | +60 maximum shield and heavier plating, at the cost of acceleration |
+| **REAR BATTERY** | — | A gun on the tail. Fires itself, backwards, and only when something is actually back there |
+| **SPINAL LANCE** | I–II | A beam down the centreline on its own clock, straight through everything in the line |
 | **ABLATIVE PLATING** | — | Hull scrapes cost 40% less shield |
 | **AUTOLOADER** | — | Ordnance reloads 35% faster |
 | **AFTERBURNER** | — | +40 top speed, quicker acceleration |
 | **RECLAIMER** | — | Keep one gun level when a ship is lost |
 
-The last five change what the ship *is* rather than what a number on it
+The systems change what the ship *is* rather than what a number on it
 says, and every one is visible on the hull: drones fly in formation and
 fire when you fire, point defence draws a line to the missile it just
-took, the siege frame is plated, the extra mounts are extra barrels.
+took, the siege frame is plated, the extra mounts are extra barrels, the
+tail gun answers what is behind you and the lance draws a line through
+the hull ahead of you.
+
+### What it sells, and when, and in what
+
+Two things decide whether a row is on the shelf.
+
+**Mods arrive as the campaign does.** Each one states the hull it first
+appears on, and before that it simply is not listed. Everything being
+available on the first hull made the armourer a wall of twenty-odd rows
+in front of a pilot with four hundred coins, and buried the interesting
+question — which two of these can I afford — under rows that were not
+really offers. A row you cannot buy, for a reason the shop will not
+state, is worse than no row.
+
+| | LODESTONE, SCAVENGER RIG | AFTERBURNER | ABLATIVE PLATING | AUTOLOADER | RECLAIMER | EXTRA MOUNT | REAR BATTERY | CELL REGENERATOR | DRONE WING | POINT DEFENCE | SIEGE FRAME | SPINAL LANCE |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| from hull | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 10 | 12 | 14 | 17 |
+
+**The permanent systems cost gold bars.** Coins accumulate by playing;
+a bar is a thing you went out of your way for, and pricing the systems in
+them makes fitting one a decision about how you flew rather than about how
+long. The shop shows both purses and marks a bar price with a `b`, because
+`15` next to `2600` reads as a bargain rather than as a different
+currency, which is exactly backwards.
+
+Bars are banked with the coins — see *What survives a closed tab* — so a
+system is something you save toward across runs.
 
 The two that change how the whole hull is flown — how far loot reaches and
 what it is worth — go up to three tiers, each dearer than the last
