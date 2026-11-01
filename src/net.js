@@ -126,6 +126,7 @@ export async function signUp(name, password) {
   const data = await call('/api/auth/register', { method: 'POST', auth: true, body: { name, password } });
   if (!data) return null;
   savePlayer({ id: data.id, name: data.name, token: data.token });
+  await identityChanged();
   await Promise.all([refreshTop(), refreshRuns(), refreshStats()]);
   return S.player;
 }
@@ -134,8 +135,26 @@ export async function signIn(name, password) {
   const data = await call('/api/auth/login', { method: 'POST', body: { name, password } });
   if (!data) return null;
   savePlayer({ id: data.id, name: data.name, token: data.token });
+  await identityChanged();
   await Promise.all([refreshTop(), refreshRuns(), refreshStats()]);
   return S.player;
+}
+
+// Called whenever the pilot this browser is acting as changes: a
+// sign-in, a sign-up, a fresh anonymous registration, or the backend
+// coming back after being unreachable.
+//
+// It exists because the hangar has to be reconciled against whichever
+// account is now in play, and net.js is the only place that knows when
+// that changes. Doing it once at page load covered exactly one of
+// those four moments, and signing in afterwards pushed this browser's
+// hangar over the account it had just signed into.
+let onIdentity = null;
+export function setIdentityHook(fn) { onIdentity = fn; }
+
+async function identityChanged() {
+  if (!onIdentity) return;
+  try { await onIdentity(); } catch { /* the run carries on regardless */ }
 }
 
 // --- the hangar, as the server holds it

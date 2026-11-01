@@ -65,7 +65,7 @@ func (s *Server) adminCaller(r *http.Request) *adminSession {
 	if !s.adminEnabled() {
 		return nil
 	}
-	if s.adminLocalOnly && !isLoopback(r.RemoteAddr) {
+	if !s.adminAllowRemote && !isLoopback(r.RemoteAddr) {
 		return nil
 	}
 	h := r.Header.Get("Authorization")
@@ -108,7 +108,7 @@ func (s *Server) audit(r *http.Request, action string, args ...any) {
 // --- login
 
 func (s *Server) adminLogin(w http.ResponseWriter, r *http.Request) {
-	if s.adminLocalOnly && !isLoopback(r.RemoteAddr) {
+	if !s.adminAllowRemote && !isLoopback(r.RemoteAddr) {
 		http.NotFound(w, r)
 		return
 	}
@@ -134,6 +134,16 @@ func (s *Server) adminLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.adminMu.Lock()
 	exp := s.now().Add(adminSessionTTL)
+	// Drop the dead ones while we are holding the lock anyway. Nothing
+	// else does: a session is only ever removed when its own token comes
+	// back or on an explicit logout, so an operator who logs in daily
+	// and closes the terminal grew this map for the life of the process.
+	now := s.now()
+	for k, v := range s.adminSessions {
+		if now.After(v.expires) {
+			delete(s.adminSessions, k)
+		}
+	}
 	s.adminSessions[hash] = &adminSession{hash: hash, expires: exp}
 	s.adminMu.Unlock()
 	s.audit(r, "login")

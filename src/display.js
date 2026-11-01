@@ -18,11 +18,16 @@
 // gameplay started and came back sharp in the menus. Reported from play
 // as "the text in the HUD gets blocky".
 //
-// So the canvas is always sized for the window, and the *world* is drawn
-// into an offscreen buffer at the adaptive scale and blown up onto it.
-// The expensive full-screen pass still costs what the machine can
-// afford; the text on top of it is rasterised at display resolution
-// whatever the machine can afford.
+// So there are two canvases, stacked by CSS. The world canvas carries
+// the adaptive scale and the compositor stretches it to the box, which
+// costs nothing. The UI canvas sits on top at the window's own scale
+// and carries the HUD and every screen made of text.
+//
+// S.scale is the world's and S.uiScale is the window's; renderScale()
+// and hullScale() both mean the world. An earlier draft of this comment
+// described drawing the world into an offscreen buffer and blitting it
+// onto a single full-scale canvas — that was tried, it halved the frame
+// rate, and it is not what the code below does.
 
 import { VIEW_W, VIEW_H } from './config.js';
 

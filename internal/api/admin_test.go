@@ -28,7 +28,7 @@ func adminServer(t *testing.T, localOnly bool) (http.Handler, store.Store) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return New(st, log, Config{
 		RateLimitPerSec: 1e6, RateBurst: 1e6,
-		AdminPasswordHash: h, AdminLocalOnly: localOnly,
+		AdminPasswordHash: h, AdminAllowRemote: !localOnly,
 	}).Routes(), st
 }
 
@@ -222,7 +222,7 @@ func TestAdminSessionsExpire(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	api := New(store.NewMemory(), log, Config{
 		RateLimitPerSec: 1e6, RateBurst: 1e6,
-		AdminPasswordHash: h, AdminLocalOnly: true,
+		AdminPasswordHash: h, AdminAllowRemote: false,
 	})
 	at := time.Now()
 	api.SetClock(func() time.Time { return at })
@@ -439,5 +439,60 @@ func TestAdminSeesPilotStatistics(t *testing.T) {
 	}
 	if len(out["recentScores"].([]any)) != 3 {
 		t.Errorf("recentScores has %d entries, want 3", len(out["recentScores"].([]any)))
+	}
+}
+
+// The zero value of the config has to be the safe one. It used to be
+// AdminLocalOnly, whose zero value allowed every address while its own
+// comment claimed the opposite and pointed at a constructor that did
+// not exist.
+func TestAdminConfigDefaultsToLoopbackOnly(t *testing.T) {
+	h, err := HashPassword(adminPw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// Note what is NOT set: a caller who thinks about nothing but the
+	// password gets the restriction.
+	srv := New(store.NewMemory(), log, Config{
+		RateLimitPerSec: 1e6, RateBurst: 1e6, AdminPasswordHash: h,
+	}).Routes()
+
+	w, _ := adminDo(t, srv, "POST", "/api/admin/login", "", map[string]any{"password": adminPw}, false)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("a config that only set the password answered a remote login with %d; "+
+			"the zero value must be loopback-only", w.Code)
+	}
+	if w, _ := adminDo(t, srv, "POST", "/api/admin/login", "", map[string]any{"password": adminPw}, true); w.Code != http.StatusOK {
+		t.Errorf("local login broke: %d", w.Code)
+	}
+}
+
+func TestExpiredAdminSessionsAreSweptOnLogin(t *testing.T) {
+	// Nothing removed an expired session unless its own token came
+	// back, so a daily login on a long-lived server grew the map
+	// forever. The rate limiter in the same struct has a sweeper for
+	// exactly this.
+	h, err := HashPassword(adminPw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	api := New(store.NewMemory(), log, Config{
+		RateLimitPerSec: 1e6, RateBurst: 1e6, AdminPasswordHash: h,
+	})
+	at := time.Now()
+	api.SetClock(func() time.Time { return at })
+	srv := api.Routes()
+
+	for i := 0; i < 5; i++ {
+		adminLoginAs(t, srv)
+		at = at.Add(adminSessionTTL + time.Minute) // each one expires before the next
+	}
+	api.adminMu.Lock()
+	n := len(api.adminSessions)
+	api.adminMu.Unlock()
+	if n > 1 {
+		t.Errorf("%d sessions held after five logins that had all expired; want the dead ones dropped", n)
 	}
 }

@@ -63,13 +63,15 @@ func hidden(root string, hide []string, urlPath string) bool {
 	target := filepath.Join(root, filepath.Clean("/"+urlPath))
 
 	for _, h := range hide {
-		// Equal, inside it, or sharing its stem. The last one matters:
-		// runs.json sits beside scores.json and a save in progress
-		// leaves a .tmp next to both, so matching the prefix covers
-		// the sidecars without anyone having to list them.
+		// Equal, inside it, or a sidecar of it. The sidecar rule has to
+		// end at a dot: scores.json.tmp and runs.json share a stem with
+		// the files they sit beside, but a bare prefix test also hides
+		// statements.html next to a `state` directory, which is a
+		// legitimate page answering 404 for no reason anybody could
+		// diagnose.
 		if target == h ||
 			strings.HasPrefix(target, h+string(filepath.Separator)) ||
-			strings.HasPrefix(target, h) {
+			strings.HasPrefix(target, h+".") {
 			return true
 		}
 	}

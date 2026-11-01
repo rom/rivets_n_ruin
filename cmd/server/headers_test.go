@@ -9,9 +9,13 @@ import (
 )
 
 func serve(t *testing.T, hsts bool, req *http.Request) http.Header {
+	return serveProxy(t, hsts, false, req)
+}
+
+func serveProxy(t *testing.T, hsts, trustProxy bool, req *http.Request) http.Header {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	secureHeaders(hsts, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	secureHeaders(hsts, trustProxy, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(200)
 	})).ServeHTTP(rec, req)
 	return rec.Result().Header
@@ -91,15 +95,33 @@ func TestHSTSOnlyOverTLS(t *testing.T) {
 		t.Errorf("HSTS sent over plain HTTP: %q", got)
 	}
 
+	// X-Forwarded-Proto is attacker-controlled on a directly exposed
+	// server, so believing it unconditionally makes the TLS check
+	// decoration: any client can satisfy it with one header.
 	fwd := httptest.NewRequest("GET", "/", nil)
 	fwd.Header.Set("X-Forwarded-Proto", "https")
-	if got := serve(t, true, fwd).Get("Strict-Transport-Security"); got == "" {
-		t.Error("HSTS not sent behind a TLS-terminating proxy")
+	if got := serveProxy(t, true, false, fwd).Get("Strict-Transport-Security"); got != "" {
+		t.Errorf("a client-supplied X-Forwarded-Proto turned HSTS on without -trust-proxy: %q", got)
+	}
+	if got := serveProxy(t, true, true, fwd).Get("Strict-Transport-Security"); got == "" {
+		t.Error("HSTS not sent behind a TLS-terminating proxy with -trust-proxy")
 	}
 
 	// ...and never when it was not asked for.
-	if got := serve(t, false, fwd).Get("Strict-Transport-Security"); got != "" {
+	if got := serveProxy(t, false, true, fwd).Get("Strict-Transport-Security"); got != "" {
 		t.Errorf("HSTS sent without -hsts: %q", got)
+	}
+}
+
+// The directive that broke every deployment not on localhost.
+func TestPolicyDoesNotUpgradeInsecureRequests(t *testing.T) {
+	// It rewrites same-origin subresource URLs to https://, and this
+	// server speaks plain HTTP: on a LAN address the page would try to
+	// fetch its own modules over TLS from a port with no TLS listener
+	// and load nothing. 127.0.0.1 is exempt from the directive, which
+	// is why the smoke test never saw it.
+	if strings.Contains(CSP, "upgrade-insecure-requests") {
+		t.Error("upgrade-insecure-requests is back; -addr 0.0.0.0:8000 will not load")
 	}
 }
 

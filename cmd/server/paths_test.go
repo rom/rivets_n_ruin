@@ -108,8 +108,8 @@ func TestDefaultLayoutIsFlaggedAsExposed(t *testing.T) {
 			t.Errorf("%s is inside the web root but not flagged: %v", want, p.Exposed)
 		}
 	}
-	if !coveredBy(p.Hidden(), p.AccountsFile) {
-		t.Error("the account database would still be served")
+	if !contains(p.Hidden(), p.AccountsFile) {
+		t.Errorf("the account database is not in the hide list: %v", p.Hidden())
 	}
 }
 
@@ -234,5 +234,76 @@ func TestNoAdminCredentialMeansNoAdmin(t *testing.T) {
 	got, err := readAdminSecret("", "")
 	if err != nil || got != "" {
 		t.Fatalf("no flags should mean no credential, got %q / %v", got, err)
+	}
+}
+
+func TestStrandedLegacySnapshotIsNoticed(t *testing.T) {
+	// The -data default used to be data/rnr.json. Dropping it means an
+	// operator who never passed the flag comes up on an empty store and
+	// sees every account, score and mod apparently gone.
+	dir := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll("data", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(LegacyDefault, []byte(`{"players":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := StrandedLegacyFile(".", "", "", ""); got == "" {
+		t.Error("a pre-split snapshot in the default location was not noticed")
+	}
+	// Anyone who passed a path flag has said where their data is.
+	for _, c := range [][3]string{{"s", "", ""}, {"", "a", ""}, {"", "", "other.json"}} {
+		if got := StrandedLegacyFile(".", c[0], c[1], c[2]); got != "" {
+			t.Errorf("warned about %s despite explicit flags %v", got, c)
+		}
+	}
+	// An empty file is a leftover, not data worth stopping for.
+	if err := os.WriteFile(LegacyDefault, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := StrandedLegacyFile(".", "", "", ""); got != "" {
+		t.Errorf("stopped for an empty file: %s", got)
+	}
+	if err := os.Remove(LegacyDefault); err != nil {
+		t.Fatal(err)
+	}
+	if got := StrandedLegacyFile(".", "", "", ""); got != "" {
+		t.Errorf("stopped with no legacy file at all: %s", got)
+	}
+}
+
+func TestPasswordTrimmingMatchesTheHasher(t *testing.T) {
+	// -hash-password and -admin-password-file have to agree on exactly
+	// which bytes are the password. They did not: one stripped the
+	// trailing newline, the other TrimSpace'd, so a password with a
+	// leading or trailing space hashed differently depending on the
+	// route in — and the login silently never matched.
+	for _, pw := range []string{" leading", "trailing ", " both ", "pass word", "plain"} {
+		dir := t.TempDir()
+		f := filepath.Join(dir, "pw")
+		// Written the way `echo` writes it.
+		if err := os.WriteFile(f, []byte(pw+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		fromFile, err := readAdminSecret("", f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// What -hash-password would have produced from the same bytes.
+		if got := trimSecret(pw + "\n"); got != pw {
+			t.Fatalf("trimSecret(%q) = %q, want the password back", pw+"\n", got)
+		}
+		if !verifyAdminPassword(fromFile, pw) {
+			t.Errorf("a password of %q cannot log in when supplied by file", pw)
+		}
 	}
 }
