@@ -104,7 +104,12 @@ say "verifying the snapshot is not reachable over HTTP"
 # machine with http_proxy set — a CI runner, a corporate laptop, this
 # container — sends even 127.0.0.1 through it and gets a refusal that
 # looks exactly like the server failing to start.
-export no_proxy='*' NO_PROXY='*'
+#
+# A function, NOT an exported no_proxy. Exporting it applies to every
+# later command in the script including `git push`, which on a machine
+# whose credentials are injected by that same proxy then cannot
+# authenticate — the publish failed with "could not read Username" and
+# the cause was four lines up from the thing that broke.
 curl() { command curl --noproxy '*' "$@"; }
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 tar xzf "build/rel/rivets-n-ruin-$VERSION-linux-amd64.tar.gz" -C "$work"
