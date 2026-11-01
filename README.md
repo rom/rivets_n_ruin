@@ -336,7 +336,7 @@ and checks exactly that.
 ## Attackers
 
 Interceptors teach dodging and turrets teach prioritising.
-Eleven more types arrive hull by hull, each asking a different question:
+Fifteen more types arrive hull by hull, each asking a different question:
 
 ![The attacker roster](docs/attackers.png)
 
@@ -349,18 +349,39 @@ surface, panel lines and rivets, a canopy or a sensor eye so you can see
 which way it is looking, engine bells with a plume on their own clock, and
 one accent colour per kind carried on the trim and the running lights.
 
+### Weight
+
+The first twelve are all roughly ship-sized, so the roster read as one
+fleet with twelve jobs. Four more are the ends of a scale — a **Gnat**
+is six pixels across and a **Monitor** is twenty-five.
+
+Size is not a difficulty knob with art attached: a thing twice as big
+is twice as easy to hit, so weight has to buy something. A gnat is
+almost free to kill and arrives in threes, so it costs you a line
+rather than hit points. A monitor is slow enough that going round it
+is always available and always costs you ground, and it fires from two
+mounts at opposite ends so there is no quiet side to go round on.
+
+Proportion carries it as much as scale does: a gnat is a nose and an
+engine with nothing between them, and a monitor is mostly between
+them.
+
 | Attacker | From | Behaviour |
 | --- | --- | --- |
 | **Mine** | OSMIUM | Creeps toward you and detonates. Cheap to kill, expensive to ignore |
 | **Lancer** | TANTALUM | Telegraphs with a lengthening aim line, then charges flat out |
 | **Weaver** | TANTALUM | Fast and erratic. Nothing to out-think, everything to out-aim |
+| **Gnat** | TANTALUM | One hit point, no gun, and it arrives in threes. A wall to pick a side of |
 | **Orbiter** | CUPRUM | Parks, circles, sprays radially. Forces you to close or leave |
+| **Dart** | CUPRUM | Lines up, runs flat out emptying its gun, and never turns round |
 | **Warder** | PYRITE | Frontal plate: head-on shots bounce. Must be flanked, or blasted |
 | **Splitter** | PYRITE | Breaks into two halves that keep coming. Killing it early is cheaper |
+| **Barge** | PYRITE | Slow and heavy, opening with a wide fan. Do not be in it |
 | **Leech** | WOLFRAM | Clamps onto the hull and drains the shield until you shoot it off |
 | **Bomber** | FERRUM | Seeds mines along its path, so ignoring it costs you the lane |
 | **Mirror** | WOLFRAM | Sends most of what you shoot at it straight back. Stop shooting and go round |
 | **Chainer** | FERRUM | Spawns as a linked pair with a live tether between them. Go round, or break a link |
+| **Monitor** | FERRUM | The heaviest thing short of a miniboss. Two mounts, so no side is quiet |
 | **Carrier** | AURUM | Launches weavers. Spend the time on the source, or keep swatting what it sends |
 
 Which hull fields which is `LEVELS[].foes` in `src/config.js`. ARGENTUM
@@ -2083,7 +2104,7 @@ src/boss.js       boss arenas, phases, weak points and the wreck window
 src/towerart.js   what each hull installation looks like
 src/bossart.js    the eight boss shapes and their destructible sections
 src/gates.js      laser gates: the wall, the emitter, and what breaks it
-src/foeart.js     the twelve attacker bodies
+src/foeart.js     the sixteen attacker bodies
 src/shipart.js    the player's ship, as its marks, guns, load and mods make it
 src/demo.js       the attract-mode pilot
 src/score.js      difficulty multipliers, and the one way points are awarded

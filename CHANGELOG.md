@@ -30,6 +30,17 @@ worth learning from.
   lander.
 - Each installation now has its own silhouette (`src/towerart.js`)
   rather than a tinted dot on a shared mounting.
+- **Four more attacking ships, at the ends of a scale.** The twelve
+  before them were all roughly ship-sized. A **GNAT** is six pixels
+  across, has one hit point and no gun, and arrives in threes — it
+  costs you a line rather than hit points. A **DART** lines up, runs
+  flat out emptying its gun, and never turns round. A **BARGE** is
+  slow and heavy and opens with a fan rather than an aimed shot. A
+  **MONITOR** is the heaviest thing short of a miniboss, with two
+  mounts at opposite ends so there is no quiet side to go round on.
+- `make run`, `make smoke` and `make gallery` use `-state` and
+  `-accounts`; the project's own tooling should model the layout the
+  README recommends rather than the one it warns about.
 
 ## [1.1.0] — 2026-11-01
 
