@@ -8,7 +8,7 @@
 // spawning while you do.
 
 import {
-  FIELD_TOP, FIELD_BOT, VIEW_W, APRON, clamp,
+  FIELD_TOP, FIELD_BOT, VIEW_W, APRON, clamp, CULL_MARGIN,
 } from './config.js';
 import { makePool } from './pool.js';
 import { enemyShots, fire } from './projectiles.js';
@@ -17,6 +17,12 @@ import { kick } from './camera.js';
 import { sfxExplode, sfxEnemyHit, sfxTurretShot } from './sfx.js';
 import { spoils, scatterCoins, spawnPickup } from './pickups.js';
 import { diff, award } from './score.js';
+
+// How far behind the view a miniboss gets before it gives up. Its own
+// number rather than CULL_MARGIN: outrunning one is a real choice the
+// hull offers, and that choice needs a nearer line than "far enough that
+// you cannot have meant to come back".
+const OUTRUN_BY = 320;
 
 export const KINDS = {
   hauler: {
@@ -143,7 +149,10 @@ export function updateMinis(game, dt) {
     // cull it on its very first frame, burning the slot and leaving nothing
     // behind but the arrival toast.
     if (m.x < game.cam.x + VIEW_W) m.seen = true;
-    if (m.x < game.cam.x - 320 || (m.seen && m.x > game.cam.x + VIEW_W + 420)) minis.kill(i);
+    if (m.x < game.cam.x - OUTRUN_BY
+      || (m.seen && m.x > game.cam.x + VIEW_W + CULL_MARGIN)) {
+      minis.kill(i);
+    }
 
     // ramming
     if (p.alive && p.invuln <= 0

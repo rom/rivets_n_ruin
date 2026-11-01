@@ -5,7 +5,7 @@
 // LEVELS[].foes, so the hulls escalate in kind as well as in number.
 
 import {
-  FIELD_TOP, FIELD_BOT, VIEW_W, APRON, clamp,
+  FIELD_TOP, FIELD_BOT, VIEW_W, APRON, clamp, CULL_MARGIN,
 } from './config.js';
 import { makePool } from './pool.js';
 import { award } from './score.js';
@@ -264,7 +264,10 @@ export function updateFoes(game, dt) {
     f.y = clamp(f.y, FIELD_TOP + 8, FIELD_BOT - 8);
     f.baseY = clamp(f.baseY, FIELD_TOP + 8, FIELD_BOT - 8);
 
-    if (f.x < game.cam.x - 160 || f.x > game.cam.x + VIEW_W + 160) { foes.kill(i); continue; }
+    if (f.x < game.cam.x - CULL_MARGIN || f.x > game.cam.x + VIEW_W + CULL_MARGIN) {
+      foes.kill(i);
+      continue;
+    }
 
     // Ramming — but not for something already clamped on. An attached
     // leech rides at the ship's own position, so the generic ram fired

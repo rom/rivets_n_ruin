@@ -32,7 +32,11 @@ export function makePlayer() {
     scrapeCd: 0,
     invuln: SHIP.invuln,
     shield: SHIP.shieldMax,
-    shieldMax: SHIP.shieldMax,   // healthbars raise this
+    shieldMax: SHIP.shieldMax,   // the refit and the upgrades both raise this
+    // ...but only the upgrades are capped, and only against each other.
+    // See PICKUP.shieldBonusMax for why this is counted separately from
+    // shieldMax rather than read off it.
+    shieldBonus: 0,
     lives: SHIP.lives,
     gunSpeed: 0,                 // gunspeed pickups: faster fire
     gunBlaze: 0,                 // gunblaze pickups: wider spread

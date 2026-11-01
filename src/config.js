@@ -552,7 +552,22 @@ export const PICKUP = {
 
   shieldRefill: 40,      // shields-refill: restores this much
   healthBarBonus: 25,    // healthbars: raises MAX shield by this much
-  shieldCeiling: 220,    // and stops here
+
+  // How much maximum shield the *upgrades* can add, across healthbars and
+  // HULL PLATING together.
+  //
+  // This used to be an absolute ceiling on shieldMax of 220, which looked
+  // reasonable against a starting 100 and was in fact dead by the fourth
+  // hull of twenty-five: the refit adds LEVEL_UP.shieldMax every hull on
+  // its own, so shieldMax passes 220 at hull four and reaches 1180 by the
+  // end. Past that point every healthbar printed "HEALTHBAR FULL" and did
+  // nothing but refill, and HULL PLATING could not be bought at all — a
+  // pickup and a whole shop row, dead for twenty-two hulls.
+  //
+  // Counting the bonus instead of the total means the upgrade is worth
+  // the same on the first hull and the last, which is what a pickup that
+  // keeps dropping ought to be.
+  shieldBonusMax: 150,   // six healthbars, or six platings, or a mix
   maxLives: 6,
 
   gunLevels: 3,          // base cap; LEVEL_UP.gunCapEvery raises it
@@ -680,6 +695,25 @@ export const CAM = {
   lead: 116,            // ship sits this far behind centre, so you see where you're going
   lerp: 5.4,
 };
+
+// How far outside the view a pooled thing must be before its slot is
+// recycled.
+//
+// This used to be a different magic number in each module — 90 for
+// interceptors, 140 for loot, 160 for attackers, 200 for your own
+// ordnance — and every one of them was smaller than the distance the
+// camera travels when you turn around. CAM.lead is 116, so reversing
+// slides the view 232px, and anything in the trailing third of the screen
+// you were just looking at was destroyed before the ship had moved at
+// all. Turning back for a coffin was what destroyed the coffin.
+//
+// Derived rather than picked: the swing, plus half a screen of backtrack,
+// so changing your mind and going back for something cannot be the thing
+// that loses it. Nothing depends on this margin to stay bounded — loot and
+// ordnance expire on their own timers, attackers chase you rather than
+// piling up out of frame, and every pool refuses to overfill — so it only
+// decides when a slot is reused.
+export const CULL_MARGIN = CAM.lead * 2 + VIEW_W / 2;
 
 export const COL = {
   space:     '#06080c',

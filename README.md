@@ -524,6 +524,15 @@ past a plateau rather than wait it out.
   the whole world across and you always see where you're going. You are not
   made to fly left — the hull runs one way — but you can, and backing up for
   a coffin is a real decision.
+
+  It was not, for a while: every pool had its own despawn margin — 90px for
+  interceptors, 140 for loot, 160 for attackers, 200 for your own ordnance
+  — and all four were **smaller than the 232px the camera travels when you
+  turn around**. Reversing destroyed everything in the trailing third of
+  the screen you were looking at, before the ship had moved at all. Turning
+  back for a coffin was what destroyed the coffin. One shared `CULL_MARGIN`
+  now, derived as the camera swing plus half a screen, so changing your
+  mind cannot be the thing that loses something.
 - **12,000 to 41,150px of procedurally generated hull**, deterministic from
   each hull's own `seed` in `LEVELS`. Six obstacle patterns — a clear run,
   a tower hanging from either surface, a pincer, a free-standing pillar and a
@@ -712,13 +721,24 @@ interceptors at 17%. Each is worth 50 points on top of its effect.
 | --- | --- | --- |
 | **shields-refill** | cyan | Restores 40 shield |
 | **lifesavers** | pale cyan | +1 ship, to a maximum of 6 |
-| **healthbars** | green | Raises **maximum** shield by 25 (to 220) and grants it |
+| **healthbars** | green | Raises **maximum** shield by 25 and grants it, up to +150 of upgrades |
 | **gunspeed** | yellow | Shorter fire interval — ×1 → ×0.76 → ×0.58 → ×0.44 |
 | **gunblaze** | orange | Adds a mirrored pair of angled barrels per level: 2 → 4 → 6 → 8 shots a volley |
 
 `shields-refill` and `healthbars` are deliberately different: one tops up the
 bar, the other extends it. Both read at a glance because the HUD label switches
 to `SHIELD 125` in green once your ceiling has moved.
+
+The cap is on what the **upgrades** add — healthbars and the armourer's
+HULL PLATING share an allowance of +150 — and not on the total. It used to
+be an absolute ceiling of 220 on maximum shield, which looks reasonable
+against a starting 100 and was dead by the fourth hull of twenty-five: the
+refit adds 45 every hull by itself, so the total passes 220 at hull four
+and reaches 1,180 by the end. Past that point every healthbar printed
+`HEALTHBAR FULL` and did nothing but refill, and HULL PLATING could not be
+bought at all — a pickup and an entire shop row, inert for twenty-two
+hulls. Counting the bonus instead of the total means the upgrade is worth
+the same on the last hull as the first.
 
 Guns cap at level 3 each, rising by one per hull cleared to a hard ceiling of
 5; collecting at max converts to points instead.
