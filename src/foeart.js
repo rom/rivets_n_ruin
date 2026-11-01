@@ -18,16 +18,16 @@
 // Drawn nose-right at facing +1; drawFoes applies the flip. Nothing here
 // mutates state.
 
-const HOT = '#ffd24a';          // the universal hit flash
+export const HOT = '#ffd24a';   // the universal hit flash
 
-function poly(ctx, pts) {
+export function poly(ctx, pts) {
   ctx.beginPath();
   ctx.moveTo(pts[0][0], pts[0][1]);
   for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
   ctx.closePath();
 }
 
-function hull(ctx, pts, body, rim, w = 1.5) {
+export function hull(ctx, pts, body, rim, w = 1.5) {
   poly(ctx, pts);
   ctx.fillStyle = body;
   ctx.fill();
@@ -38,13 +38,13 @@ function hull(ctx, pts, body, rim, w = 1.5) {
 
 // The lit top surface. Takes the same outline, squashed upward, so it
 // always sits on the hull it belongs to.
-function litTop(ctx, pts, colour) {
+export function litTop(ctx, pts, colour) {
   poly(ctx, pts);
   ctx.fillStyle = colour;
   ctx.fill();
 }
 
-function rivets(ctx, x0, y, x1, n, colour = '#6b7682') {
+export function rivets(ctx, x0, y, x1, n, colour = '#6b7682') {
   ctx.fillStyle = colour;
   for (let i = 0; i <= n; i++) {
     ctx.fillRect(Math.round(x0 + ((x1 - x0) * i) / n) - 0.5, y - 0.5, 1, 1);
@@ -52,7 +52,7 @@ function rivets(ctx, x0, y, x1, n, colour = '#6b7682') {
 }
 
 // An engine bell with a plume. `t` keeps each ship's flicker out of step.
-function engine(ctx, x, y, h, t, colour, power = 1) {
+export function engine(ctx, x, y, h, t, colour, power = 1) {
   ctx.fillStyle = '#20262e';
   ctx.fillRect(x, y - h / 2, 3, h);
   ctx.fillStyle = '#404a57';
@@ -69,8 +69,15 @@ function engine(ctx, x, y, h, t, colour, power = 1) {
   ctx.restore();
 }
 
+// These seven are the fleet's shared vocabulary: a dark hull with one lit
+// upper surface, panel lines and rivets, engine bells on their own clock,
+// a canopy so the thing has a front and a crew, and one accent colour per
+// kind on the trim and the running lights. Exported so the minibosses can
+// be built from the same parts — they should read as the same navy at a
+// larger size, not as a different art style that happens to be nearby.
+
 // A canopy: dark glass with a highlight, so the ship has a crew and a front.
-function canopy(ctx, x, y, w, h, tint = '#9ae8f8') {
+export function canopy(ctx, x, y, w, h, tint = '#9ae8f8') {
   ctx.fillStyle = '#0a0d13';
   ctx.beginPath(); ctx.ellipse(x, y, w, h, 0, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = tint;
@@ -82,7 +89,7 @@ function canopy(ctx, x, y, w, h, tint = '#9ae8f8') {
 }
 
 // A running light that blinks on its own phase.
-function light(ctx, x, y, t, colour, rate = 4) {
+export function light(ctx, x, y, t, colour, rate = 4) {
   ctx.fillStyle = Math.sin(t * rate) > 0 ? colour : '#2a323c';
   ctx.fillRect(x - 0.5, y - 0.5, 1.5, 1.5);
 }

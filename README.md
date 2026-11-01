@@ -382,11 +382,24 @@ keeps spawning while you do.
 | **BULWARK** | PYRITE | Radial walls and a lot of health. Expensive to stop for |
 | **HARRIER PACK** | FERRUM | Fast, and calls escorts while it runs rings around you |
 
-They are drawn in the same register as the bosses: the hauler is a pirate
-freighter with a bridge tower and colours off the stern, the cutter is an
-alien ray with one eye and an arc strung between two horns, the bulwark is
-an assault drum with its barrels out, and the harrier is a raider with a
-crew canopy and a pennant.
+They are drawn from the attackers' own vocabulary rather than in a style of
+their own — a dark hull with one lit upper surface, panel lines and rivets
+so there is a scale to read them against, engine bells on their own clock,
+and a canopy or an eye so you can tell which way one is looking. A miniboss
+should be the same navy at four times the size, so `src/miniart.js` imports
+those parts from `src/foeart.js` instead of defining a second rivet.
+
+They were drawn inline out of bare polygons and quadratic curves, which is
+what made them read as diagrams of ships rather than ships: a slab with a
+notch is a *shape*. What they have now is interior structure, because they
+are big enough to show it. The hauler is a pirate ore freighter with four
+open hoppers that visibly empty as it comes apart, a bridge tower with lit
+windows and colours off the stern. The cutter is an alien ray with a
+chitin shell, veins that dim as it is hurt and an arc strung between two
+horns. The bulwark is a siege barge in visible layers of plate with a
+projector ring turning amidships. The harrier is a swept interceptor with
+launch rails under the wings — loaded while it still has escorts to send —
+and four engines it plainly does not need.
 
 One appears on ARGENTUM and a fourth is added by AURUM, spread evenly along
 the hull and always clear of both aprons and of the boss arena. If a boss is
@@ -1483,6 +1496,7 @@ src/level.js      hull generation, collision buckets, pre-rendered plating
 src/player.js     ship physics, flip, firing, hull collision response
 src/enemies.js    turret and interceptor behaviour
 src/miniboss.js   the four mid-hull minibosses
+src/miniart.js    their bodies, from the same vocabulary as the attackers
 src/boss.js       boss arenas, phases, weak points and the wreck window
 src/bossart.js    the eight boss shapes and their destructible sections
 src/gates.js      laser gates: the wall, the emitter, and what breaks it
