@@ -12,6 +12,14 @@ worth learning from.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.1.0] — 2026-11-01
+
+A HUD you can read, bosses you can tell apart, three filesystem roots,
+accounts that keep your progress, an operator's door, and a way to
+start over.
+
 ### Added
 
 - **Six more things bolted to the hull.** POPGUN and BASTION are the
@@ -41,14 +49,6 @@ worth learning from.
 - `make run`, `make smoke` and `make gallery` use `-state` and
   `-accounts`; the project's own tooling should model the layout the
   README recommends rather than the one it warns about.
-
-## [1.1.0] — 2026-11-01
-
-A HUD you can read, bosses you can tell apart, three filesystem roots,
-accounts that keep your progress, an operator's door, and a way to
-start over.
-
-### Added
 
 - **`F` twice on the settings screen starts you over**: the hangar, the
   best score, the furthest hull reached, and the pilot with them. The

@@ -1,16 +1,37 @@
-A HUD you can read, bosses you can tell apart, and a server that keeps its secrets in their own directory.
+A hull with more on it, a fleet with light and heavy in it, a HUD you can read, and a server that keeps its secrets in their own directory.
 
-## The game
+## The hull
 
-**The HUD is sharp again.** The adaptive frame-rate scaler was shrinking the whole canvas, so on a wide window every glyph in the HUD was upscaled the moment gameplay started — and came back sharp in the menus, which is why it read as something that happens *while playing*. The world and the UI are separate layers now; the compositor does the stretch, which is free. The smoke test measures 60fps, up from the 48 it managed before.
+**Six more installations.** POPGUN and BASTION are the gun at 0.45× and 3.2× its weight — size is the message, and a hull can now vary its pressure without varying what it asks of you.
 
-**A reused boss is refitted, not redrawn.** Twenty-five bosses are built from eight ships, and through the first sixteen hulls each silhouette came round exactly twice, identical. Later appearances now carry ribs, bolted plating and a livery — same class, visibly a different vessel. A test fails if two hulls would ever end in a boss that draws the same.
+RADAR and ARRAY do not shoot. They *paint* their neighbours: while one stands, every tower inside its reach wakes earlier and swings round faster, and shows a ring in the dish's colour so the effect is visible rather than inferred. A dish spins and an array sweeps, and both turn whether or not anybody is watching. POST keeps the interceptor stream thick — cheap to kill and easy to ignore, which is the trap. SILO opens from 900px out with missiles slow enough to shoot down if you see them leave.
 
-**`F` twice on the settings screen starts you over**: the hangar, the best score, the furthest hull, and the pilot with them. Settings and accessibility options survive, because those are how you like to play rather than what you have achieved.
+**Spaceports.** A place rather than a pattern: traffic control at one end, fuel standing in the middle, whatever was parked when the shooting started at the far end. The tanks are spaced so one going up reaches the next, so a port can be taken apart with a single shot — or taken apart around you, if you came in close for the lander.
+
+## The fleet
+
+**Four more attackers, at the ends of a scale.** The twelve before them were all roughly ship-sized.
+
+| | r | hp | speed | |
+| --- | --- | --- | --- | --- |
+| **GNAT** | 6 | 1 | 360 | No gun. Arrives in threes — it costs you a line, not hit points |
+| **DART** | 8 | 2 | 330 | Lines up, empties its gun along one pass, never turns round |
+| **BARGE** | 21 | 14 | 54 | Opens with a fan, so sitting off its line does not work |
+| **MONITOR** | 25 | 22 | 38 | Two mounts at opposite ends — no quiet side to go round on |
+
+Size is not a difficulty knob with art attached: a thing twice as big is twice as easy to hit, so each one's weight had to buy something.
+
+**Reused bosses are refitted rather than redrawn.** Twenty-five bosses are built from eight ships, and through the first sixteen hulls each silhouette came round exactly twice — identical. Later appearances now carry ribs, bolted plating and a livery.
+
+## The HUD
+
+**It is no longer blurred by the frame-rate scaler.** The adaptive cap used to shrink the whole canvas, so on a wide window every glyph went to mush the moment gameplay started and came back sharp in the menus. The world and the UI are separate layers now; the compositor does the stretch, which is free.
 
 ## Accounts
 
-Signing in now keeps your coins, gold bars and bought mods against the account, so they survive a new browser, a cleared cache or a second machine. The two copies are reconciled by taking the better of each — the only rule that cannot take something away from a pilot who earned it.
+Signing in keeps your coins, gold bars and bought mods against the account, so they survive a new browser, a cleared cache or a second machine. The two copies are reconciled by taking the better of each — the only rule that cannot take something away from a pilot who earned it.
+
+**`F` twice on the settings screen starts you over**: the hangar, the best score, the furthest hull, and the pilot with them. Settings and accessibility options survive, because those are how you like to play rather than what you have achieved.
 
 ## The server
 
@@ -24,14 +45,14 @@ Security headers gained `X-Frame-Options`, `Cross-Origin-Embedder-Policy` and `X
 
 ## Fixed
 
-- **The account database was served over HTTP** under the pre-split layout. Twice: once in 1.0.0, and once again in a fix that recorded the directory and skipped the files inside it.
-- `upgrade-insecure-requests` broke every deployment not on localhost.
+- **The account database was served over HTTP** under the pre-split layout. Twice: once in 1.0.0, and again in a fix that recorded the directory and skipped the files inside it.
+- `upgrade-insecure-requests` broke every deployment not on localhost, rewriting the game's own modules to `https://` on a server with no TLS listener.
 - A merge dropped every CSS rule on the page, which put the HUD and the title screen below the fold and looked like booting straight into a run.
 - Signing in after page load pushed the browser's hangar over the account it had just signed into.
 - A data race between snapshots and live requests.
 - Several smaller ones: a boss fade cancelled by a stray `globalAlpha`, a config default whose comment claimed the opposite of its value, a password-trimming mismatch that could set a credential you could never use.
 
-Upgrading from 1.0.0 with no path flags: the server will refuse to start if it finds your old `data/rnr.json`, and tell you how to keep it or move it. It will not silently ignore your data.
+**Upgrading from 1.0.0 with no path flags:** the server refuses to start if it finds your old `data/rnr.json`, and tells you how to keep it or move it. It will not silently ignore your data.
 
 ## Running it
 
