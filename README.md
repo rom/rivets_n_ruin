@@ -430,6 +430,36 @@ The first eight are the eight shapes, one per hand-authored hull:
 | ![THE SEXTON](docs/boss-07-thesexton.png) | ![GILTHAMMER](docs/boss-08-gilthammer.png) |
 | **7 · THE SEXTON** — scavenger barge, armoured in salvage, towing its take | **8 · GILTHAMMER** — the admiralty's gilded dreadnought |
 
+### One class, four ships
+
+Eight silhouettes across twenty-five hulls means every ship is reused
+three or four times — and through the first sixteen hulls each one comes
+round exactly twice. Drawn identically, the second reads as the first
+turning up again under a new name, which is how it was reported from
+play: *"all bosses occur twice"*.
+
+So a reused hull is refitted rather than redrawn. Each appearance adds
+dorsal and ventral ribs that break the outline, a band of bolted plating
+across the hull, and a livery:
+
+| | |
+| --- | --- |
+| bare | first of its class |
+| **blue**, 3 ribs, 1 band | second |
+| **orange**, 5 ribs, 2 bands | third |
+| **violet**, 7 ribs, 3 bands | fourth |
+
+The ribs carry it as much as the colour does, so the tier still reads
+without relying on hue. `bossTier()` in `src/boss.js` counts how many
+ships of the class came before; `TIERS` in `src/bossart.js` says what
+each refit looks like, and a test fails if two hulls would ever end in
+a boss that draws the same.
+
+The livery is drawn, never composited. Washing it over the hull with
+`source-atop` is the obvious implementation and it clips to whatever is
+already on the canvas — which, on an opaque world canvas, is a 300×300
+block of dreadnought.
+
 ### The deep campaign
 
 Past the admiralty hull there are seventeen more guards. Their behaviours
