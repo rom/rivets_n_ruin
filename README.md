@@ -1988,6 +1988,16 @@ playthrough does not settle.
   value goes to `NaN`; they do not prove anything looks right. The browser
   smoke test asserts pixels were drawn, not that they were the right ones.
   Audio is the thinnest of all — nothing anywhere checks what is heard.
+- **The world and the UI are separate canvases.** The adaptive scaler
+  protects the frame rate by rendering the world at fewer pixels and
+  letting the compositor stretch it, which costs nothing. It used to do
+  that by shrinking the whole backing store — so on a wide window the
+  canvas was 640px across and every glyph in the HUD went to mush the
+  moment gameplay started, then came back sharp in the menus. Reported
+  from play as "the text in the HUD gets blocky". The UI layer now sits
+  on top at the window's own resolution and is never upscaled. The first
+  attempt kept one canvas and upscaled an offscreen world buffer in
+  software: correct, and it halved the frame rate.
 - **HUD text uses the system monospace font**, not a bitmap font, so it does
   not scale as crisply as the rest of the art.
 - **Anti-cheat is defence in depth, not proof.** See the backend section for
