@@ -6,7 +6,7 @@
 // strict upgrade. All three are finite and all three are lost with a ship.
 
 import {
-  ARMORY, FIELD_TOP, FIELD_BOT, VIEW_W, clamp,
+  ARMORY, FIELD_TOP, FIELD_BOT, VIEW_W, clamp, CULL_MARGIN,
 } from './config.js';
 import { makePool } from './pool.js';
 import { obstaclesNear } from './level.js';
@@ -123,7 +123,8 @@ export function updateOrdnance(game, dt) {
 
     o.y = clamp(o.y, FIELD_TOP + 3, FIELD_BOT - 3);
 
-    const offscreen = o.x < game.cam.x - 200 || o.x > game.cam.x + VIEW_W + 200;
+    const offscreen = o.x < game.cam.x - CULL_MARGIN
+      || o.x > game.cam.x + VIEW_W + CULL_MARGIN;
     if (o.fuse <= 0 || offscreen) {
       if (!offscreen) blast(game, o, spec);
       ordnance.kill(i);

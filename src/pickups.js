@@ -4,7 +4,7 @@
 // and a long run gets meaningfully stronger rather than just longer.
 
 import {
-  PICKUP, SHIP, FIELD_TOP, FIELD_BOT, VIEW_W, clamp,
+  PICKUP, SHIP, FIELD_TOP, FIELD_BOT, VIEW_W, clamp, CULL_MARGIN,
 } from './config.js';
 import { makePool } from './pool.js';
 import { award } from './score.js';
@@ -234,8 +234,9 @@ export function updatePickups(game, dt) {
     const bob = p.kind === 'coin' ? 4 : PICKUP.bob;
     p.y = p.baseY + Math.sin(p.t * 2.2) * bob;
 
-    // despawn well off-screen rather than hoarding pool slots
-    if (p.x < game.cam.x - 140 || p.x > game.cam.x + VIEW_W + 140) {
+    // Recycle the slot once it is well clear of the view. The margin is
+    // shared and deliberately wide; see CULL_MARGIN.
+    if (p.x < game.cam.x - CULL_MARGIN || p.x > game.cam.x + VIEW_W + CULL_MARGIN) {
       pickups.kill(i);
       continue;
     }
@@ -329,14 +330,21 @@ function collect(game, p) {
       }
       break;
     case 'healthbar':
-      if (pl.shieldMax < PICKUP.shieldCeiling) {
-        pl.shieldMax = Math.min(PICKUP.shieldCeiling, pl.shieldMax + PICKUP.healthBarBonus);
-        pl.shield = Math.min(pl.shieldMax, pl.shield + PICKUP.healthBarBonus);
+      if ((pl.shieldBonus || 0) < PICKUP.shieldBonusMax) {
+        const add = Math.min(PICKUP.healthBarBonus,
+          PICKUP.shieldBonusMax - (pl.shieldBonus || 0));
+        pl.shieldBonus = (pl.shieldBonus || 0) + add;
+        pl.shieldMax += add;
+        pl.shield = Math.min(pl.shieldMax, pl.shield + add);
         label = 'HEALTHBAR  MAX ' + pl.shieldMax;
       } else {
+        // Every upgrade fitted. Said as points, like the lifesaver does:
+        // this read "HEALTHBAR FULL", which sounds like a full shield
+        // rather than a full set, and was what it printed for twenty-two
+        // hulls out of twenty-five.
         pl.shield = pl.shieldMax;
         award(game, 300);
-        label = 'HEALTHBAR  FULL';
+        label = 'HEALTHBAR  +300';
       }
       break;
     case 'gunspeed':

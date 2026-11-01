@@ -121,9 +121,18 @@ export const ITEMS = [
     owned: (p) => p.gunBlaze, max: (p) => p.gunCap },
   { id: 'shield', name: 'HULL PLATING', base: 500, step: 200,
     blurb: '+25 maximum shield, filled.',
-    can: (p) => p.shieldMax < PICKUP.shieldCeiling,
-    buy: (p) => { p.shieldMax += 25; p.shield = p.shieldMax; },
-    owned: (p) => p.shieldMax, max: () => PICKUP.shieldCeiling },
+    // Against the upgrade bonus, not against shieldMax: the refit pushes
+    // shieldMax past any absolute ceiling within a few hulls, and this row
+    // was unbuyable from the fourth hull on because of it.
+    can: (p) => (p.shieldBonus || 0) < PICKUP.shieldBonusMax,
+    buy: (p) => {
+      const add = Math.min(PICKUP.healthBarBonus,
+        PICKUP.shieldBonusMax - (p.shieldBonus || 0));
+      p.shieldBonus = (p.shieldBonus || 0) + add;
+      p.shieldMax += add;
+      p.shield = p.shieldMax;
+    },
+    owned: (p) => (p.shieldBonus || 0), max: () => PICKUP.shieldBonusMax },
   // Not 'magnet': that is the Lodestone mod's id, and a shop row list that
   // holds two different things under one id hands the wrong one to anything
   // that looks a row up rather than indexing it.

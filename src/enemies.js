@@ -1,5 +1,5 @@
 import {
-  TURRET, TOWERS, INTERCEPTOR, VIEW_W, FIELD_TOP, FIELD_BOT, APRON, clamp,
+  TURRET, TOWERS, INTERCEPTOR, VIEW_W, FIELD_TOP, FIELD_BOT, APRON, clamp, CULL_MARGIN,
 } from './config.js';
 import { makePool } from './pool.js';
 import { enemyShots, fire } from './projectiles.js';
@@ -169,8 +169,10 @@ export function updateInterceptors(game, dt) {
       sfxTurretShot();
     }
 
-    // despawn once well past the viewport
-    if (e.x < game.cam.x - 90 || e.x > game.cam.x + VIEW_W + 90) interceptors.kill(i);
+    // despawn once well past the viewport; see CULL_MARGIN
+    if (e.x < game.cam.x - CULL_MARGIN || e.x > game.cam.x + VIEW_W + CULL_MARGIN) {
+      interceptors.kill(i);
+    }
   }
 }
 

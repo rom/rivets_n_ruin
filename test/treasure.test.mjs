@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   pickups, resetPickups, spawnPickup, spoils, tint, isTreasure,
-  TREASURES, LOOT, KINDS, rollTreasure, freshHaul, dropWeight, rollKind,
+  TREASURES, LOOT, KINDS, rollTreasure, freshHaul, dropWeight, rollKind, updatePickups,
 } from '../src/pickups.js';
 import { PICKUP, LEVELS, HULL_BONUS, DIFFICULTY } from '../src/config.js';
 import { set as setSetting, reset as resetSettings } from '../src/settings.js';
@@ -19,7 +19,13 @@ function fakeGame(levelIndex = 0) {
       length: LEVELS[levelIndex].length, spec: LEVELS[levelIndex], turrets: [],
       obstacles: [], buckets: new Map(), chunks: new Map(), chunkGen: -1, tick: 0,
     },
-    player: { x: 0, y: 160, alive: true, invuln: 99, shield: 100, coinMul: 1 },
+    // updatePickups reads the camera to decide what to recycle, so a game
+    // without one is not a game any pickup code can run against.
+    cam: { x: 0, shake: 0 },
+    player: {
+      x: 300, y: 160, alive: true, invuln: 99, shield: 100, coinMul: 1,
+      shieldMax: 100, shieldBonus: 0, magnetMul: 1, lives: 3,
+    },
   };
 }
 
@@ -286,4 +292,131 @@ test('an empty drop table still yields a real pickup', () => {
   } finally {
     Object.assign(PICKUP.dropWeights, real);
   }
+});
+
+// --- healthbars and hull plating, which stopped working at hull four
+//
+// The cap was an absolute ceiling on shieldMax of 220. That looks
+// reasonable against a starting 100 and was in fact dead by the fourth
+// hull of twenty-five: the refit adds LEVEL_UP.shieldMax every hull by
+// itself, so shieldMax passes 220 at hull four and reaches 1180 by the
+// end. Past that, every healthbar printed "HEALTHBAR FULL" and did
+// nothing but refill, and HULL PLATING could not be bought at all.
+//
+// Reported from play as "does the healthbar full really work?". It did
+// not.
+
+import { ITEMS } from '../src/shop.js';
+import { LEVEL_UP as LU, SHIP, DT } from '../src/config.js';
+
+const shieldOnHull = (n) => SHIP.shieldMax + (n - 1) * LU.shieldMax;
+
+// Collecting goes through the real update loop rather than a private
+// function: the thing being tested is what happens when a player flies
+// into a healthbar, and collect() is not reachable from outside.
+function pickUp(game, kind) {
+  const p = spawnPickup(game, game.player.x, game.player.y, kind);
+  assert.ok(p, `could not place a ${kind}`);
+  p.x = game.player.x;
+  p.baseY = game.player.y;
+  p.y = game.player.y;
+  updatePickups(game, DT);
+  return p;
+}
+
+test('a healthbar raises the maximum on every hull, not just the first three', () => {
+  for (const hull of [1, 2, 3, 4, 8, 15, 25]) {
+    const game = fakeGame();
+    const p = game.player;
+    p.magnetMul = 1;
+    p.shieldMax = shieldOnHull(hull);
+    p.shieldBonus = 0;
+    p.shield = 10;
+    const before = p.shieldMax;
+    pickUp(game, 'healthbar');
+    assert.ok(p.shieldMax > before,
+      `on hull ${hull} a healthbar left shieldMax at ${p.shieldMax}; the refit alone `
+      + 'had already passed the old ceiling, so the pickup did nothing');
+    assert.equal(p.shieldMax - before, PICKUP.healthBarBonus);
+  }
+});
+
+test('the upgrades are capped against each other, not against the refit', () => {
+  const game = fakeGame();
+  const p = game.player;
+  p.shieldMax = shieldOnHull(20);     // deep in the campaign
+  p.shieldBonus = 0;
+  const base = p.shieldMax;
+
+  let taken = 0;
+  for (let i = 0; i < 40; i++) {
+    const before = p.shieldMax;
+    pickUp(game, 'healthbar');
+    if (p.shieldMax > before) taken++;
+  }
+  assert.equal(p.shieldBonus, PICKUP.shieldBonusMax,
+    'the bonus did not reach its cap');
+  assert.equal(p.shieldMax - base, PICKUP.shieldBonusMax,
+    'the bonus added something other than what it counted');
+  assert.equal(taken, PICKUP.shieldBonusMax / PICKUP.healthBarBonus,
+    `took ${taken} healthbars to cap, expected `
+    + `${PICKUP.shieldBonusMax / PICKUP.healthBarBonus}`);
+});
+
+test('a healthbar past the cap pays points and says so', () => {
+  const game = fakeGame();
+  const p = game.player;
+  p.shieldMax = shieldOnHull(10);
+  p.shieldBonus = PICKUP.shieldBonusMax;      // all fitted
+  p.shield = 5;
+  const score = game.score;
+  pickUp(game, 'healthbar');
+
+  assert.equal(p.shield, p.shieldMax, 'a capped healthbar did not at least refill');
+  assert.ok(game.score > score, 'a capped healthbar paid nothing');
+  // "HEALTHBAR FULL" reads as a full shield rather than a full set of
+  // upgrades, and it was what the game said for twenty-two hulls.
+  assert.ok(!/FULL/.test(game.toast.text),
+    `the toast says "${game.toast.text}", which reads as a full shield`);
+});
+
+test('HULL PLATING stays buyable for the whole campaign', () => {
+  const plating = ITEMS.find((i) => i.id === 'shield');
+  assert.ok(plating, 'the HULL PLATING row is gone');
+  for (const hull of [1, 4, 12, 25]) {
+    const p = { shieldMax: shieldOnHull(hull), shieldBonus: 0, shield: 0 };
+    assert.ok(plating.can(p),
+      `HULL PLATING cannot be bought on hull ${hull} (shieldMax ${p.shieldMax}) — `
+      + 'a whole shop row dead for most of the game');
+  }
+  // ...and it does stop, once the bonus is spent.
+  const capped = { shieldMax: shieldOnHull(5), shieldBonus: PICKUP.shieldBonusMax, shield: 0 };
+  assert.ok(!plating.can(capped), 'HULL PLATING never stops being buyable');
+});
+
+test('plating and healthbars draw on the same allowance', () => {
+  // Two routes to the same upgrade; between them they must not grant
+  // twice the cap.
+  const plating = ITEMS.find((i) => i.id === 'shield');
+  const game = fakeGame();
+  const p = game.player;
+  p.shieldMax = shieldOnHull(6);
+  p.shieldBonus = 0;
+  const base = p.shieldMax;
+
+  for (let i = 0; i < 3; i++) if (plating.can(p)) plating.buy(p);
+  for (let i = 0; i < 20; i++) pickUp(game, 'healthbar');
+
+  assert.equal(p.shieldBonus, PICKUP.shieldBonusMax);
+  assert.equal(p.shieldMax - base, PICKUP.shieldBonusMax,
+    'buying plating and collecting healthbars together exceeded the allowance');
+});
+
+test('the shop shows the allowance, not a nonsense ratio', () => {
+  const plating = ITEMS.find((i) => i.id === 'shield');
+  const p = { shieldMax: shieldOnHull(10), shieldBonus: 50 };
+  assert.equal(plating.owned(p), 50);
+  assert.equal(plating.max(), PICKUP.shieldBonusMax);
+  assert.ok(plating.owned(p) <= plating.max(),
+    `the shop row would read "${plating.owned(p)}/${plating.max()}"`);
 });
