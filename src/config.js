@@ -388,6 +388,32 @@ export const LEVELS = [...CORE_LEVELS, ...DEEP_LEVELS];
 // difficulty curve is met with a power curve, not just better flying.
 // Difficulty. One multiplier set, applied where the numbers are actually
 // used, so changing it takes effect without rebuilding anything.
+// How often a squadron arrives.
+//
+// The gap after one is paced by what arrived, measured in what it was
+// worth to kill — the only currency the roster already agrees on:
+//
+//   gap = max(floor, weight / rate) * jitter
+//
+// A swarm of gnats comes round again quickly; a monitor buys itself a long
+// quiet. `rate` is per hull and is not a new difficulty knob: it is set to
+// exactly what the old one-at-a-time cadence delivered on that hull — one
+// roster pull every `legacyGap` seconds — so composition changed and the
+// pressure did not. See foeRateFor in foes.js.
+//
+// A single global rate was tried first and cannot work. The old cadence's
+// threat rate climbed with roster depth, from 47 points a second on
+// TANTALUM to 97 on FERRUM, because a deeper roster holds heavier kinds
+// and it still spawned one of anything every 3.7 seconds. Weight pacing
+// against one number flattens that curve by design: the best fit over all
+// twenty-five hulls still left the deep ones 40% quieter than they were.
+export const FOE_PACE = {
+  floor: 1.2,         // shortest breath between squadrons, whatever arrives
+  jitter: 0.8,        // multiplies the gap by 0.8..1.2, mean 1
+  legacyGap: 3.7,     // the old cadence's mean gap: 2.6 + 2.2 / 2
+  assumed: 240,       // the weight to assume when nothing spawned (off the hull)
+};
+
 export const DIFFICULTY = [
   { id: 'cadet',   name: 'CADET',   enemyDmg: 0.6, bossHp: 0.7, spawn: 1.35, scrape: 0.6, scoreMul: 0.7 },
   { id: 'pilot',   name: 'PILOT',   enemyDmg: 1.0, bossHp: 1.0, spawn: 1.0,  scrape: 1.0, scoreMul: 1.0 },

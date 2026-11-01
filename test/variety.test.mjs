@@ -5,6 +5,7 @@ import { buildLevel, mixSeed, pointBlocked, obstaclesNear } from '../src/level.j
 import { makeGame, update } from '../src/game.js';
 import { setSynthetic } from '../src/input.js';
 import { foes } from '../src/foes.js';
+const poolOfFoes = () => foes;
 import { interceptors } from '../src/enemies.js';
 import { enemyShots } from '../src/projectiles.js';
 import { LEVELS, TOWERS, FIELD_TOP, FIELD_BOT, DT } from '../src/config.js';
@@ -463,4 +464,218 @@ test('a press pushes a ship caught in it back into the gap', () => {
   // And it ended up somewhere it can fly from, not embedded in the jaw.
   assert.ok(p.y > jaw.y + jaw.h - 1,
     `the ship finished inside the jaw at y=${p.y.toFixed(1)}`);
+});
+
+// ------------------------------------------------------------- squadrons
+//
+// Attackers used to arrive one at a time, uniformly at random from the
+// roster: on a deep hull, fifteen kinds all equally likely at every moment,
+// which averages into texture. They arrive as compositions now. The thing
+// that must not have changed is how much arrives.
+
+import {
+  SQUADS, squadsFor, squadWeight, foeRateFor, spawnSquadron, resetFoes, SPEC,
+  NEVER_ALONE,
+} from '../src/foes.js';
+import { FOE_PACE } from '../src/config.js';
+
+test('every squadron is made of kinds that exist', () => {
+  const ids = new Set();
+  for (const sq of SQUADS) {
+    assert.ok(!ids.has(sq.id), `two squadrons share the id ${sq.id}`);
+    ids.add(sq.id);
+    assert.ok(sq.of.length, `${sq.id} has no members`);
+    for (const [kind, n] of sq.of) {
+      assert.ok(SPEC[kind], `${sq.id} fields '${kind}', which is not an attacker`);
+      assert.ok(n >= 1, `${sq.id} fields ${n} of ${kind}`);
+    }
+  }
+});
+
+test('a hull only fields squadrons it has the kinds for', () => {
+  for (const spec of LEVELS) {
+    if (!spec.foes.length) continue;
+    const has = new Set(spec.foes);
+    for (const sq of squadsFor(spec)) {
+      for (const [kind] of sq.of) {
+        assert.ok(has.has(kind),
+          `${spec.name} can field ${sq.id}, which needs ${kind} — not on its roster`);
+      }
+    }
+  }
+});
+
+test('every kind on a roster can still arrive on its own', () => {
+  // A roster entry that only ever turns up inside a group stops being its
+  // own answer to anything.
+  for (const spec of LEVELS) {
+    if (!spec.foes.length) continue;
+    const alone = new Set(
+      squadsFor(spec).filter((sq) => sq.of.length === 1 && sq.of[0][1] === 1)
+        .map((sq) => sq.of[0][0]),
+    );
+    for (const kind of spec.foes) {
+      if (NEVER_ALONE.has(kind)) {
+        assert.ok(!alone.has(kind),
+          `${spec.name} can field a lone ${kind}, which is only half an attacker`);
+        assert.ok(squadsFor(spec).some((sq) => sq.of.some(([k, n]) => k === kind && n > 1)),
+          `${spec.name} fields ${kind} but never in a group, so it never arrives at all`);
+        continue;
+      }
+      assert.ok(alone.has(kind), `${spec.name} can never field a lone ${kind}`);
+    }
+  }
+});
+
+test('squadrons deliver the pressure the old cadence delivered', () => {
+  // The whole point of pacing the gap by weight: composition changed and
+  // the difficulty did not. Measured per hull against what one roster pull
+  // every FOE_PACE.legacyGap seconds actually produced, which is what the
+  // game shipped with.
+  for (const spec of LEVELS) {
+    if (!spec.foes.length) continue;
+    let legacy = 0;
+    for (const k of spec.foes) {
+      const together = k === 'gnat' ? (SPEC.gnat.swarm || 1) : k === 'chainer' ? 2 : 1;
+      legacy += SPEC[k].score * together;
+    }
+    // 2.6 + 2.2 / 2, written out rather than read from FOE_PACE.legacyGap.
+    // Taking it from the config made this test self-referential: both
+    // sides moved together and any value passed.
+    legacy = legacy / spec.foes.length / 3.7;
+
+    const list = squadsFor(spec);
+    const rate = foeRateFor(spec);
+    let weight = 0;
+    let gap = 0;
+    for (const sq of list) {
+      const w = squadWeight(sq);
+      weight += w;
+      gap += Math.max(FOE_PACE.floor, w / rate);
+    }
+    const now = weight / gap;
+    const drift = Math.abs(now / legacy - 1);
+    assert.ok(drift < 0.05,
+      `${spec.name}: ${now.toFixed(1)} pts/s against the old ${legacy.toFixed(1)}`
+      + ` — ${(drift * 100).toFixed(0)}% off`);
+  }
+});
+
+test('a heavy squadron buys a longer quiet than a light one', () => {
+  const spec = LEVELS[LEVELS.length - 1];
+  const rate = foeRateFor(spec);
+  const gapOf = (id) => {
+    const sq = SQUADS.find((s) => s.id === id);
+    return Math.max(FOE_PACE.floor, squadWeight(sq) / rate);
+  };
+  assert.ok(gapOf('monitor') > gapOf('swarm') * 2,
+    `a monitor (${gapOf('monitor').toFixed(1)}s) should buy far longer`
+    + ` than three gnats (${gapOf('swarm').toFixed(1)}s)`);
+});
+
+// Driving the real spawn path.
+function flying() {
+  const game = launchAt(LEVELS.length - 1);
+  for (const t of game.level.turrets) t.dead = true;
+  return game;
+}
+
+test('a squadron arrives whole, in formation, facing one way', () => {
+  const game = flying();
+  const seen = new Set();
+  for (let i = 0; i < 300; i++) {
+    resetFoes();
+    const sq = spawnSquadron(game);
+    assert.ok(sq, 'the hull with every kind on it spawned nothing');
+    seen.add(sq.squad.id);
+    const want = sq.squad.of.reduce((t, [, n]) => t + n, 0);
+    assert.equal(sq.members.length, want,
+      `${sq.squad.id} arrived ${sq.members.length} strong, wanted ${want}`);
+    const facing = sq.members[0].facing;
+    for (const m of sq.members) {
+      assert.equal(m.facing, facing, `${sq.squad.id} has a member flying the other way`);
+      assert.ok(m.baseY >= FIELD_TOP && m.baseY <= FIELD_BOT,
+        `${sq.squad.id} put a member outside the corridor at y=${m.baseY}`);
+      assert.ok(Number.isFinite(m.x) && Number.isFinite(m.y), 'a member has no position');
+    }
+  }
+  assert.ok(seen.size > 8,
+    `300 spawns produced only ${seen.size} different squadrons`);
+});
+
+test('a squadron does not stack its members on one spot', () => {
+  // A wide formation spawned near a girder used to have three members
+  // clamped onto the same line: one object drawn three times rather than
+  // three things in the way.
+  const game = flying();
+  for (let i = 0; i < 400; i++) {
+    resetFoes();
+    const sq = spawnSquadron(game);
+    if (sq.members.length < 2) continue;
+    // Measured as distance, not as a distinct (x, y) key. The key version
+    // missed the actual failure: a line formation clamped against a girder
+    // puts two members on the same y, 10px apart in x — two different keys
+    // and two overlapping sprites. The tightest spacing any formation in
+    // the table asks for is about 30px, so 20 is clear of every legitimate
+    // one and well above the 10px collapse.
+    for (let a = 0; a < sq.members.length; a++) {
+      for (let b = a + 1; b < sq.members.length; b++) {
+        const A = sq.members[a];
+        const B = sq.members[b];
+        const d = Math.hypot(A.x - B.x, A.baseY - B.baseY);
+        assert.ok(d >= 20,
+          `${sq.squad.id} put two members ${d.toFixed(1)}px apart`
+          + ` (${sq.members.map((m) => `${Math.round(m.x)},${Math.round(m.baseY)}`).join(' ')})`);
+      }
+    }
+  }
+});
+
+test('a chainer never arrives without its mate', () => {
+  // The pair and the live tether between them is the attacker, and the
+  // old spawn path killed a chainer it could not pair. Driven on a roster
+  // of nothing but chainers so the squadron picked is always the pair,
+  // and with the pool squeezed so pairing has to fail.
+  const game = launchAt(LEVELS.length - 1);
+  for (const t of game.level.turrets) t.dead = true;
+  game.level.spec = { ...game.level.spec, foes: ['chainer'] };
+  const pool = poolOfFoes();
+
+  for (let free = 1; free <= 3; free++) {
+    resetFoes();
+    while (pool.spawn()) { /* fill */ }
+    for (let k = 0; k < free; k++) pool.kill(0);
+    const before = pool.count;
+    const sq = spawnSquadron(game);
+    if (free === 1) {
+      assert.equal(sq, null, 'a chainer squadron formed with room for only one');
+      assert.equal(pool.count, before, 'the unpaired chainer was left in the pool');
+    } else if (sq) {
+      assert.equal(sq.members.length, 2, `a chainer squadron of ${sq.members.length}`);
+      assert.equal(sq.members[0].mate, sq.members[1], 'the pair is not linked');
+      assert.equal(sq.members[1].mate, sq.members[0], 'the link is one-way');
+      assert.ok(sq.members[0].holdsLink !== sq.members[1].holdsLink,
+        'both ends hold the link, so the tether would be billed twice');
+    }
+  }
+});
+
+test('a squadron that cannot fit in the pool degrades instead of breaking', () => {
+  const game = flying();
+  // Fill the pool to one slot short, then ask for a squadron.
+  const pool = poolOfFoes();
+  resetFoes();
+  while (pool.spawn()) { /* fill it */ }
+  const full = pool.count;
+  assert.ok(full > 0, 'the foe pool would not fill');
+  pool.kill(0);                       // exactly one slot free
+  const sq = spawnSquadron(game);
+  assert.ok(sq === null || sq.members.length >= 1,
+    'a squadron with no room came back malformed');
+  if (sq) {
+    for (const m of sq.members) assert.ok(SPEC[m.kind], 'a member has no spec');
+    // A lone chainer is not an attacker and must not be left as one.
+    if (sq.squad.link) assert.equal(sq.members.length, 2, 'half a chainer pair survived');
+  }
+  assert.ok(pool.count <= full, 'the pool overflowed');
 });

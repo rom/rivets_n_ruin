@@ -1,6 +1,6 @@
 import {
   SHIP, INTERCEPTOR, LEVELS, LEVEL_UP, PICKUP, BOSS, HULL_BONUS, APRON, VIEW_W,
-  FIELD_TOP, FIELD_BOT, clamp, LANCE} from './config.js';
+  FIELD_TOP, FIELD_BOT, clamp, LANCE, FOE_PACE} from './config.js';
 import { diff, award, hurt } from './score.js';
 import { get as setting, set as setSetting, onChange as onSetting } from './settings.js';
 import { buildLevel, obstaclesNear, updateMovers } from './level.js';
@@ -17,7 +17,8 @@ import {
   updatePickups, resetPickups, pickups, TREASURES, freshHaul,
 } from './pickups.js';
 import {
-  updateFoes, resetFoes, foes, hitFoe, spawnFoeForLevel, dropAttached,
+  updateFoes, resetFoes, foes, hitFoe, spawnFoeForLevel, spawnSquadron, foeRateFor,
+  dropAttached,
   SPEC as FOE_SPEC,
 } from './foes.js';
 import { updateOrdnance, resetOrdnance, ordnance } from './armory.js';
@@ -616,12 +617,24 @@ export function update(game, dt) {
     game.banner = null;
   }
 
-  // Extra attacker types, on their own slower cadence so they punctuate the
+  // Squadrons, on their own slower cadence so they punctuate the
   // interceptor stream rather than drowning it.
+  //
+  // The gap after one is paced by what arrived, in the only currency the
+  // roster already agrees on: what it was worth to kill. A swarm of gnats
+  // comes round again quickly; a monitor buys itself a long quiet. Tuned
+  // so the threat per second stays what the one-at-a-time cadence
+  // delivered — composition was the point, not a difficulty change.
   game.foeCd -= dt;
   if (game.foeCd <= 0) {
-    game.foeCd = 2.6 + Math.random() * 2.2;
-    if (p.x > APRON && p.x < game.level.length - APRON) spawnFoeForLevel(game);
+    let weight = FOE_PACE.assumed;
+    if (p.x > APRON && p.x < game.level.length - APRON) {
+      const sq = spawnSquadron(game);
+      if (sq) weight = sq.weight;
+    }
+    const rate = foeRateFor(game.level.spec);
+    const gap = rate > 0 ? Math.max(FOE_PACE.floor, weight / rate) : FOE_PACE.floor;
+    game.foeCd = gap * (FOE_PACE.jitter + Math.random() * (2 - FOE_PACE.jitter * 2));
   }
 
   // Tell the backend we are out here. Self-throttling to one beat every 5s.
