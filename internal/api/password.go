@@ -89,3 +89,9 @@ func validatePassword(pw string) error {
 	}
 	return nil
 }
+
+// HashPassword is hashPassword, exported for cmd/server: the admin
+// credential arrives in the environment and has to be hashed before the
+// API package ever sees it, so the plaintext can be dropped at startup
+// rather than carried around in a config struct.
+func HashPassword(pw string) (string, error) { return hashPassword(pw) }

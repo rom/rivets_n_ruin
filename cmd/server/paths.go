@@ -192,3 +192,39 @@ func contains(list []string, s string) bool {
 	}
 	return false
 }
+
+// readAdminSecret loads the admin credential from a file, preferring a
+// pre-computed hash.
+//
+// A file beats the environment for one specific reason: the environment
+// a process started with stays in /proc/PID/environ for the life of
+// that process, and nothing the process does to its own copy removes it.
+// A file can be chmod 600 and can hold the hash instead of the password,
+// so the plaintext need never exist on the server at all.
+//
+// Whitespace is trimmed because the overwhelmingly common way to make
+// one of these is `echo secret > file`, and a trailing newline that
+// silently changes the password is a bad afternoon.
+func readAdminSecret(hashFile, pwFile string) (string, error) {
+	if hashFile != "" && pwFile != "" {
+		return "", fmt.Errorf("give -admin-password-hash-file or -admin-password-file, not both")
+	}
+	for _, f := range []string{hashFile, pwFile} {
+		if f == "" {
+			continue
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return "", fmt.Errorf("reading %s: %w", f, err)
+		}
+		v := strings.TrimSpace(string(b))
+		if v == "" {
+			return "", fmt.Errorf("%s is empty", f)
+		}
+		if f == hashFile {
+			return v, nil
+		}
+		return hashAdminPassword(v)
+	}
+	return "", nil
+}

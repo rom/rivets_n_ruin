@@ -163,3 +163,76 @@ func TestUnderDoesNotMatchOnStringPrefix(t *testing.T) {
 		t.Error("a root is not inside itself")
 	}
 }
+
+func TestReadAdminSecretPrefersAHash(t *testing.T) {
+	dir := t.TempDir()
+	hashFile := filepath.Join(dir, "hash")
+	// A real hash, so the test cannot pass on a value the server would
+	// later refuse.
+	h, err := hashAdminPassword("correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hashFile, []byte(h+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readAdminSecret(hashFile, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != h {
+		t.Errorf("the hash came back changed:\n got %q\nwant %q", got, h)
+	}
+}
+
+func TestReadAdminSecretHashesAPlaintextFile(t *testing.T) {
+	dir := t.TempDir()
+	pwFile := filepath.Join(dir, "pw")
+	// A trailing newline, because `echo secret > file` is how these get
+	// made and a newline that silently changes the password is a bad
+	// afternoon.
+	if err := os.WriteFile(pwFile, []byte("correct horse battery staple\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readAdminSecret("", pwFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == "" || !strings.HasPrefix(got, "pbkdf2-") {
+		t.Fatalf("the plaintext was not hashed: %q", got)
+	}
+	if strings.Contains(got, "horse") {
+		t.Fatal("the plaintext survived into the stored credential")
+	}
+}
+
+func TestReadAdminSecretRefusesAmbiguityAndEmptyFiles(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a")
+	b := filepath.Join(dir, "b")
+	for _, f := range []string{a, b} {
+		if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := readAdminSecret(a, b); err == nil {
+		t.Error("giving both files should be refused rather than one silently winning")
+	}
+	empty := filepath.Join(dir, "empty")
+	if err := os.WriteFile(empty, []byte("   \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readAdminSecret("", empty); err == nil {
+		t.Error("an empty password file should be refused, not treated as no password")
+	}
+	if _, err := readAdminSecret("", filepath.Join(dir, "nope")); err == nil {
+		t.Error("a missing file should be an error, not silently no admin")
+	}
+}
+
+func TestNoAdminCredentialMeansNoAdmin(t *testing.T) {
+	got, err := readAdminSecret("", "")
+	if err != nil || got != "" {
+		t.Fatalf("no flags should mean no credential, got %q / %v", got, err)
+	}
+}

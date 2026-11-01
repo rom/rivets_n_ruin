@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/rom/rivets_n_ruin/internal/store"
 )
@@ -24,6 +26,15 @@ type Config struct {
 	// default so an existing client keeps working; on, it closes the
 	// simplest bypass, which is not opening a run at all.
 	RequireRuns bool
+
+	// AdminPasswordHash enables the operator routes. Empty — the
+	// default — means they are not registered at all, so there is no
+	// surface to find and nothing to brute-force. There is deliberately
+	// no built-in credential.
+	AdminPasswordHash string
+	// AdminLocalOnly restricts those routes to loopback. Defaults to on
+	// via NewWithAdmin; most of what they do is irreversible.
+	AdminLocalOnly bool
 }
 
 type Server struct {
@@ -33,6 +44,15 @@ type Server struct {
 	runs        *runStore
 	errs        *errorRing
 	requireRuns bool
+
+	adminHash      string
+	adminLocalOnly bool
+	adminMu        sync.Mutex
+	adminSessions  map[string]*adminSession
+	clock          func() time.Time
+	// A bucket of its own for the name check, far tighter than the rest
+	// of the API. See available.go.
+	nameRL *rateLimiter
 	// What the OS agreed to take away, for /api/stats. A hardening layer
 	// nobody can see the state of gets quietly broken and stays broken.
 	hardening any
@@ -50,6 +70,11 @@ func New(s store.Store, log *slog.Logger, cfg Config) *Server {
 		runs:        newRunStore(),
 		errs:        newErrorRing(),
 		requireRuns: cfg.RequireRuns,
+
+		adminHash:      cfg.AdminPasswordHash,
+		adminLocalOnly: cfg.AdminLocalOnly,
+		adminSessions:  map[string]*adminSession{},
+		nameRL:         newRateLimiter(NameCheckPerSec, NameCheckBurst),
 	}
 }
 
@@ -63,6 +88,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/players", s.createPlayer)
 	mux.HandleFunc("POST /api/auth/register", s.register)
 	mux.HandleFunc("POST /api/auth/login", s.login)
+	// One bit, one name at a time, behind its own tight limiter. See
+	// available.go for why it is shaped the way it is.
+	mux.HandleFunc("POST /api/auth/available", s.nameAvailable)
 	mux.HandleFunc("POST /api/runs/start", s.startRun)
 	mux.HandleFunc("GET /api/players/{id}", s.getPlayer)
 	mux.HandleFunc("GET /api/me", s.getMe)
@@ -79,6 +107,23 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/mods/{id}/top", s.modTop)
 
 	mux.HandleFunc("POST /api/errors", s.reportErrors)
+
+	// --- the operator's door
+	//
+	// Registered only when a password was configured, so an unconfigured
+	// server has no admin surface at all rather than a disabled one.
+	// Everything behind requireAdmin answers 404 when it refuses.
+	if s.adminEnabled() {
+		mux.HandleFunc("POST /api/admin/login", s.adminLogin)
+		mux.HandleFunc("POST /api/admin/logout", s.requireAdmin(s.adminLogout))
+		mux.HandleFunc("GET /api/admin/stats", s.requireAdmin(s.adminStats))
+		mux.HandleFunc("GET /api/admin/players", s.requireAdmin(s.adminListPlayers))
+		mux.HandleFunc("POST /api/admin/players", s.requireAdmin(s.adminCreatePlayer))
+		mux.HandleFunc("GET /api/admin/players/{id}", s.requireAdmin(s.adminGetPlayer))
+		mux.HandleFunc("DELETE /api/admin/players/{id}", s.requireAdmin(s.adminDeletePlayer))
+		mux.HandleFunc("POST /api/admin/players/{id}/reset", s.requireAdmin(s.adminResetPlayer))
+		mux.HandleFunc("POST /api/admin/players/{id}/password", s.requireAdmin(s.adminSetPassword))
+	}
 
 	mux.HandleFunc("POST /api/presence", s.heartbeat)
 	mux.HandleFunc("GET /api/presence", s.livePresence)

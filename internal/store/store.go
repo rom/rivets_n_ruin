@@ -51,6 +51,23 @@ type Store interface {
 	ListMods(limit int, sortBy string) ([]model.Mod, error)
 	IncrementPlays(modID string) error
 
+	// --- administration
+	//
+	// Deliberately not reachable from any pilot-facing route. Listing
+	// is the one operation the public API must never offer, because it
+	// is enumeration by definition; an operator holding the admin
+	// credential is the one caller for whom that is the point.
+	ListPlayers(query string, limit int) []model.Player
+	// DeletePlayer removes the pilot and everything of theirs: scores,
+	// hangar, token and password. A delete that leaves the scores
+	// behind leaves the name behind with them, on the one page that is
+	// published.
+	DeletePlayer(id string) error
+	// ResetPlayer clears a pilot's history and belongings but keeps the
+	// account and its credential, for the case where someone wants a
+	// clean slate rather than to be gone.
+	ResetPlayer(id string) error
+
 	// What a pilot owns between runs. Never nil: a pilot who has banked
 	// nothing reads as empty rather than missing, so every caller has
 	// one case fewer.
