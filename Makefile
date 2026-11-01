@@ -153,7 +153,7 @@ icons: ## Regenerate favicon.ico and apple-touch-icon.png
 
 dist: clean build ## Build a self-contained release tree in build/dist
 	@mkdir -p $(BUILD_DIR)/dist
-	@cp -r index.html src favicon.ico apple-touch-icon.png README.md LICENSE $(BUILD_DIR)/dist/
+	@cp -r index.html src favicon.ico apple-touch-icon.png README.md CHANGELOG.md LICENSE $(BUILD_DIR)/dist/
 	@# docs/ and deploy/ are not optional extras. The README has 63 images
 	@# in it, every one under docs/, and it points systemd users at the
 	@# unit file; without these the "self-contained" tree ships a README
