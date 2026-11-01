@@ -96,7 +96,18 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiSrv.Routes())
-	mux.Handle("/", noCache(staticLog(log, *verbose, http.FileServer(http.Dir(root)))))
+	mux.Handle("/", noCache(staticLog(log, *verbose,
+		hideData(root, *data, http.FileServer(http.Dir(root))))))
+
+	// Say it out loud when the two defaults overlap. The path is blocked
+	// either way, but an operator who believes the snapshot is reachable
+	// over HTTP may have built something around that, and an operator who
+	// has not thought about it at all should be told where the file is.
+	if dataAbs := absOr(*data); strings.HasPrefix(dataAbs, root+string(filepath.Separator)) {
+		log.Warn("the snapshot sits inside the web root; it is blocked from being served, "+
+			"but it holds password hashes and belongs outside",
+			"data", dataAbs, "root", root, "fix", "-data /var/lib/rivets-n-ruin/rnr.json")
+	}
 	handler := secureHeaders(mux)
 
 	srv := &http.Server{

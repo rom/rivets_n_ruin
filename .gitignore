@@ -4,3 +4,7 @@ data/
 
 # build output
 build/
+
+# `go build ./...` drops the main package here as ./server; the real
+# build goes to build/ via the Makefile.
+/server
