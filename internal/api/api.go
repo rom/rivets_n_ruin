@@ -66,6 +66,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/runs/start", s.startRun)
 	mux.HandleFunc("GET /api/players/{id}", s.getPlayer)
 	mux.HandleFunc("GET /api/me", s.getMe)
+	mux.HandleFunc("GET /api/me/hangar", s.getHangar)
+	mux.HandleFunc("PUT /api/me/hangar", s.putHangar)
 
 	mux.HandleFunc("POST /api/scores", s.submitScore)
 	mux.HandleFunc("GET /api/scores/top", s.topScores)

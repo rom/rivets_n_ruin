@@ -386,3 +386,128 @@ func TestSnapshotIsNotWorldReadable(t *testing.T) {
 		t.Fatal("the snapshot holds no password hash, so this proves nothing")
 	}
 }
+
+// --- hangars
+
+func TestHangarIsNeverNil(t *testing.T) {
+	m := NewMemory()
+	h := m.Hangar("nobody")
+	if h == nil || h.Mods == nil {
+		t.Fatalf("a pilot who has banked nothing must read as empty, not missing: %#v", h)
+	}
+	if h.Coins != 0 || h.Bars != 0 || len(h.Mods) != 0 {
+		t.Fatalf("an empty hangar is not empty: %#v", h)
+	}
+}
+
+func TestSetHangarClamps(t *testing.T) {
+	m := NewMemory()
+	mods := map[string]int{}
+	for i := 0; i < MaxMods*3; i++ {
+		mods[fmt.Sprintf("mod%03d", i)] = 5
+	}
+	mods["negative"] = -4
+	mods[""] = 2
+	mods[strings.Repeat("x", 200)] = 2
+
+	got := m.SetHangar("p1", &model.Hangar{
+		Coins: MaxCoins * 10, Bars: -99, Mods: mods,
+	})
+	if got.Coins != MaxCoins {
+		t.Errorf("coins = %d, want the cap %d", got.Coins, MaxCoins)
+	}
+	if got.Bars != 0 {
+		t.Errorf("a negative balance became %d, want 0", got.Bars)
+	}
+	if len(got.Mods) > MaxMods {
+		t.Errorf("%d mods kept, want at most %d", len(got.Mods), MaxMods)
+	}
+	for id, lvl := range got.Mods {
+		if id == "" || len(id) > 64 {
+			t.Errorf("a junk mod id survived: %q", id)
+		}
+		if lvl < 1 || lvl > MaxModLevel {
+			t.Errorf("%s came back at level %d", id, lvl)
+		}
+	}
+}
+
+func TestSetHangarHandsBackACopy(t *testing.T) {
+	// The caller gets a value it can scribble on. Returning the stored
+	// map would let an HTTP handler mutate the store after the fact,
+	// outside the lock.
+	m := NewMemory()
+	m.SetHangar("p1", &model.Hangar{Coins: 10, Mods: map[string]int{"a": 1}})
+	got := m.Hangar("p1")
+	got.Coins = 99999
+	got.Mods["a"] = 99
+	got.Mods["b"] = 1
+
+	again := m.Hangar("p1")
+	if again.Coins != 10 || again.Mods["a"] != 1 || len(again.Mods) != 1 {
+		t.Fatalf("the stored hangar was changed from outside: %#v", again)
+	}
+}
+
+func TestSetHangarTakesNil(t *testing.T) {
+	m := NewMemory()
+	got := m.SetHangar("p1", nil)
+	if got == nil || got.Coins != 0 || got.Mods == nil {
+		t.Fatalf("a nil body should store an empty hangar, got %#v", got)
+	}
+}
+
+func TestDeleteHangar(t *testing.T) {
+	m := NewMemory()
+	m.SetHangar("p1", &model.Hangar{Coins: 500})
+	m.DeleteHangar("p1")
+	if h := m.Hangar("p1"); h.Coins != 0 {
+		t.Fatalf("a deleted hangar still has %d coins", h.Coins)
+	}
+}
+
+func TestHangarsSurviveASnapshot(t *testing.T) {
+	// It lives in the account half, because deleting a pilot has to take
+	// their belongings with them and because it is per-pilot data rather
+	// than the published leaderboard.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "accounts.json")
+
+	m := NewMemory()
+	m.SetHangar("p1", &model.Hangar{Coins: 1234, Bars: 7, Mods: map[string]int{"reclaimer": 3}})
+	if err := m.SnapshotPart(path, Accounts); err != nil {
+		t.Fatal(err)
+	}
+
+	back := NewMemory()
+	if err := back.Load(path); err != nil {
+		t.Fatal(err)
+	}
+	h := back.Hangar("p1")
+	if h.Coins != 1234 || h.Bars != 7 || h.Mods["reclaimer"] != 3 {
+		t.Fatalf("the hangar did not survive the round trip: %#v", h)
+	}
+
+	// ...and not in the published half, which is handed out freely.
+	pub := filepath.Join(dir, "scores.json")
+	if err := m.SnapshotPart(pub, Public); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "reclaimer") {
+		t.Error("a pilot's belongings were written into the public snapshot")
+	}
+}
+
+func TestClampInt(t *testing.T) {
+	for _, c := range []struct{ v, lo, hi, want int }{
+		{5, 0, 10, 5}, {-1, 0, 10, 0}, {99, 0, 10, 10}, {0, 0, 0, 0},
+	} {
+		if got := clampInt(c.v, c.lo, c.hi); got != c.want {
+			t.Errorf("clampInt(%d,%d,%d) = %d, want %d", c.v, c.lo, c.hi, got, c.want)
+		}
+	}
+}

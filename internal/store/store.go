@@ -51,6 +51,16 @@ type Store interface {
 	ListMods(limit int, sortBy string) ([]model.Mod, error)
 	IncrementPlays(modID string) error
 
+	// What a pilot owns between runs. Never nil: a pilot who has banked
+	// nothing reads as empty rather than missing, so every caller has
+	// one case fewer.
+	Hangar(playerID string) *model.Hangar
+	// SetHangar clamps before it stores and returns what was kept, so a
+	// client that sent something out of range learns it rather than
+	// drifting out of step.
+	SetHangar(playerID string, h *model.Hangar) *model.Hangar
+	DeleteHangar(playerID string)
+
 	Heartbeat(p model.Presence) error
 	LivePresence() []model.Presence
 

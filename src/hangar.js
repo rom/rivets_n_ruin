@@ -79,12 +79,67 @@ export function loadHangar(validIds = null) {
 // Called after anything that changes what the pilot owns. Takes the game
 // rather than a hangar object so there is exactly one copy of the truth —
 // a separate mirror would be one more thing to keep in step.
+//
+// Writes localStorage first and the server second, and never waits for
+// the server. localStorage is the copy that has to be there when the tab
+// closes; the backend is the copy that makes a second machine work.
+// Reversing them would mean a dropped connection could cost a purchase.
+//
+// The upload is a hook rather than an argument because saveHangar is
+// called from the shop, the game loop and two page-lifecycle handlers,
+// and threading a parameter through all of them to reach one module
+// would be four chances to forget.
+let upload = null;
+export function setHangarSync(fn) { upload = fn; }
+
 export function saveHangar(game) {
   const h = sanitise({ coins: game.coins, bars: game.bars, mods: game.mods });
   try {
     localStorage.setItem(KEY, JSON.stringify({ version: VERSION, ...h }));
   } catch { /* private mode; the run still plays, it just will not keep */ }
+  if (upload) {
+    // Never awaited, and never allowed to throw into a caller that was
+    // in the middle of buying something.
+    try { Promise.resolve(upload(h)).catch(() => {}); } catch { /* offline */ }
+  }
   return h;
+}
+
+// Reconciling the two copies at sign-in.
+//
+// Two places hold a hangar and either can be ahead: the browser you are
+// sitting at may have banked coins while offline, and the account may
+// have been played on another machine since. There is no clock worth
+// trusting on the client, so this does not try to merge by time.
+//
+// It takes the better of each, which is the only rule that can never
+// take something away from a pilot who earned it. The failure it allows
+// — playing offline on two machines and keeping the best of both — is a
+// pilot being slightly richer than they should be in a single-player
+// shop. The failure it avoids is losing a purchase, and between those
+// two there is no contest.
+export function mergeHangars(local, remote) {
+  const a = sanitise(local);
+  const b = sanitise(remote);
+  const out = {
+    coins: Math.max(a.coins, b.coins),
+    bars: Math.max(a.bars, b.bars),
+    mods: {},
+  };
+  for (const id of new Set([...Object.keys(a.mods), ...Object.keys(b.mods)])) {
+    out.mods[id] = Math.max(a.mods[id] || 0, b.mods[id] || 0);
+  }
+  return out;
+}
+
+// Puts a reconciled hangar into the live game, so the shop and the HUD
+// read it immediately rather than at the next reload.
+export function applyHangar(game, h) {
+  const clean = sanitise(h);
+  game.coins = clean.coins;
+  game.bars = clean.bars;
+  game.mods = clean.mods;
+  return clean;
 }
 
 // The escape hatch. Progress that persists needs a way back to nothing, or
