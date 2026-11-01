@@ -285,8 +285,8 @@ and checks exactly that.
 
 ## Attackers
 
-Interceptors teach dodging and turrets teach prioritising. Eight more types
-arrive hull by hull, each asking a different question:
+Interceptors teach dodging and turrets teach prioritising.
+Eleven more types arrive hull by hull, each asking a different question:
 
 ![The attacker roster](docs/attackers.png)
 
@@ -309,13 +309,27 @@ one accent colour per kind carried on the trim and the running lights.
 | **Splitter** | PYRITE | Breaks into two halves that keep coming. Killing it early is cheaper |
 | **Leech** | WOLFRAM | Clamps onto the hull and drains the shield until you shoot it off |
 | **Bomber** | FERRUM | Seeds mines along its path, so ignoring it costs you the lane |
+| **Mirror** | WOLFRAM | Sends most of what you shoot at it straight back. Stop shooting and go round |
+| **Chainer** | FERRUM | Spawns as a linked pair with a live tether between them. Go round, or break a link |
+| **Carrier** | AURUM | Launches weavers. Spend the time on the source, or keep swatting what it sends |
 
 Which hull fields which is `LEVELS[].foes` in `src/config.js`. ARGENTUM
 fields none of them — the first hull is turrets and interceptors only.
 
+The last three are deliberately not more of the same. A mirror makes
+shooting the wrong move, which is the one thing a shoot 'em up never asks
+of you — it sends about three quarters of what you fire at it back down
+the line it came from, and the answer is to stop and flank. A chainer is
+not a ship at all but a pair and the wire between them: flying through
+the wire hurts, and killing either end drops it. A carrier poses the
+oldest question in the genre honestly — the source or the swarm — and
+caps its own brood so leaving it alone fills the screen rather than the
+pool.
+
 A leech is the only attacker that does not simply have to be avoided: once
 it is on, it is on, and it costs 11 shield a second until something takes
-it off. Two things about that were wrong and are now fixed:
+it off — for up to four and a half seconds, after which it has had its
+fill and lets go. Two things about that were wrong and are now fixed:
 
 - **It drained at five times its stated rate.** An attached leech sits at
   the ship's own position, which also tripped the generic ram check: 18
@@ -1455,7 +1469,7 @@ src/miniboss.js   the four mid-hull minibosses
 src/boss.js       boss arenas, phases, weak points and the wreck window
 src/bossart.js    the eight boss shapes and their destructible sections
 src/gates.js      laser gates: the wall, the emitter, and what breaks it
-src/foeart.js     the nine attacker bodies
+src/foeart.js     the twelve attacker bodies
 src/shipart.js    the player's ship, as its marks, guns, load and mods make it
 src/demo.js       the attract-mode pilot
 src/score.js      difficulty multipliers, and the one way points are awarded
@@ -1725,7 +1739,7 @@ playthrough does not settle.
   deaf is eight chances to be wrong.
 - **The graphics are unjudged.** Bloom strength, foreground density and the
   surface shading are tuned by eye against screenshots, not by playing.
-  Bloom in particular is easy to overdo. The eight boss shapes, the nine
+  Bloom in particular is easy to overdo. The eight boss shapes, the eleven
   attackers, the twenty-five ship marks and the radar strip were all drawn
   against still frames; whether any of it reads at speed with forty bullets
   on screen is a different question, and a fully fitted Mark VIII is

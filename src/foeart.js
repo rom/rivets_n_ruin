@@ -375,6 +375,126 @@ const BODIES = {
       ctx.restore();
     }
   },
+
+  // A slab of mirrored plate on a small tug. Everything about it should
+  // say "this will send it back": the face is a bright angled surface and
+  // the hull behind it is almost nothing, so the plate is what you read.
+  mirror(ctx, f, spec, lit) {
+    const face = f.facing;
+    // the tug behind the plate
+    ctx.fillStyle = lit ? HOT : '#272b33';
+    ctx.beginPath();
+    ctx.moveTo(-face * 13, -7);
+    ctx.lineTo(-face * 4, -5);
+    ctx.lineTo(-face * 4, 5);
+    ctx.lineTo(-face * 13, 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = lit ? HOT : '#3a414c';
+    ctx.fillRect(-face * 13, -7, face * 4, 2);
+    // engine
+    ctx.fillStyle = '#8fd8ff';
+    ctx.fillRect(-face * 15, -2, face * 3, 4);
+    // the plate: canted, bright, with a hot rim
+    ctx.save();
+    ctx.rotate(face * 0.16);
+    const grad = ctx.createLinearGradient(0, -12, 0, 12);
+    grad.addColorStop(0, '#dff2ff');
+    grad.addColorStop(0.45, '#7fb6d8');
+    grad.addColorStop(0.55, '#cfe8f7');
+    grad.addColorStop(1, '#5d87a4');
+    ctx.fillStyle = lit ? HOT : grad;
+    ctx.fillRect(face * 2, -12, face * 5, 24);
+    ctx.fillStyle = '#eaf7ff';
+    ctx.fillRect(face * 6, -12, face * 1.5, 24);
+    ctx.strokeStyle = '#2b3440';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(face * 2, -12, face * 5, 24);
+    // mounting struts, so the plate is bolted on rather than floating
+    ctx.fillStyle = '#4a515c';
+    for (const ry of [-7, 0, 7]) ctx.fillRect(-face * 4, ry - 1, face * 7, 2);
+    ctx.restore();
+    canopy(ctx, -face * 8, -2, 2, 1.6, '#9fe8ff');
+  },
+
+  // A launch bay with engines. Reads as something that carries other
+  // things: a long spine, a lit hangar mouth facing the way it travels,
+  // and a rack of empty cradles that visibly empties.
+  carrier(ctx, f, spec, lit) {
+    const face = f.facing;
+    const brood = f.brood || 0;
+    ctx.fillStyle = lit ? HOT : '#2a2520';
+    ctx.beginPath();
+    ctx.moveTo(face * 18, 0);
+    ctx.lineTo(face * 6, -11);
+    ctx.lineTo(-face * 16, -9);
+    ctx.lineTo(-face * 16, 9);
+    ctx.lineTo(face * 6, 11);
+    ctx.closePath();
+    ctx.fill();
+    // lit upper surface
+    ctx.fillStyle = lit ? HOT : '#4a3f33';
+    ctx.beginPath();
+    ctx.moveTo(face * 18, 0);
+    ctx.lineTo(face * 6, -11);
+    ctx.lineTo(-face * 16, -9);
+    ctx.lineTo(-face * 14, -5);
+    ctx.lineTo(face * 6, -6);
+    ctx.closePath();
+    ctx.fill();
+    // hangar mouth
+    ctx.fillStyle = '#120d08';
+    ctx.fillRect(face * 4, -5, face * 9, 10);
+    ctx.fillStyle = '#ff9f4a';
+    ctx.globalAlpha = 0.5 + 0.5 * Math.sin(f.t * 4);
+    ctx.fillRect(face * 5, -4, face * 2, 8);
+    ctx.globalAlpha = 1;
+    // cradles: three, filled until the brood is out
+    for (let k = 0; k < 3; k++) {
+      const cy = -7 + k * 7;
+      ctx.fillStyle = k < 3 - brood ? '#c08043' : '#241d16';
+      ctx.fillRect(-face * 13, cy - 1.5, face * 6, 3);
+    }
+    rivets(ctx, -face * 14, -8, face * 4, 5, '#8a6f4e');
+    engine(ctx, -face * 16, -4, 4, f.t, '#ffb259');
+    engine(ctx, -face * 16, 4, 4, f.t + 0.4, '#ffb259');
+    canopy(ctx, face * 1, -6, 2.4, 1.8, '#ffd9a8');
+    light(ctx, face * 14, 0, f.t, '#ff9f4a', 3);
+  },
+
+  // One end of a pair. A spool with a cable running off it — which is the
+  // whole tell, because the thing that hurts is the cable and not this.
+  chainer(ctx, f, spec, lit) {
+    ctx.fillStyle = lit ? HOT : '#2b2a33';
+    ctx.beginPath(); ctx.arc(0, 0, 9, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = lit ? HOT : '#3f3d4d';
+    ctx.beginPath(); ctx.arc(-1, -1.5, 7, 0, Math.PI * 2); ctx.fill();
+    // the spool, turning
+    ctx.save();
+    ctx.rotate(f.t * 2.4);
+    ctx.strokeStyle = '#ffd24a';
+    ctx.lineWidth = 1.6;
+    for (let k = 0; k < 4; k++) {
+      const a = (k / 4) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 2.5, Math.sin(a) * 2.5);
+      ctx.lineTo(Math.cos(a) * 6, Math.sin(a) * 6);
+      ctx.stroke();
+    }
+    ctx.restore();
+    ctx.fillStyle = '#1a1820';
+    ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd24a';
+    ctx.beginPath(); ctx.arc(0, 0, 1.5, 0, Math.PI * 2); ctx.fill();
+    // clamps, so it reads as a thing that holds a line
+    ctx.fillStyle = '#595a6b';
+    for (const a of [0.6, Math.PI - 0.6]) {
+      ctx.save();
+      ctx.rotate(a);
+      ctx.fillRect(7, -2, 4, 4);
+      ctx.restore();
+    }
+  },
 };
 
 // Splitter and shard share a frame: one is the whole pod, the other is the

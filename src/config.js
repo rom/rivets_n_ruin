@@ -295,7 +295,7 @@ const CORE_LEVELS = [
     gapScale: 0.63, clearChance: 0.04,
     turretHp: 15, turretCooldown: 0.92, turretRange: 420,
     interceptorSpeed: 266, interceptorSpawn: 0.75, interceptorHp: 5,
-    foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech'],
+    foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech', 'mirror'],
     enemyDmg: 1.28,
     towers: ['gun', 'lance', 'mortar', 'warden', 'rocket'], lasers: 3, laserHp: 5, tune: 3 },
 
@@ -304,7 +304,7 @@ const CORE_LEVELS = [
     gapScale: 0.59, clearChance: 0.035,
     turretHp: 16, turretCooldown: 0.86, turretRange: 440,
     interceptorSpeed: 280, interceptorSpawn: 0.70, interceptorHp: 5,
-    foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech'],
+    foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech', 'chainer'],
     enemyDmg: 1.34,
     towers: ['gun', 'flak', 'mortar', 'warden', 'rocket'], lasers: 3, laserHp: 6, tune: 6 },
 
@@ -313,7 +313,7 @@ const CORE_LEVELS = [
     gapScale: 0.55, clearChance: 0.03,
     turretHp: 18, turretCooldown: 0.80, turretRange: 460,
     interceptorSpeed: 294, interceptorSpawn: 0.64, interceptorHp: 6,
-    foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech'],
+    foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech', 'carrier'],
     enemyDmg: 1.40,
     towers: ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket'], lasers: 4, laserHp: 7, tune: 7 },
 ];
@@ -327,7 +327,8 @@ const CORE_LEVELS = [
 //
 
 const THEME_CYCLE = Object.keys(THEMES);
-const ALL_FOES = ['mine', 'lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech'];
+const ALL_FOES = ['mine', 'lancer', 'orbiter', 'warder', 'weaver', 'splitter',
+  'bomber', 'leech', 'mirror', 'carrier', 'chainer'];
 const ALL_TOWERS = ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket'];
 
 // Binary floating point gives 0.64 - 3 * 0.018 as 0.5860000000000001, and

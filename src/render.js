@@ -821,6 +821,35 @@ function drawFoes(ctx) {
       ctx.globalAlpha = 1;
       ctx.restore();
     }
+
+    // The chainer's tether is the thing that hurts, so it is drawn big
+    // and hot: a hazard on the hull, not a decoration on the ship. Drawn
+    // from the end that holds the link, and only while both ends live —
+    // which is the visual that tells you killing either one drops it.
+    if (f.kind === 'chainer' && f.holdsLink && f.mate
+      && !f.mate.dead && f.mate.hp > 0 && !f.dead) {
+      const m = f.mate;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = '#ffd24a';
+      ctx.globalAlpha = 0.22;
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.moveTo(f.x, f.y); ctx.lineTo(m.x, m.y); ctx.stroke();
+      ctx.globalAlpha = 0.9;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(f.x, f.y); ctx.lineTo(m.x, m.y); ctx.stroke();
+      ctx.restore();
+      // beads running along it, so it reads as live rather than as a wire
+      const n = 5;
+      for (let k = 0; k < n; k++) {
+        const u = ((k / n) + (f.t * 0.6) % 1) % 1;
+        ctx.fillStyle = '#fff3c4';
+        ctx.fillRect(Math.round(f.x + (m.x - f.x) * u) - 1,
+          Math.round(f.y + (m.y - f.y) * u) - 1, 2, 2);
+      }
+    }
   }
 }
 

@@ -224,7 +224,7 @@ test('the README attacker table lists every attacker, from the right hull', () =
   // ...and claims the right number of them.
   const count = Object.keys(real).length;
   const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
-    'eight', 'nine', 'ten', 'eleven', 'twelve'];
+    'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen'];
   assert.ok(new RegExp(`${words[count]} more types`, 'i').test(readme),
     `the README does not say "${words[count]} more types" for ${count} attackers`);
 });
@@ -303,7 +303,7 @@ test('the README layout block names every client module', () => {
 
 test('the README counts the art it claims to count', () => {
   const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
-    'eight', 'nine', 'ten'];
+    'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen'];
   assert.ok(readme.includes(`the ${words[BODY_KINDS.length]} attacker bodies`),
     `the layout block miscounts the ${BODY_KINDS.length} attacker bodies`);
   const minis = Object.keys(MINI_KINDS).length;

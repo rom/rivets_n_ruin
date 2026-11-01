@@ -11,7 +11,7 @@ import { makePool } from './pool.js';
 import { award, hurt } from './score.js';
 import { enemyShots, fire } from './projectiles.js';
 import { explode, sparks } from './particles.js';
-import { sfxTurretShot, sfxEnemyHit, sfxExplode } from './sfx.js';
+import { sfxTurretShot, sfxEnemyHit, sfxExplode, sfxPlayerHit} from './sfx.js';
 import { spoils } from './pickups.js';
 import { kick } from './camera.js';
 
@@ -37,6 +37,22 @@ export const SPEC = {
   // Unbounded, a grab in a corridor with nothing to scrape against was
   // a drain with no answer.
   leech:   { hp: 3, speed: 210, score: 260, r: 10, drain: 11, grabR: 15, holdTime: 4.5 },
+
+  // --- three that ask something the nine above do not.
+  //
+  // A roster grows by adding questions, not by adding another thing with
+  // more health. Each of these makes a different move the right one.
+
+  // Reflects what you shoot at it. The answer is to stop shooting and go
+  // round, which is the one thing a shoot 'em up never asks you to do.
+  mirror:  { hp: 7, speed: 86, score: 380, r: 13, reflect: 0.75, fireEvery: 2.6 },
+  // Launches weavers. The question is whether to spend the time on the
+  // source or keep swatting what it sends.
+  carrier: { hp: 9, speed: 72, score: 420, r: 17, launchEvery: 2.2, broodMax: 3 },
+  // Spawns as a linked pair with a live tether between them. Flying
+  // through the tether hurts; killing either end drops it. Go round, or
+  // break a link.
+  chainer: { hp: 4, speed: 128, score: 300, r: 10, tetherDmg: 22, tetherGap: 96 },
 };
 
 // A deflector bubble, fitted to some attackers on later hulls. Unlike a
@@ -71,6 +87,7 @@ export const foes = makePool(26, () => ({
   hp: 0, t: 0, cd: 0, state: 0, dead: false, flash: 0, facing: -1,
   shield: 0, shieldMax: 0, shieldFlash: 0,
   held: 0, fed: false,     // leech: how long attached, and whether it has
+  mate: null, holdsLink: false, brood: 0, parent: null,
 }));
 
 export function resetFoes() { foes.clear(); }
@@ -115,6 +132,10 @@ export function spawnFoe(game, kind) {
   // full stomach, or the next leech to spawn never attaches at all.
   f.held = 0;
   f.fed = false;
+  f.mate = null;
+  f.holdsLink = false;
+  f.brood = 0;
+  f.parent = null;
 
   // Deflector, on the kinds that can carry one, from the middle of the
   // campaign onward.
@@ -132,7 +153,56 @@ export function spawnFoe(game, kind) {
 export function spawnFoeForLevel(game) {
   const list = game.level.spec.foes;
   if (!list || !list.length) return null;
-  return spawnFoe(game, list[Math.floor(Math.random() * list.length)]);
+  const kind = list[Math.floor(Math.random() * list.length)];
+  const f = spawnFoe(game, kind);
+  // A chainer is half of a thing. One on its own is a weak weaver; the
+  // pair and the live tether between them is the attacker.
+  if (f && kind === 'chainer') {
+    const mate = spawnFoe(game, 'chainer');
+    if (mate) {
+      mate.x = f.x;
+      mate.baseY = clamp(f.baseY + SPEC.chainer.tetherGap, FIELD_TOP + 20, FIELD_BOT - 20);
+      mate.y = mate.baseY;
+      mate.facing = f.facing;
+      f.mate = mate;
+      mate.mate = f;
+      f.holdsLink = true;          // only one end draws and bills it
+    } else {
+      // No room in the pool for the other half: a lone chainer is not an
+      // attacker, so it does not get to be one.
+      foes.kill(foes.count - 1);
+      return null;
+    }
+  }
+  return f;
+}
+
+// The live tether between a chainer pair. Billed from the end that holds
+// the link so the player cannot be charged twice for one wire, and only
+// while both ends are alive — killing either drops it, which is the
+// second answer the pair offers.
+function tetherHurts(game, f, dt) {
+  const p = game.player;
+  const m = f.mate;
+  if (!f.holdsLink || !m || m.dead || m.hp <= 0 || !p.alive || p.invuln > 0) return;
+  if (f.dead || f.hp <= 0) return;
+  const dx = m.x - f.x;
+  const dy = m.y - f.y;
+  const len2 = dx * dx + dy * dy;
+  if (!len2) return;
+  // Distance from the ship to the segment between the two ends.
+  let t = ((p.x - f.x) * dx + (p.y - f.y) * dy) / len2;
+  t = clamp(t, 0, 1);
+  const cx = f.x + dx * t;
+  const cy = f.y + dy * t;
+  if (Math.hypot(p.x - cx, p.y - cy) < 10) {
+    hurt(game, SPEC.chainer.tetherDmg);
+    game.flash = Math.max(game.flash, 0.4);
+    kick(game.cam, 5);
+    sparks(cx, cy, 0, -1, 7, '#ffd24a');
+    p.invuln = 0.4;
+    sfxPlayerHit();
+  }
 }
 
 export function updateFoes(game, dt) {
@@ -213,6 +283,60 @@ export function updateFoes(game, dt) {
           fire(enemyShots, f.x, f.y, Math.cos(a) * 185, Math.sin(a) * 185, 4, 9, 2);
           sfxTurretShot();
         }
+        break;
+      }
+
+      case 'mirror': {
+        // Closes slowly and side-on. The plate faces you, like a warder's,
+        // but it answers shots by sending them back rather than eating
+        // them — see hitFoe, where the reflection actually happens.
+        f.x += f.facing * spec.speed * dt;
+        f.baseY += clamp(p.y - f.baseY, -52 * dt, 52 * dt);
+        f.y = f.baseY;
+        f.cd -= dt;
+        if (f.cd <= 0 && game.state === 'play') {
+          f.cd = spec.fireEvery;
+          const a = Math.atan2(p.y - f.y, p.x - f.x);
+          fire(enemyShots, f.x, f.y, Math.cos(a) * 170, Math.sin(a) * 170, 4, 9, 2);
+          sfxTurretShot();
+        }
+        break;
+      }
+
+      case 'carrier': {
+        // Keeps its distance and sends things. Its brood is counted so a
+        // carrier left alone fills the screen but not the pool.
+        f.x += f.facing * spec.speed * dt;
+        f.baseY += clamp(p.y - f.baseY, -34 * dt, 34 * dt);
+        f.y = f.baseY;
+        f.cd -= dt;
+        // Counted live each time rather than tallied: a counter that only
+        // goes up means a carrier whose brood is shot down never launches
+        // again, and an index into a swap-remove pool is a reference that
+        // goes stale the first time anything else dies.
+        f.brood = 0;
+        for (let k = 0; k < foes.count; k++) if (foes.items[k].parent === f) f.brood++;
+        if (f.cd <= 0 && game.state === 'play' && f.brood < spec.broodMax) {
+          f.cd = spec.launchEvery;
+          const child = spawnFoe(game, 'weaver');
+          if (child) {
+            child.x = f.x - f.facing * 14;
+            child.baseY = f.y;
+            child.y = f.y;
+            child.parent = f;
+            f.brood++;
+            sparks(child.x, child.y, -f.facing, 0, 5, '#ff9f4a');
+          }
+        }
+        break;
+      }
+
+      case 'chainer': {
+        // Half of a pair. The tether is drawn and billed from the one
+        // that holds the link, so only one of the two does the work.
+        f.x += f.facing * spec.speed * dt;
+        f.baseY += clamp(p.y - f.baseY, -44 * dt, 44 * dt);
+        f.y = f.baseY + Math.sin(f.t * 1.9) * 16;
         break;
       }
 
@@ -316,6 +440,8 @@ export function updateFoes(game, dt) {
     // second, about five times the drain it is specified to do, and the
     // invulnerability that ram sets then suppressed the drain entirely. It
     // has its own damage model; this one does not apply to it.
+    if (f.kind === 'chainer') tetherHurts(game, f, dt);
+
     // Anything that grabs is excluded outright, attached or not. It was
     // excluded only while attached, which was right until a leech could
     // let go: on the frame it released it was still sitting at the ship's
@@ -366,6 +492,18 @@ export function hitFoe(game, index, sx, sy, dmg) {
   if (foeShielded(f, sx, sy)) {
     sparks(sx, sy, -1, 0, 3, '#8e9aa9');
     return true;      // absorbed by the plate
+  }
+
+  // A mirror sends most of what you shoot at it back down the line it
+  // came from. Not all of it: a weapon that is strictly a mistake to use
+  // is not a decision, it is a rule you learn once and then obey.
+  if (spec.reflect && Math.random() < spec.reflect) {
+    const ang = Math.atan2(game.player.y - f.y, game.player.x - f.x);
+    fire(enemyShots, f.x, f.y, Math.cos(ang) * 300, Math.sin(ang) * 300, 2.2, dmg * 2, 2);
+    sparks(sx, sy, Math.sign(game.player.x - f.x), 0, 6, '#9fe8ff');
+    f.flash = 0.1;
+    sfxEnemyHit();
+    return true;
   }
 
   // The deflector takes the hit first, from any angle. Overkill carries
