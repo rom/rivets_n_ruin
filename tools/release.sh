@@ -159,6 +159,13 @@ tar xzf "build/rel/rivets-n-ruin-$VERSION-linux-amd64.tar.gz" -C "$work"
   [ "$fail" -eq 0 ] || { echo "release gate failed — not publishing" >&2; exit 1; }
 )
 
+# The toolchain goes in the log, because the checksums below only
+# reproduce under the same one. Someone rebuilding with a different Go
+# gets a different binary from identical source, which looks exactly
+# like a tampered download. Caught while verifying 1.1.0: the release
+# was built with go1.27.2 and the notes claimed 1.24.7.
+say "built with $(go version)"
+
 say "artifacts"
 cat build/rel/SHA256SUMS.txt
 
