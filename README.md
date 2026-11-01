@@ -1393,6 +1393,85 @@ Audio cannot start before a user gesture (browsers forbid it), so the context is
 created on your first keypress. Mute is `M`; both it and your tune choice
 persist across reloads.
 
+## Security
+
+One page for the whole picture, because the pieces are spread across the
+sections that explain them and none of them means much alone.
+
+### What is actually at risk
+
+A shoot 'em up has a smaller threat model than it looks, and being
+honest about its shape is what keeps the defences pointed somewhere
+useful.
+
+| | |
+| --- | --- |
+| **Worth protecting** | password hashes and token hashes; the integrity of the leaderboard; the machine the server runs on |
+| **Already public** | pilot names, scores, mod definitions, who is flying right now. These are printed on the board |
+| **Not defended, on purpose** | a pilot editing their own hangar. It buys them a better ship in their own run; submitted scores go through the validator regardless |
+| **Not in scope** | DDoS. That belongs in front of the process, and the per-IP bucket here is not it |
+
+Treating the public things as secret would be theatre, and theatre is
+how real defences get budget taken away from them.
+
+### The pieces
+
+| | |
+| --- | --- |
+| [Three roots](#three-roots) | content read-only, state writable, credentials somewhere else again |
+| [Headers](#headers) | a content security policy with no exceptions in it |
+| [The operator's door](#the-operators-door) | admin routes that do not exist unless you configure them |
+| [Is this name taken?](#is-this-name-taken) | one bit, not an enumeration oracle |
+| [Anti-cheat](#anti-cheat--what-it-does-and-does-not-do) | what a submitted score has to survive |
+| [Score validation](#score-validation--read-this-before-trusting-a-number) | the physics the backend checks against |
+| [Hardening the process](#hardening-the-process) | Landlock, no-new-privs, non-dumpable, systemd |
+| [Identity and accounts](#identity-and-accounts) | passwords, tokens, and what a login is worth |
+
+### The rules this all follows
+
+**Nothing the server writes is ever served.** Not the leaderboards, not
+the open runs, not the log, and above all not the account database.
+Blocked by path, resolved the way `net/http` resolves it so a traversal
+cannot walk around it, answering `404` rather than `403`.
+
+**No default credential, anywhere.** The admin surface is not disabled
+without a password — it is not registered. There is nothing to find.
+
+**Secrets never go in a flag.** A flag is visible in `ps` to every user
+on the machine. The admin credential comes from a file or, with a stated
+caveat, the environment.
+
+**One error for one class of failure.** Login answers the same way and
+takes the same time whether the pilot does not exist or the password is
+wrong. The name check returns one bit and nothing beside it. The admin
+routes answer `404` for every refusal.
+
+**The process asks the OS to take its privileges away** once it has
+bound its port and read its files: Landlock on the three roots,
+`PR_SET_NO_NEW_PRIVS`, `PR_SET_DUMPABLE(0)`, every thread. On macOS it
+says plainly what it cannot do rather than pretending.
+
+### What is not true
+
+Two claims that were in this README and were wrong, kept here because a
+security document that only lists its wins is not one:
+
+- Writing the snapshot `0600` did **not** stop it being readable. The web
+  server owned the file and served it on request. Permissions do not help
+  against your own process.
+- `os.Unsetenv` does **not** remove a variable from `/proc/PID/environ`.
+  That is a snapshot taken at exec time. `PR_SET_DUMPABLE(0)` is what
+  bounds it, and the file-based credential options exist so nobody has to
+  rely on that.
+
+Both were found by running the thing and looking, not by reading it.
+
+### Reporting something
+
+Open an issue. There is no bounty, this is a game about a spaceship, and
+an honest "no money, but I will fix it and credit you" is better than a
+policy nobody intends to fund.
+
 ## Backend
 
 A Go service keeping high scores, top lists, mods and live presence.
@@ -1414,6 +1493,7 @@ reports each pilot's progress along the hull.
 | `POST` | `/api/auth/login` | — | log in with name and password; rotates the token |
 | `GET` | `/api/players/{id}` | — | profile and recent runs |
 | `GET` | `/api/me` | yes | your own profile |
+| `POST` | `/api/auth/available` | — | is one pilot name free? one bit, tightly limited |
 | `GET` | `/api/me/hangar` | yes | coins, bars and bought mods |
 | `PUT` | `/api/me/hangar` | yes | bank them against the account |
 | `POST` | `/api/scores` | yes | submit a run; returns your new rank |
@@ -1426,6 +1506,105 @@ reports each pilot's progress along the hull.
 | `GET` | `/api/mods/{id}/top` | — | that mod's leaderboard |
 | `POST` | `/api/presence` | yes | heartbeat while flying |
 | `GET` | `/api/presence` | — | who is flying right now |
+
+### The operator's door
+
+Registered only when a credential is configured. With none, the routes
+do not exist — there is no default password, nothing to find and nothing
+to brute-force. Everything behind it answers `404` when it refuses,
+including a wrong token and a request from the wrong address: a surface
+that announces itself is a surface worth attacking.
+
+| | | |
+| --- | --- | --- |
+| `POST` | `/api/admin/login` | password in, short-lived token out |
+| `POST` | `/api/admin/logout` | end the session now |
+| `GET` | `/api/admin/stats` | store counters, live sessions, what the OS granted |
+| `GET` | `/api/admin/players` | list and search pilots |
+| `POST` | `/api/admin/players` | add one, with or without a password |
+| `GET` | `/api/admin/players/{id}` | everything about one pilot, with statistics |
+| `DELETE` | `/api/admin/players/{id}` | remove the pilot and all of their data |
+| `POST` | `/api/admin/players/{id}/reset` | clear their history, keep the account |
+| `POST` | `/api/admin/players/{id}/password` | set a new password |
+
+**Loopback only**, unless you pass `-admin-anywhere`. Most of what these
+do cannot be undone, and anyone who wants them reachable from elsewhere
+should have to say so and put TLS and an allowlist in front. A token
+minted locally does not work from off-machine either, so a leaked one
+does not travel.
+
+**Changing a password kills the pilot's session token.** Otherwise
+resetting the credential of a compromised account would change nothing
+for whoever was already inside it.
+
+**Deleting takes the scores with it.** A delete that left them behind
+would leave the pilot's name on the leaderboard — the one page that is
+published — so the only part anybody could see would not have been
+deleted. `reset` is there for when you want a clean slate instead.
+
+Sessions last 30 minutes and live in memory, so a restart logs you out.
+Every action is written to the log with the caller's address, *before*
+it happens: an audit line written afterwards is missing exactly the
+operations that failed halfway through.
+
+#### Giving it a password
+
+Three ways, in descending order of how much they leak:
+
+```bash
+# best: the plaintext never reaches the server
+printf '%s' 'the password' | rnr-server -hash-password > /etc/rivets/admin.hash
+rnr-server -admin-password-hash-file /etc/rivets/admin.hash
+
+# fine: not in ps, not in the environment
+rnr-server -admin-password-file /etc/rivets/admin.pw
+
+# convenient, and it stays in /proc/PID/environ
+RNR_ADMIN_PASSWORD='the password' rnr-server
+```
+
+Never as a flag value: a flag is visible in `ps` to every user on the
+machine.
+
+The environment variable is unset at startup, which stops anything the
+server execs inheriting it — but it does **not** scrub
+`/proc/PID/environ`. That is a snapshot of the initial stack taken at
+exec time and the kernel keeps serving it whatever the process does to
+its own copy. Verified by reading it back after unsetting, because the
+first version of the comment above it claimed otherwise.
+
+What bounds it is `PR_SET_DUMPABLE(0)`, which the hardening layer
+applies on Linux and which hands `/proc/PID/*` to root — so another user
+on the box cannot read it, and root could read anything anyway. With
+`-harden off`, or on a platform without it, assume the password is
+visible to anything running as the same user.
+
+### Is this name taken?
+
+A sign-up form has to be able to ask, and any endpoint that answers is
+an oracle for "does this account exist". The honest position is that
+pilot names are already public — they are printed on the leaderboard —
+so existence is not the secret. What is worth protecting is everything
+*else* about an account, and the cheapness of harvesting names in bulk.
+
+`POST /api/auth/available` therefore:
+
+- takes **one name, in full**. No prefixes, no patterns, no listing,
+  nothing that can return more than one bit.
+- answers with that one bit and nothing beside it. No id, no creation
+  date, no "has a password", no rank. Those are what an enumeration is
+  *for*, and a test fails if the response ever grows a second field.
+- has **its own rate limit**, an order of magnitude tighter than the
+  rest of the API — a burst of 10, then one a second. A hundred
+  thousand candidate names is a day and a half from one address.
+- validates the name before looking anything up, so the validator
+  cannot be used to tell the two answers apart, and floors the response
+  time so the handler cannot become a timing oracle.
+
+Listing pilots exists, and lives behind the admin credential, where
+enumeration is the point rather than a leak. A test asserts no
+pilot-facing route returns a list of players.
+
 | `POST` | `/api/errors` | — | client error reports; see below |
 
 ### High scores persist against your pilot, not your browser
@@ -1764,17 +1943,6 @@ switch off the first time it breaks.
 directory and reads one, which is exactly the shape a confinement policy
 wants. Point the policy at `-data`'s directory and the static root.
 
-### HTTP headers
-
-Every response carries a content security policy with no exceptions in
-it, because the game has no third-party anything: no fonts, no analytics,
-no CDN. `default-src 'self'`, no inline script, `object-src 'none'`,
-`base-uri 'none'`, `form-action 'none'`, `frame-ancestors 'none'`, plus
-`X-Content-Type-Options`, `Referrer-Policy: no-referrer`, both
-`Cross-Origin-*-Policy` headers, and a `Permissions-Policy` that turns
-off the camera, microphone, geolocation and payment handlers nothing here
-will ever want.
-
 ### Storage
 
 An in-process store behind a `Store` interface, snapshotted to JSON (written to
@@ -1845,6 +2013,7 @@ src/projectiles.js src/particles.js src/camera.js src/rng.js src/input.js
 
 index.html        host page, canvas, integer upscaling
 package.json      test tooling only — the game has no dependencies
+CHANGELOG.md      what changed, and why
 Makefile          make, for the list of targets
 tools/smoke.cjs   the browser smoke test: flies the game and reads pixels
 tools/coverage.sh the coverage gate, so CI and your machine agree

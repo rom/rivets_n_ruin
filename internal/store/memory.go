@@ -630,3 +630,89 @@ func clampInt(v, lo, hi int) int {
 
 func clonePlayer(p *model.Player) *model.Player { c := *p; return &c }
 func cloneScore(s *model.Score) *model.Score    { c := *s; return &c }
+
+// --- administration
+
+// ListPlayers returns pilots, newest first, optionally filtered by a
+// case-insensitive substring of the name.
+//
+// This is enumeration, and that is the point: it exists for an operator
+// holding the admin credential and is deliberately unreachable from
+// anything a pilot can call. The public API has no route that lists
+// players, and must not grow one.
+func (m *Memory) ListPlayers(query string, limit int) []model.Player {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	q := strings.ToLower(strings.TrimSpace(query))
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]model.Player, 0, len(m.players))
+	for _, p := range m.players {
+		if q != "" && !strings.Contains(strings.ToLower(p.Name), q) {
+			continue
+		}
+		out = append(out, *p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Created.After(out[j].Created) })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+// DeletePlayer removes a pilot and everything of theirs.
+//
+// Scores go with the account. A delete that left them behind would
+// leave the pilot's name behind with them, on the leaderboard, which is
+// the one page that is published — so "delete this user" would not have
+// deleted the only part anybody could see.
+func (m *Memory) DeletePlayer(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.players[id]
+	if !ok {
+		return ErrNotFound
+	}
+	delete(m.players, id)
+	delete(m.byName, strings.ToLower(p.Name))
+	delete(m.byToken, p.TokenHash)
+	delete(m.hangars, id)
+	m.dropScoresLocked(id)
+	return nil
+}
+
+// ResetPlayer clears a pilot's history and belongings and keeps the
+// account, for the case where someone wants a clean slate rather than
+// to be gone. The credential is untouched: they can still log in.
+func (m *Memory) ResetPlayer(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.players[id]
+	if !ok {
+		return ErrNotFound
+	}
+	m.dropScoresLocked(id)
+	delete(m.hangars, id)
+	p.Runs = 0
+	p.Best = 0
+	return nil
+}
+
+// Caller holds the write lock.
+func (m *Memory) dropScoresLocked(playerID string) {
+	kept := m.scores[:0]
+	for _, s := range m.scores {
+		if s.PlayerID != playerID {
+			kept = append(kept, s)
+		}
+	}
+	// The tail still points at the removed entries; clearing it lets
+	// them be collected instead of being kept alive by the backing
+	// array for as long as the process runs.
+	for i := len(kept); i < len(m.scores); i++ {
+		m.scores[i] = nil
+	}
+	m.scores = kept
+}
