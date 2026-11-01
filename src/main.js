@@ -1,5 +1,6 @@
 import { VIEW_W, VIEW_H } from './config.js';
-import { fitCanvas, applyTransform, reportFrame, setStatic } from './display.js';
+import { fitCanvas, applyTransform, applyUiTransform, reportFrame,
+  setStatic } from './display.js';
 import {
   initInput, tapped, endFrame, setSynthetic, realAnyTapped,
 } from './input.js';
@@ -13,11 +14,12 @@ import {
   drawDemoBadge,
 } from './hud.js';
 import { rows as shopRows, buy as shopBuy, applyMods } from './shop.js';
-import { saveHangar, clearHangar } from './hangar.js';
+import { saveHangar, clearHangar, setHangarSync, mergeHangars, applyHangar } from './hangar.js';
 import { unlock, toggleMute, isMuted, ready } from './audio.js';
 import { startMusic, stopMusic, musicRunning } from './music.js';
 import { sfxUi } from './sfx.js';
-import { initNet, rename, refreshTop, refreshRuns, refreshPresence, netState, toggleBoard } from './net.js';
+import { initNet, rename, refreshTop, refreshRuns, refreshPresence, netState, toggleBoard,
+  fetchHangar, pushHangar, setIdentityHook } from './net.js';
 import { nextTune, tuneName, setTune, TUNES } from './music.js';
 import * as settings from './settings.js';
 import { applySettings } from './audio.js';
@@ -27,11 +29,20 @@ import { LEVELS, BUILD } from './config.js';
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false });
 
-// The canvas backing store tracks the window and the device pixel ratio, and
-// the context carries a matching transform, so everything — sprites, strokes
-// and especially text — is rasterised at display resolution rather than
-// drawn into 640x360 and blown up. See display.js.
-function fit() { fitCanvas(canvas, ctx); }
+// Two layers. The world canvas carries the adaptive scale and the
+// compositor stretches it to the box for free; the UI canvas sits on top
+// at the window's own resolution, so the HUD and the menus are never
+// upscaled. Before this the cap took the whole backing store down with
+// it and the HUD text went blocky the moment gameplay started. See
+// display.js.
+const uiCanvas = document.getElementById('ui');
+const uiCtx = uiCanvas ? uiCanvas.getContext('2d') : null;
+const ui = uiCtx ? { canvas: uiCanvas, ctx: uiCtx } : null;
+// Everything that is not the world draws here. Falls back to the world
+// canvas if the page has no UI layer, so an old index.html still plays.
+const hudCtx = uiCtx || ctx;
+
+function fit() { fitCanvas(canvas, ctx, ui); }
 
 // Launching the demo is launching a run: the same reset, the same states.
 // It starts on the furthest hull reached, because that is the hull worth
@@ -103,10 +114,46 @@ const game = makeGame(mod ? { seed: mod.seed, name: mod.name.toUpperCase() } : n
 setTune(LEVELS[0].tune);
 let paused = false;
 
+// Brings the hangar in line with whichever account is now in play.
+//
+// Two copies, and either can be ahead: this browser may have banked
+// coins offline, and the account may have been played on another
+// machine. mergeHangars takes the better of each, which is the only
+// rule that cannot take something away from a pilot who earned it.
+//
+// Uploading is switched OFF for the duration and only switched back on
+// once the merge has landed. That ordering is the whole safety
+// property: with the hook live, any save — a purchase, a pagehide —
+// would PUT this browser's hangar over the account before anyone had
+// looked at what the account held.
+//
+// It runs on every identity change, not just at page load. The first
+// version ran once at startup, which left signing in afterwards doing
+// exactly the thing the ordering exists to prevent.
+async function syncHangar() {
+  setHangarSync(null);
+  try {
+    const remote = await fetchHangar();
+    if (!remote) return;                     // signed out, or offline
+    applyHangar(game, mergeHangars(
+      { coins: game.coins, bars: game.bars, mods: game.mods }, remote,
+    ));
+    saveHangar(game);                        // local copy, hook still off
+    await pushHangar({ coins: game.coins, bars: game.bars, mods: game.mods });
+  } finally {
+    setHangarSync(pushHangar);
+  }
+}
+
+// Every moment the pilot this browser acts as can change: a sign-in, a
+// sign-up, a fresh anonymous registration, the backend coming back.
+setIdentityHook(syncHangar);
+
 // Backend comes up behind the game, never in front of it.
 initNet().then((ok) => {
-  if (!ok) console.info('backend unreachable — scores stay local');
-  else syncBest(game);   // adopt the account's best if it beats this browser's
+  if (!ok) { console.info('backend unreachable — scores stay local'); return; }
+  syncBest(game);     // adopt the account's best if it beats this browser's
+  syncHangar();
 });
 
 // Keep the title screen's board and pilot count fresh while nobody is flying,
@@ -115,7 +162,10 @@ initNet().then((ok) => {
 setInterval(() => {
   if (game.state === 'play' || game.state === 'dying') return;
   if (!netState().online) {
-    initNet().then((ok) => { if (ok) syncBest(game); });
+    // A backend that comes back has to be treated as an identity
+    // arriving, not just a board to refresh: nothing has reconciled
+    // the hangar yet and the upload hook is not wired.
+    initNet().then((ok) => { if (ok) { syncBest(game); syncHangar(); } });
     return;
   }
   refreshTop(mod ? mod.id : '');
@@ -297,13 +347,20 @@ startLoop(
     if (setStatic(isOverlay())) fit();
     applyTransform(ctx);   // a resize resets context state; re-establish it
     drawWorld(ctx, game);
-    drawHud(ctx, game, { muted: isMuted(), audio: ready() });
-    if (demoOn) drawDemoBadge(ctx, game);
-    if (shopOpen) drawShop(ctx, game, shopSel, shopNote);
-    else if (helpOpen) drawHelp(ctx, helpPage);
-    else if (settingsOpen) drawSettings(ctx, game, settingsSel, { wipeArmed, wipeNote });
-    else if (game.quitting) drawQuitPrompt(ctx, game);
-    else if (paused) drawPaused(ctx);
+
+    // Everything from here up is text, and text is what the adaptive
+    // scale must never touch.
+    if (hudCtx !== ctx) {
+      applyUiTransform(hudCtx);
+      hudCtx.clearRect(0, 0, VIEW_W, VIEW_H);
+    }
+    drawHud(hudCtx, game, { muted: isMuted(), audio: ready() });
+    if (demoOn) drawDemoBadge(hudCtx, game);
+    if (shopOpen) drawShop(hudCtx, game, shopSel, shopNote);
+    else if (helpOpen) drawHelp(hudCtx, helpPage);
+    else if (settingsOpen) drawSettings(hudCtx, game, settingsSel, { wipeArmed, wipeNote });
+    else if (game.quitting) drawQuitPrompt(hudCtx, game);
+    else if (paused) drawPaused(hudCtx);
     // Frame-to-frame interval, not draw time: canvas2d records lazily, so
     // the real cost of a resolution shows up as a longer frame, not a longer
     // draw call.

@@ -8,28 +8,13 @@
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#06080c">
 <meta name="description" content="A side-scrolling shoot 'em up: skim the hull of a dreadnought, break its guns, and fly it back.">
-<style>
-  :root { color-scheme: dark; }
-  html, body { margin: 0; height: 100%; background: #05070a; overflow: hidden; }
-  body {
-    display: grid; place-items: center;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
-  canvas {
-    display: block;
-    image-rendering: auto;
-    background: #05070a;
-    box-shadow: 0 0 0 1px #1b212b, 0 24px 80px -20px #000;
-  }
-  #hint {
-    position: fixed; bottom: 10px; left: 0; right: 0;
-    text-align: center; color: #39424e; font-size: 11px; letter-spacing: .09em;
-    pointer-events: none; user-select: none;
-  }
-</style>
+<link rel="stylesheet" href="/src/game.css">
 </head>
 <body>
-  <canvas id="game" width="640" height="384"></canvas>
+  <div id="stack">
+    <canvas id="game" width="640" height="384"></canvas>
+    <canvas id="ui" width="640" height="384"></canvas>
+  </div>
   <div id="hint">ARROWS / WASD MOVE &nbsp;·&nbsp; Z / SPACE FIRE &nbsp;·&nbsp; ENTER START &nbsp;·&nbsp; P PAUSE &nbsp;·&nbsp; M MUTE &nbsp;·&nbsp; R RESTART</div>
   <script type="module" src="./src/main.js"></script>
 </body>

@@ -432,10 +432,11 @@ function drawPart(ctx, b, part) {
 // one reads as the first turning up again under a new name — reported
 // from play as "all bosses occur twice".
 //
-// A tier does not redraw the ship. It refits it: a livery wash over the
-// whole hull, heavier rim plating, and hardware that changes the
-// outline. Same class, visibly a different vessel, and the eight bodies
-// below did not have to be written four times.
+// A tier does not redraw the ship. It refits it: ribs that break the
+// outline, bands of plating bolted across the hull, and a livery colour
+// on both. Same class, visibly a different vessel, and the eight bodies
+// below did not have to be written four times. The colour is drawn, not
+// composited — see the note on the table below.
 
 // No tinting pass. The obvious implementation washes the livery over the
 // hull with source-atop, which clips to pixels already drawn — and the
@@ -463,6 +464,7 @@ function tierSpines(ctx, b, tier) {
   // edge to start from.
   const root = 18;
   const reach = 52 + n * 4;
+  const wasCap = ctx.lineCap;
   ctx.strokeStyle = tier.rim;
   ctx.lineWidth = 3;
   ctx.lineCap = 'round';
@@ -477,7 +479,7 @@ function tierSpines(ctx, b, tier) {
     ctx.lineTo(x + lean, reach);
   }
   ctx.stroke();
-  ctx.lineCap = 'butt';
+  ctx.lineCap = wasCap;
 
   // Caps, so the ribs end in something rather than fraying out.
   ctx.fillStyle = tier.lamp;
@@ -501,11 +503,18 @@ function tierBands(ctx, b, tier) {
     rivets(ctx, x, -36, x, 36, 5, tier.lamp);
   }
   // One lamp, pulsing, so the tier is legible even on a dark hull.
+  //
+  // Multiplied into whatever alpha the caller had, and put back to that
+  // rather than to 1. drawBoss dims the whole boss while it is coming
+  // apart, and assigning 1 here threw that away: the plating stopped
+  // fading and drawBossParts, which runs next, drew the surviving
+  // sections at full strength over a flickering hull.
+  const was = ctx.globalAlpha;
   const pulse = 0.55 + 0.45 * Math.sin(b.t * 3 + tier.spines);
-  ctx.globalAlpha = pulse;
+  ctx.globalAlpha = was * pulse;
   ctx.fillStyle = tier.lamp;
   ctx.fillRect(-4, -52, 8, 5);
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = was;
 }
 
 export function drawBossBody(ctx, b) {

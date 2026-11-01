@@ -9,6 +9,25 @@
 // drawn into 640x360 and then blown up by CSS.
 //
 // The cap exists because the hull texture is cached per scale: see level.js.
+//
+// Two scales, not one. The adaptive cap below protects the frame rate by
+// rendering fewer pixels, and it used to do that by shrinking the whole
+// backing store — which took the HUD down with it. On a wide window at
+// cap 1 the canvas was 640px across and the browser stretched it to
+// fill, so the score, the clock and every label went to mush the moment
+// gameplay started and came back sharp in the menus. Reported from play
+// as "the text in the HUD gets blocky".
+//
+// So there are two canvases, stacked by CSS. The world canvas carries
+// the adaptive scale and the compositor stretches it to the box, which
+// costs nothing. The UI canvas sits on top at the window's own scale
+// and carries the HUD and every screen made of text.
+//
+// S.scale is the world's and S.uiScale is the window's; renderScale()
+// and hullScale() both mean the world. An earlier draft of this comment
+// described drawing the world into an offscreen buffer and blitting it
+// onto a single full-scale canvas — that was tried, it halved the frame
+// rate, and it is not what the code below does.
 
 import { VIEW_W, VIEW_H } from './config.js';
 
@@ -23,6 +42,9 @@ export const MAX_SCALE = 4;
 // the scale. It is rendered at this cap and smoothly upscaled; text, sprites
 // and the HUD still get the full scale, which is where blockiness shows.
 export const HULL_MAX_SCALE = 2;
+// Keyed off the world scale, never the UI's: the hull is drawn on the
+// world canvas, and caching it at the sharper UI scale would spend
+// memory on pixels that are never shown.
 export const hullScale = () => Math.min(S.scale, HULL_MAX_SCALE);
 
 const S = {
@@ -35,6 +57,7 @@ const S = {
   budget: [],
   cooldown: 0,
   static: false,       // a menu is up: see setStatic
+  uiScale: 1,          // the UI layer, always the window's own scale
 };
 
 // --- static mode
@@ -58,8 +81,13 @@ export function setStatic(on) {
   return true;
 }
 
-const targetScale = () => (S.static ? S.wanted : Math.min(S.wanted, S.cap));
+// What the world canvas is rendered at. A menu is a dim rect and some
+// text over a frozen world and needs no protecting, so static mode
+// spends the full scale there too.
+export const worldScale = () => (S.static ? S.wanted : Math.min(S.wanted, S.cap));
 
+// renderScale is the world canvas's scale: it is what every gameplay
+// caller means by "the scale", and the hull cache is keyed on it.
 export const renderScale = () => S.scale;
 // Bumped whenever the scale changes, so caches keyed on it can invalidate.
 export const scaleGeneration = () => S.generation;
@@ -75,7 +103,7 @@ export function computeScale(cssW, cssH, dpr = window.devicePixelRatio || 1) {
 }
 
 // Sizes the canvas and returns true if the scale actually changed.
-export function fitCanvas(canvas, ctx) {
+export function fitCanvas(canvas, ctx, ui = null) {
   const availW = window.innerWidth;
   const availH = window.innerHeight - 40;
   const fit = Math.min(availW / VIEW_W, availH / VIEW_H);
@@ -85,9 +113,10 @@ export function fitCanvas(canvas, ctx) {
   const scale = computeScale(cssW, cssH);
 
   S.wanted = scale;
-  const capped = targetScale();
-  const changed = capped !== S.scale;
-  S.scale = capped;
+  const world = worldScale();
+  const changed = world !== S.scale || scale !== S.uiScale;
+  S.scale = world;
+  S.uiScale = scale;
   S.cssW = cssW;
   S.cssH = cssH;
   if (changed) S.generation++;
@@ -97,10 +126,40 @@ export function fitCanvas(canvas, ctx) {
   canvas.style.width = cssW + 'px';
   canvas.style.height = cssH + 'px';
 
+  // The UI layer always gets the window. It is stacked on the world
+  // canvas by CSS, so it has to match the same box exactly.
+  if (ui) {
+    ui.canvas.width = Math.round(VIEW_W * S.uiScale);
+    ui.canvas.height = Math.round(VIEW_H * S.uiScale);
+    ui.canvas.style.width = cssW + 'px';
+    ui.canvas.style.height = cssH + 'px';
+    applyUiTransform(ui.ctx);
+  }
+
   // Resizing a canvas resets its context state, so re-apply everything.
   applyTransform(ctx);
   return changed;
 }
+
+// --- the UI layer
+//
+// The world canvas carries the adaptive scale and is stretched to the
+// box by CSS, which the compositor does for nothing. The UI canvas sits
+// on top at the window's own resolution, so the HUD and the menus are
+// rasterised at display resolution however hard the world is working.
+//
+// The first attempt at this used one canvas and a software upscale of
+// an offscreen world buffer. It was correct and it halved the frame
+// rate: 48fps to 24fps in the smoke test. Letting the compositor do the
+// stretch is the whole point.
+
+export function applyUiTransform(ctx) {
+  ctx.setTransform(S.uiScale, 0, 0, S.uiScale, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+}
+
+export const uiScale = () => S.uiScale;
 
 // Puts the context back into logical coordinates. Must be called after any
 // canvas resize, and at the top of each frame.

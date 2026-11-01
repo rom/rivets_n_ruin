@@ -166,15 +166,35 @@ test('every tier of every ship draws without throwing', () => {
 // already on the canvas — and the world canvas is opaque, so that tints
 // a 300x300 block of dreadnought instead of the boss. Caught by looking
 // at the compositing before it was ever rendered.
-test('drawing a boss never changes the composite mode it was handed', () => {
-  const ctx = stubCtx();
-  ctx.globalCompositeOperation = 'source-over';
+test('drawing a boss gives back the context it was handed', () => {
+  // The alpha half of this used to assert === 1 with the context
+  // starting at 1, which the bug it was meant to catch satisfies
+  // exactly: tierBands assigned 1 rather than restoring. Starting from
+  // a dimmed context is what makes the assertion mean anything —
+  // drawBoss dims the whole boss while it comes apart, and that is the
+  // state in which the plating stopped fading.
   for (let t = 0; t < 4; t++) {
-    drawBossBody(ctx, { kind: 'warden', tier: t, t: 1, flash: 0, dead: false,
-      hp: 1, maxHp: 1, parts: [], spec: {}, phase: 0 });
-    assert.equal(ctx.globalCompositeOperation, 'source-over',
-      `tier ${t} left the context in ${ctx.globalCompositeOperation} mode`);
-    assert.equal(ctx.globalAlpha, 1, `tier ${t} left globalAlpha at ${ctx.globalAlpha}`);
+    for (const alpha of [1, 0.5]) {
+      const ctx = stubCtx();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = alpha;
+      ctx.lineCap = 'square';
+      drawBossBody(ctx, { kind: 'warden', tier: t, t: 1, flash: 0, dead: false,
+        hp: 1, maxHp: 1, parts: [], spec: {}, phase: 0 });
+      assert.equal(ctx.globalCompositeOperation, 'source-over',
+        `tier ${t} left the context in ${ctx.globalCompositeOperation} mode`);
+      assert.equal(ctx.globalAlpha, alpha,
+        `tier ${t} left globalAlpha at ${ctx.globalAlpha}, not the ${alpha} it was given`);
+      assert.equal(ctx.lineCap, 'square',
+        `tier ${t} left lineCap at ${ctx.lineCap}`);
+      // Nothing may paint brighter than the alpha it was handed. The
+      // refit lamp pulses, and multiplying the pulse in is the only
+      // way it can pulse without escaping a dimmed boss.
+      const tooBright = ctx.drawn.filter((a) => a > alpha + 1e-9);
+      assert.equal(tooBright.length, 0,
+        `tier ${t} painted ${tooBright.length} time(s) at up to alpha `
+        + `${Math.max(0, ...tooBright)} inside a context dimmed to ${alpha}`);
+    }
   }
 });
 
@@ -182,11 +202,16 @@ test('drawing a boss never changes the composite mode it was handed', () => {
 function stubCtx() {
   const noop = () => {};
   const st = { globalCompositeOperation: 'source-over', globalAlpha: 1, fillStyle: '',
-    strokeStyle: '', lineWidth: 1, lineCap: 'butt', font: '', textAlign: '' };
+    strokeStyle: '', lineWidth: 1, lineCap: 'butt', font: '', textAlign: '',
+    // The alpha in force at each paint, so a test can check what was
+    // actually drawn and not merely what was left behind.
+    drawn: [] };
   const stack = [];
   return new Proxy(st, {
     get(t, k) {
       if (k in t) return t[k];
+      if (k === 'fillRect') return () => { t.drawn.push(t.globalAlpha); };
+      if (k === 'stroke') return () => { t.drawn.push(t.globalAlpha); };
       if (k === 'save') return () => stack.push({ ...t });
       if (k === 'restore') return () => Object.assign(t, stack.pop() || {});
       if (k === 'createLinearGradient' || k === 'createRadialGradient') {
