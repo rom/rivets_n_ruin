@@ -14,11 +14,12 @@ import {
   drawDemoBadge,
 } from './hud.js';
 import { rows as shopRows, buy as shopBuy, applyMods } from './shop.js';
-import { saveHangar, clearHangar } from './hangar.js';
+import { saveHangar, clearHangar, setHangarSync, mergeHangars, applyHangar } from './hangar.js';
 import { unlock, toggleMute, isMuted, ready } from './audio.js';
 import { startMusic, stopMusic, musicRunning } from './music.js';
 import { sfxUi } from './sfx.js';
-import { initNet, rename, refreshTop, refreshRuns, refreshPresence, netState, toggleBoard } from './net.js';
+import { initNet, rename, refreshTop, refreshRuns, refreshPresence, netState, toggleBoard,
+  fetchHangar, pushHangar } from './net.js';
 import { nextTune, tuneName, setTune, TUNES } from './music.js';
 import * as settings from './settings.js';
 import { applySettings } from './audio.js';
@@ -113,10 +114,30 @@ const game = makeGame(mod ? { seed: mod.seed, name: mod.name.toUpperCase() } : n
 setTune(LEVELS[0].tune);
 let paused = false;
 
+// Brings the hangar in line with the account.
+//
+// Two copies, and either can be ahead: this browser may have banked
+// coins offline, and the account may have been played on another
+// machine. mergeHangars takes the better of each, which is the only
+// rule that cannot take something away from a pilot who earned it.
+async function syncHangar() {
+  const remote = await fetchHangar();
+  if (!remote) return;                       // signed out, or offline
+  const merged = mergeHangars(
+    { coins: game.coins, bars: game.bars, mods: game.mods }, remote,
+  );
+  applyHangar(game, merged);
+  saveHangar(game);                          // writes both copies back
+}
+
 // Backend comes up behind the game, never in front of it.
 initNet().then((ok) => {
-  if (!ok) console.info('backend unreachable — scores stay local');
-  else syncBest(game);   // adopt the account's best if it beats this browser's
+  if (!ok) { console.info('backend unreachable — scores stay local'); return; }
+  syncBest(game);     // adopt the account's best if it beats this browser's
+  // Only start uploading once the merge has happened. Wiring the hook
+  // first would let an ordinary save push this browser's empty hangar
+  // over an account that had things in it.
+  syncHangar().then(() => setHangarSync(pushHangar));
 });
 
 // Keep the title screen's board and pilot count fresh while nobody is flying,

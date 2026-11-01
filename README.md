@@ -1096,6 +1096,38 @@ place was written straight back when the tab closed — found by doing
 exactly that in a browser, and now `clearHangar` takes the game so the two
 cannot get out of step.
 
+### What survives a closed browser
+
+localStorage survives a tab. It does not survive a new browser, a cleared
+cache or a second machine — which is most of what an account is for. An
+account that preserves nothing is a username.
+
+Signed in, the hangar is held against the account as well:
+`GET /api/me/hangar` and `PUT /api/me/hangar`. The browser copy is still
+written first and the upload is never awaited, because localStorage is
+the copy that has to be there when the tab closes and the backend is the
+copy that makes a second machine work. Reversing them would mean a
+dropped connection could cost a purchase.
+
+At sign-in the two are reconciled by **taking the better of each**.
+There is no clock on the client worth trusting, so no attempt is made to
+merge by time. The failure that rule allows is a pilot who played
+offline on two machines ending up slightly richer than they should be in
+a single-player shop; the failure it avoids is losing something they
+paid for. Between those two there is no contest.
+
+The upload is wired only *after* the first merge has completed. Doing it
+the other way round would let an ordinary save push a fresh browser's
+empty hangar over an account that had things in it — which is the one
+way this feature could destroy exactly what it exists to protect.
+
+The server clamps everything on the way in: balances are bounded, mod
+levels are bounded, and the number of mod ids is capped. The hangar is
+client-authoritative, exactly as the localStorage copy was — a pilot who
+forges a balance buys themselves a better ship, which affects their own
+run and nothing else, and submitted scores go through the run validator
+regardless. The caps are there so a corrupt value cannot reach the HUD.
+
 ### Starting hull
 
 `START HULL` begins a run on any hull you have reached — the same choice
@@ -1382,6 +1414,8 @@ reports each pilot's progress along the hull.
 | `POST` | `/api/auth/login` | — | log in with name and password; rotates the token |
 | `GET` | `/api/players/{id}` | — | profile and recent runs |
 | `GET` | `/api/me` | yes | your own profile |
+| `GET` | `/api/me/hangar` | yes | coins, bars and bought mods |
+| `PUT` | `/api/me/hangar` | yes | bank them against the account |
 | `POST` | `/api/scores` | yes | submit a run; returns your new rank |
 | `POST` | `/api/runs/start` | yes | open a run; returns the id and the secret that signs its submission |
 | `GET` | `/api/scores/top` | — | top pilots — `?mod=`, `?window=day\|week\|all`, `?limit=` |
