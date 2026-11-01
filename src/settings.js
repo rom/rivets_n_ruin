@@ -41,7 +41,7 @@ export const DEFS = [
     def: 100, min: 50, max: 100, step: 10,
     help: 'Slows everything evenly. More thinking time; the clock slows with it.' },
   { id: 'reduceFlash', group: 'ACCESSIBILITY', label: 'REDUCE FLASHING', kind: 'bool', def: false,
-    help: 'Damps the full-screen flashes on hits and big explosions.' },
+    help: 'Damps the full-screen flashes, and stops the score pulsing.' },
   { id: 'contrast', group: 'ACCESSIBILITY', label: 'HIGH CONTRAST', kind: 'bool', def: false,
     help: 'Outlines incoming fire and hazards, and brightens the HUD.' },
   { id: 'aimLine', group: 'ACCESSIBILITY', label: 'FIRING LINE', kind: 'bool', def: false,
