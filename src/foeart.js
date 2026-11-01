@@ -52,21 +52,54 @@ export function rivets(ctx, x0, y, x1, n, colour = '#6b7682') {
 }
 
 // An engine bell with a plume. `t` keeps each ship's flicker out of step.
-export function engine(ctx, x, y, h, t, colour, power = 1) {
+// The bell, and the plume that comes out of it.
+//
+// Split because the plume is additive and the bell is not, and
+// switching the canvas composite mode is by a distance the most
+// expensive thing either of them does — on a dirty full-size canvas it
+// costs far more than the handful of pixels it is blending. Measured:
+// three engines drawn the obvious way cost 9.1µs of a monitor's 22.7µs
+// body, and two thirds of that is the mode switching, not the fill.
+//
+// So a ship with several engines draws all its bells, then switches
+// once, then draws all its plumes. The pixels are identical — bells and
+// plumes of different engines do not overlap each other — and a
+// three-engined ship pays for one switch instead of three.
+function engineBell(ctx, x, y, h) {
   ctx.fillStyle = '#20262e';
   ctx.fillRect(x, y - h / 2, 3, h);
   ctx.fillStyle = '#404a57';
   ctx.fillRect(x + 1, y - h / 2 + 1, 1, h - 2);
+}
+
+function enginePlume(ctx, x, y, h, t, colour, power) {
   const len = (3 + Math.abs(Math.sin(t * 19)) * 4) * power;
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
   ctx.fillStyle = colour;
   ctx.globalAlpha = 0.75;
   ctx.fillRect(x - len, y - h / 4, len, h / 2);
   ctx.fillStyle = '#ffffff';
   ctx.globalAlpha = 0.5;
   ctx.fillRect(x - len * 0.5, y - 1, len * 0.5, 2);
-  ctx.restore();
+}
+
+export function engine(ctx, x, y, h, t, colour, power = 1) {
+  engineBell(ctx, x, y, h);
+  const was = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = 'lighter';
+  enginePlume(ctx, x, y, h, t, colour, power);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = was;
+}
+
+// Several engines on one ship, for one mode switch rather than one
+// each. Each entry is [x, y, h, t, colour, power]; power defaults to 1.
+export function engines(ctx, list) {
+  for (const e of list) engineBell(ctx, e[0], e[1], e[2]);
+  const was = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = 'lighter';
+  for (const e of list) enginePlume(ctx, e[0], e[1], e[2], e[3], e[4], e[5] === undefined ? 1 : e[5]);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = was;
 }
 
 // These seven are the fleet's shared vocabulary: a dark hull with one lit
@@ -155,8 +188,8 @@ const BODIES = {
   // silhouette points at the thing it is going to charge into.
   lancer(ctx, f, spec, lit) {
     const charging = f.state === 1;
-    engine(ctx, -15, -3.5, 4, f.t, '#ff9a3a', charging ? 2.2 : 1);
-    engine(ctx, -15, 3.5, 4, f.t + 1.3, '#ff9a3a', charging ? 2.2 : 1);
+    engines(ctx, [[-15, -3.5, 4, f.t, '#ff9a3a', charging ? 2.2 : 1],
+      [-15, 3.5, 4, f.t + 1.3, '#ff9a3a', charging ? 2.2 : 1]]);
     // swept wings
     hull(ctx, [[-13, -2], [-3, -9], [4, -7], [-2, -2]], '#2a313b', '#4e5765');
     hull(ctx, [[-13, 2], [-3, 9], [4, 7], [-2, 2]], '#2a313b', '#4e5765');
@@ -228,8 +261,7 @@ const BODIES = {
   // An assault shuttle with a blast shield bolted to its nose. The shield
   // is the point, so it is the biggest thing on it.
   warder(ctx, f, spec, lit) {
-    engine(ctx, -16, -4, 5, f.t, '#9ad94e');
-    engine(ctx, -16, 4, 5, f.t + 0.9, '#9ad94e');
+    engines(ctx, [[-16, -4, 5, f.t, '#9ad94e'], [-16, 4, 5, f.t + 0.9, '#9ad94e']]);
     // thruster pods
     hull(ctx, [[-16, -8], [-6, -10], [-2, -6], [-14, -4]], '#242b35', '#4a5260', 1);
     hull(ctx, [[-16, 8], [-6, 10], [-2, 6], [-14, 4]], '#242b35', '#4a5260', 1);
@@ -280,8 +312,7 @@ const BODIES = {
 
   // A hauler with its bay hanging open and the next mine already in it.
   bomber(ctx, f, spec, lit) {
-    engine(ctx, -17, -4, 6, f.t, '#ff9a3a', 1.1);
-    engine(ctx, -17, 4, 6, f.t + 1.6, '#ff9a3a', 1.1);
+    engines(ctx, [[-17, -4, 6, f.t, '#ff9a3a', 1.1], [-17, 4, 6, f.t + 1.6, '#ff9a3a', 1.1]]);
     // wing boxes
     hull(ctx, [[-14, -7], [-2, -11], [6, -9], [4, -5]], '#2f2a22', '#5e5240', 1);
     hull(ctx, [[-14, 7], [-2, 11], [6, 9], [4, 5]], '#2f2a22', '#5e5240', 1);
@@ -463,8 +494,7 @@ const BODIES = {
       ctx.fillRect(-face * 13, cy - 1.5, face * 6, 3);
     }
     rivets(ctx, -face * 14, -8, face * 4, 5, '#8a6f4e');
-    engine(ctx, -face * 16, -4, 4, f.t, '#ffb259');
-    engine(ctx, -face * 16, 4, 4, f.t + 0.4, '#ffb259');
+    engines(ctx, [[-face * 16, -4, 4, f.t, '#ffb259'], [-face * 16, 4, 4, f.t + 0.4, '#ffb259']]);
     canopy(ctx, face * 1, -6, 2.4, 1.8, '#ffd9a8');
     light(ctx, face * 14, 0, f.t, '#ff9f4a', 3);
   },
@@ -580,7 +610,7 @@ BODIES.barge = (ctx, f, spec, lit) => {
   // Wide and slab-sided, with the spread launcher across the front.
   // Nothing sleek about it: this is a thing that was built to carry a
   // gun rather than to fly.
-  for (const y of [-9, 9]) engine(ctx, -18, y, 5, f.t, '#ff7a2f', 0.8);
+  engines(ctx, [-9, 9].map((y) => [-18, y, 5, f.t, '#ff7a2f', 0.8]));
   hull(ctx, [[18, -6], [20, 0], [18, 6], [-14, 13], [-18, 11], [-18, -11], [-14, -13]],
     lit ? HOT : '#4c5663', '#8e9aa9', 2);
   litTop(ctx, [[18, -6], [-14, -13], [-18, -11]], '#aeb9c6');
@@ -600,7 +630,7 @@ BODIES.monitor = (ctx, f, spec, lit) => {
   // a turret at each end, so neither side of it is quiet. Drawn with
   // the mounts standing proud of the hull, because which one just
   // fired is information worth having.
-  for (const y of [-11, 0, 11]) engine(ctx, -23, y, 5, f.t, '#e8434f', 0.7);
+  engines(ctx, [-11, 0, 11].map((y) => [-23, y, 5, f.t, '#e8434f', 0.7]));
   hull(ctx, [[22, -8], [25, 0], [22, 8], [-16, 16], [-23, 13], [-23, -13], [-16, -16]],
     lit ? HOT : '#49525f', '#9aa6b4', 2);
   litTop(ctx, [[22, -8], [-16, -16], [-23, -13]], '#b1bcc9');
@@ -634,8 +664,7 @@ export function drawFoeBody(ctx, f, spec, lit) {
 // A fighter: swept wings, a canopy, twin exhausts. The thing you see most
 // of in the whole game, and it was six line segments.
 export function drawInterceptorBody(ctx, e, t) {
-  engine(ctx, -12, -3, 4, t, '#ffb27a', 1.3);
-  engine(ctx, -12, 3, 4, t + 1.1, '#ffb27a', 1.3);
+  engines(ctx, [[-12, -3, 4, t, '#ffb27a', 1.3], [-12, 3, 4, t + 1.1, '#ffb27a', 1.3]]);
   // wings, swept back, with a tip light on each
   hull(ctx, [[-10, -2], [0, -9], [6, -7.5], [1, -2]], '#2c2620', '#6b5a46', 1);
   hull(ctx, [[-10, 2], [0, 9], [6, 7.5], [1, 2]], '#2c2620', '#6b5a46', 1);

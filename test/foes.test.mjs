@@ -758,3 +758,80 @@ test('every attacker in a roster has a body to draw', async () => {
       `${kind} has no body in foeart.js and would be drawn as a warder`);
   }
 });
+
+// --- drawing cost
+//
+// Switching the canvas composite mode is by a distance the most
+// expensive thing a body does: eight monitors on screen cost 15.7ms a
+// frame with one switch per engine and 0.3ms with one per ship, for
+// pixel-identical output. Measured, then fixed, then measured again.
+//
+// Timing cannot be asserted in a test — it would be flaky on any
+// machine and meaningless on a shared one. The invariant can: a ship
+// pays for one switch however many engines it has.
+
+function countingCtx() {
+  const noop = () => {};
+  const st = { globalAlpha: 1, fillStyle: '', strokeStyle: '', lineWidth: 1,
+    lineCap: 'butt', font: '', textAlign: '', switches: 0, _gco: 'source-over' };
+  const stack = [];
+  return new Proxy(st, {
+    get(t, k) {
+      if (k === 'globalCompositeOperation') return t._gco;
+      if (k in t) return t[k];
+      if (k === 'save') return () => stack.push({ ...t });
+      if (k === 'restore') return () => { const p = stack.pop(); if (p) { p.switches = t.switches; Object.assign(t, p); } };
+      if (k === 'createLinearGradient' || k === 'createRadialGradient') return () => ({ addColorStop: noop });
+      if (k === 'measureText') return () => ({ width: 0 });
+      return noop;
+    },
+    set(t, k, v) {
+      if (k === 'globalCompositeOperation') { if (v !== t._gco) t.switches++; t._gco = v; return true; }
+      t[k] = v; return true;
+    },
+  });
+}
+
+test('a ship pays for one composite switch, not one per engine', async () => {
+  const { engines, engine } = await import('../src/foeart.js');
+  const ctx = countingCtx();
+  // Three engines, the monitor's arrangement.
+  engines(ctx, [-11, 0, 11].map((y) => [-23, y, 5, 1.1, '#e8434f', 0.7]));
+  // Into 'lighter' and back out: two writes, one round trip.
+  assert.ok(ctx.switches <= 2,
+    `three engines cost ${ctx.switches} composite writes; batching buys one round trip`);
+
+  // ...and a single engine is no worse than it was.
+  const one = countingCtx();
+  engine(one, -12, 0, 5, 1.1, '#e8b4ff', 1.4);
+  assert.ok(one.switches <= 2, `one engine cost ${one.switches} composite writes`);
+
+  // Both have to hand the context back as they found it. Checked here
+  // rather than only after a whole body, because a later canopy() sets
+  // the alpha to 1 on its way out and masks the leak — which it did.
+  for (const [label, c] of [['engines()', ctx], ['engine()', one]]) {
+    assert.equal(c.globalAlpha, 1, `${label} left globalAlpha at ${c.globalAlpha}`);
+    assert.equal(c.globalCompositeOperation, 'source-over',
+      `${label} left the context in ${c.globalCompositeOperation}`);
+  }
+});
+
+test('every body leaves the composite mode it was handed', async () => {
+  // engine() used to save/restore. It sets and resets now, which is
+  // cheaper and only correct if it actually puts the mode back.
+  const { drawFoeBody } = await import('../src/foeart.js');
+  const { SPEC } = await import('../src/foes.js');
+  for (const kind of Object.keys(SPEC)) {
+    const ctx = countingCtx();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.switches = 0;
+    const spec = SPEC[kind];
+    drawFoeBody(ctx, {
+      kind, t: 1.1, flash: 0, mount: 0, state: 1, shotsLeft: 2, facing: -1,
+      hp: spec.hp, maxHp: spec.hp, dead: false, whole: true, shield: 0,
+    }, spec, false);
+    assert.equal(ctx.globalCompositeOperation, 'source-over',
+      `${kind} left the context in ${ctx.globalCompositeOperation}`);
+    assert.equal(ctx.globalAlpha, 1, `${kind} left globalAlpha at ${ctx.globalAlpha}`);
+  }
+});

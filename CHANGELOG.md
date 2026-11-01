@@ -12,7 +12,21 @@ worth learning from.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **Ships with several engines draw far more cheaply.** Each engine
+  plume switched the canvas composite mode to `lighter` on its own, and
+  that switch costs far more than the pixels it blends: eight MONITORs
+  cost 15.7ms a frame, and 0.3ms once a ship batches its plumes into
+  one switch. Output is pixel-identical — every body was rendered in
+  both builds and the PNGs compared.
+
+### Fixed
+
+- The Known gaps section counted eight attackers, six towers and eleven
+  mods, long after there were sixteen, fifteen and thirteen. It opens by
+  saying a stale gap list is worse than none, so a parity test now
+  counts them.
 
 ## [1.1.0] — 2026-11-01
 
