@@ -249,7 +249,22 @@ function resolveHull(p, game) {
       impact(p, game, Math.abs(p.vx), right ? o.x + o.w : o.x, p.y, right ? 1 : -1, 0);
       p.vx = -p.vx * 0.25;
     } else {
-      const downward = pushD < pushU;
+      // The shortest way out of a block is normally the right way out, but
+      // a block anchored to a girder is a special case: when the ship is
+      // deep inside one, the short side is the girder, and resolving that
+      // way puts it through the rim and outside the playfield.
+      //
+      // It could not happen while every obstacle was static — you are
+      // pushed off a wall long before you are inside it — but a press jaw
+      // closes onto the ship, so being deep inside one is the normal case
+      // rather than the impossible one. Caught by the press test: a ship
+      // held under a closing jaw came out at y=11.5, eight pixels above
+      // the hull.
+      let downward = pushD < pushU;
+      const upFits = p.y - pushU - hh >= FIELD_TOP;
+      const downFits = p.y + pushD + hh <= FIELD_BOT;
+      if (downward && !downFits && upFits) downward = false;
+      else if (!downward && !upFits && downFits) downward = true;
       p.y += downward ? pushD : -pushU;
       impact(p, game, Math.abs(p.vy), p.x, downward ? o.y + o.h : o.y, 0, downward ? 1 : -1);
       p.vy = -p.vy * 0.25;

@@ -3,7 +3,7 @@ import {
   FIELD_TOP, FIELD_BOT, clamp, LANCE} from './config.js';
 import { diff, award, hurt } from './score.js';
 import { get as setting, set as setSetting, onChange as onSetting } from './settings.js';
-import { buildLevel, obstaclesNear } from './level.js';
+import { buildLevel, obstaclesNear, updateMovers } from './level.js';
 import { updateGates, hitGate, gateHit, liveGates } from './gates.js';
 import { makeBoss, updateBoss, hitBoss, bossBeaten, arenaLeft } from './boss.js';
 import { makeCamera, updateCamera, kick } from './camera.js';
@@ -526,6 +526,10 @@ export function update(game, dt) {
   game.runTime += dt;
   const p = game.player;
 
+  // The jaws move first. A jaw closing onto the ship has to be resolved by
+  // the player's own push-out in the same frame, or the ship spends a frame
+  // inside solid steel and comes out the wrong side of it.
+  updateMovers(game.level, game.time);
   updatePlayer(p, game, dt);
   // Gates run immediately after the ship moves, so a beam stops it in the
   // same frame rather than letting it sit a frame inside the wall.

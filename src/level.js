@@ -14,6 +14,52 @@ const BUCKET = 256;
 // are bit-for-bit what they were before this argument existed.
 export const mixSeed = (hullSeed, runSeed) => (hullSeed ^ runSeed) >>> 0;
 
+// ------------------------------------------------------------------ the press
+//
+// The one pattern whose geometry moves. Everything else on a hull is
+// somewhere to not be; a press is a rhythm to arrive on.
+//
+// A jaw pair hangs from both girders and closes toward a centre line on a
+// cycle. It never shuts: the gap bottoms out at `minGap`, which is several
+// times the ship's nine pixels of height, so a pilot caught at the wrong
+// phase is squeezed and charged a scrape rather than killed by geometry
+// they could not answer. That is the whole difference between a hazard and
+// a trap, and it is why minGap is a floor rather than a target.
+//
+// One function owns the arithmetic, because the collision box and the drawn
+// box have to be the same rectangle. Two copies of this that drifted apart
+// would be a crusher that kills you a few pixels before it touches you.
+const TAU = Math.PI * 2;
+
+export function pressRect(p, t) {
+  // Fully open at phase 0, so the base rect a hull is built with is the
+  // smallest the jaw ever gets. Anything placed by consulting the static
+  // geometry — gates especially — then sees the jaw at its least intrusive,
+  // which is the safe direction to be wrong in.
+  const k = 0.5 + 0.5 * Math.cos(TAU * (t / p.period + p.phase));
+  const gap = p.minGap + (p.openGap - p.minGap) * k;
+  if (p.side > 0) {
+    const h = p.cy - gap / 2 - FIELD_TOP;
+    return { y: FIELD_TOP, h };
+  }
+  const y = p.cy + gap / 2;
+  return { y, h: FIELD_BOT - y };
+}
+
+// Advances every jaw on the hull. Called once per frame off the hull clock,
+// before the ship moves, so a jaw that closes onto the ship is resolved by
+// the player's own push-out in the same frame instead of leaving it a frame
+// inside solid steel.
+export function updateMovers(level, t) {
+  const list = level.movers;
+  if (!list || !list.length) return;
+  for (const o of list) {
+    const r = pressRect(o.press, t);
+    o.y = r.y;
+    o.h = r.h;
+  }
+}
+
 // ---------------------------------------------------------------- generation
 
 // Obstacle patterns, chosen by a seeded roll. Every pattern leaves a
@@ -27,17 +73,17 @@ function layout(r, spec) {
   const roll = r();
   if (roll < spec.clearChance) {
     // clear run — the breathing room that makes the dense parts read
-  } else if (roll < 0.24) {
+  } else if (roll < 0.22) {
     const w = rr(r, 64, 132), h = rr(r, 52, 136);
     obstacles.push({ x: 0, y: FIELD_TOP, w, h, face: 1 });
     if (r() < 0.55) turrets.push({ x: w / 2, y: FIELD_TOP + h, dir: 1 });
     advance = w;
-  } else if (roll < 0.40) {
+  } else if (roll < 0.36) {
     const w = rr(r, 64, 132), h = rr(r, 52, 136);
     obstacles.push({ x: 0, y: FIELD_BOT - h, w, h, face: -1 });
     if (r() < 0.55) turrets.push({ x: w / 2, y: FIELD_BOT - h, dir: -1 });
     advance = w;
-  } else if (roll < 0.55) {
+  } else if (roll < 0.51) {
     // pincer — a forced corridor, the signature Uridium threat
     const gap = rr(r, 88, 118);
     const gapY = rr(r, FIELD_TOP + 44, FIELD_BOT - 44 - gap);
@@ -48,14 +94,14 @@ function layout(r, spec) {
     if (t < 0.35) turrets.push({ x: w / 2, y: gapY, dir: 1 });
     else if (t < 0.7) turrets.push({ x: w / 2, y: gapY + gap, dir: -1 });
     advance = w;
-  } else if (roll < 0.64) {
+  } else if (roll < 0.60) {
     // free-standing pillar — pass above or below
     const w = rr(r, 52, 92), h = rr(r, 66, 118);
     const y = rr(r, FIELD_TOP + 58, FIELD_BOT - 58 - h);
     obstacles.push({ x: 0, y, w, h, face: 1 });
     if (r() < 0.45) turrets.push({ x: w / 2, y, dir: 1 });
     advance = w;
-  } else if (roll < 0.72) {
+  } else if (roll < 0.68) {
     // Chicane: stubs from alternating surfaces, never overlapping in x,
     // so every slice is at least half open and the line through it is a
     // weave rather than a dodge. The first pattern that asks you to be
@@ -78,7 +124,7 @@ function layout(r, spec) {
       fromTop = !fromTop;
     }
     advance = sx;
-  } else if (roll < 0.79) {
+  } else if (roll < 0.75) {
     // Comb: a row of fingers off one surface with clear water between
     // them. Flyable straight down the open side, or threaded if you want
     // what is parked in the teeth.
@@ -100,7 +146,7 @@ function layout(r, spec) {
       });
     }
     advance = sx;
-  } else if (roll < 0.85) {
+  } else if (roll < 0.81) {
     // Two walls in series, each with one slot, at different heights. The
     // first is a pincer; the second is a pincer you have to already be
     // moving toward. Nothing else in the set makes you commit twice.
@@ -123,7 +169,7 @@ function layout(r, spec) {
     }
     if (r() < 0.5) turrets.push({ x: w / 2, y: firstY, dir: 1 });
     advance = w * 2 + between;
-  } else if (roll < 0.90) {
+  } else if (roll < 0.86) {
     // Islands: free-standing blocks at different heights, spread out. No
     // forced line at all — several work, and picking one is the whole of
     // it. The counterweight to the patterns above, which all insist.
@@ -138,7 +184,7 @@ function layout(r, spec) {
       sx += w + rr(r, 40, 76);
     }
     advance = sx;
-  } else if (roll < 0.935) {
+  } else if (roll < 0.895) {
     // A spaceport: a place rather than a pattern.
     //
     // Everything else on a hull is something to get past. This is
@@ -171,7 +217,7 @@ function layout(r, spec) {
     turrets.push({ x: w - rr(r, 40, 70), y, dir, kind: 'lander' });
     if (r() < 0.5) turrets.push({ x: w * 0.6, y, dir, kind: 'post' });
     advance = w;
-  } else if (roll < 0.96) {
+  } else if (roll < 0.92) {
     // A narrows: the corridor itself closes down for a long stretch and
     // opens again. Single obstacles are dodged; this has to be flown.
     const seg = ri(r, 5, 9);
@@ -191,6 +237,44 @@ function layout(r, spec) {
         obstacles.push({ x: sx, y: top + gap, w: segW + 1, h: FIELD_BOT - top - gap, face: -1 });
       }
       sx += segW;
+    }
+    advance = sx;
+  } else if (roll < 0.96 && spec.press) {
+    // A press: jaws that close and open on a cycle, staggered along the
+    // run so flying it is a wave rather than one piece of timing. The
+    // 4% this band costs comes out of the two single-block patterns
+    // above, which are the plainest things the generator makes; every
+    // other pattern keeps the share it had.
+    //
+    // Gated on the hull, like the towers and the attackers are. The first
+    // three are the tutorial, and a crusher on the hull that teaches you
+    // the throttle is not an escalation, it is an ambush. Hulls that field
+    // none spend this band on the stepped stack below instead.
+    const n = ri(r, 2, 4);
+    const period = rr(r, 2.2, 3.4);
+    const span = FIELD_BOT - FIELD_TOP;
+    // Bounded so both jaws are at least a tenth of the corridor tall even
+    // at full open: a zero-height block is a degenerate rectangle that
+    // every collision and drawing path then has to special-case.
+    const cy = FIELD_TOP + rr(r, 0.42, 0.58) * span;
+    const openGap = span * 0.62;
+    // Tense, and a long way clear of the ship's nine pixels: being caught
+    // mid-close should cost a scrape, not a life.
+    const minGap = rr(r, 34, 52);
+    let sx = 0;
+    for (let i = 0; i < n; i++) {
+      const w = rr(r, 30, 44);
+      // Out of step by just over a quarter turn, so a pilot who holds one
+      // altitude meets a different phase at each jaw.
+      const phase = i * 0.28;
+      for (const side of [1, -1]) {
+        const press = { cy, side, minGap, openGap, period, phase };
+        const rect = pressRect(press, 0);
+        obstacles.push({
+          x: sx, y: rect.y, w, h: rect.h, face: side, press,
+        });
+      }
+      sx += w + rr(r, 96, 150);
     }
     advance = sx;
   } else {
@@ -240,11 +324,23 @@ export function buildLevel(spec, runSeed = 0) {
     tx += rr(r, 620, 1250);
   }
 
-  // Drop any turret whose muzzle is buried inside a block.
+  // Everything whose geometry moves, kept apart so the per-frame update and
+  // the per-frame draw have a short list rather than the whole hull.
+  const movers = obstacles.filter((o) => o.press);
+
+  // Drop any turret whose muzzle is buried inside a block. A mover is
+  // excluded from the test and handled by the one after it: the base rect
+  // is a jaw at its smallest, so a muzzle that reads as clear here could
+  // still be swallowed later in the cycle.
   const buried = (px, py) =>
-    obstacles.some((o) => px > o.x - 3 && px < o.x + o.w + 3 && py > o.y && py < o.y + o.h);
+    obstacles.some((o) => !o.press && px > o.x - 3 && px < o.x + o.w + 3
+      && py > o.y && py < o.y + o.h);
+  // Nothing is mounted in the travel of a jaw, at any phase. A gun that
+  // spends half its life inside a moving block cannot be shot back at.
+  const inTravel = (px) =>
+    movers.some((o) => px > o.x - 10 && px < o.x + o.w + 10);
   const turrets = turretSpots
-    .filter((t) => !buried(t.x, t.y + t.dir * 6))
+    .filter((t) => !buried(t.x, t.y + t.dir * 6) && !inTravel(t.x))
     .map((t, i) => {
       const roster = spec.towers && spec.towers.length ? spec.towers : ['gun'];
       // A spot may name its own kind — a spaceport is an arrangement of
@@ -283,7 +379,7 @@ export function buildLevel(spec, runSeed = 0) {
   }
 
   return {
-    obstacles, turrets, buckets,
+    obstacles, turrets, buckets, movers,
     // Laser gates, placed from the same rng so a hull always has the same
     // walls in the same places.
     gates: buildGates(r, spec, LEN, obstacles),
@@ -689,8 +785,11 @@ function renderChunk(level, index, scale) {
   g.fillRect(x0, 0, w, FIELD_H);
 
   // Obstacles overlapping this chunk, including the ones whose shadow spills
-  // into it from the left.
+  // into it from the left. A mover is skipped: a chunk is a bitmap cached
+  // across frames, so anything baked into one is frozen at the phase it was
+  // rendered at. They are drawn live instead — see drawMovers.
   for (const o of level.obstacles) {
+    if (o.press) continue;
     if (o.x + o.w + 10 < x0 || o.x > x0 + w) continue;
     drawBlock(g, o, t);
   }
@@ -973,6 +1072,118 @@ function drawBlock(g, o, t) {
   for (let sx = 0; sx < o.w - 4; sx += 8) {
     g.fillStyle = (sx / 8) % 2 ? '#15181e' : t.chevron;
     g.fillRect(o.x + 2 + sx, fy, 4, 3);
+  }
+}
+
+// A jaw, drawn live every frame in world coordinates.
+//
+// Deliberately not drawn with drawBlock. Half the themes render an obstacle
+// as a silhouette — a crystal spike, a dune, an asteroid — which is smaller
+// than its collision box on purpose, and reads as part of the ground. Both
+// are wrong here. A crusher has to look like machinery bolted to the girder
+// rather than terrain that happens to move, and its drawn edge has to be
+// its collision edge, because a pilot threading a closing gap is steering by
+// the pixels. So a jaw is always a box, and always the box it collides with.
+function drawRam(g, o, t) {
+  const top = o.face === 1;
+  const p = o.press;
+  // How far this jaw reaches at full close. The channel it runs in is
+  // drawn to that line, so the hazard is legible before you are in it —
+  // a crusher you can only learn by being caught by it is a trap, and the
+  // whole pattern is built not to be one.
+  const reach = p.cy - p.minGap / 2 - FIELD_TOP;
+  const chanY = top ? FIELD_TOP : FIELD_BOT - reach;
+
+  // The track the jaw runs in, and a bracket on the hull at the line it
+  // closes to. The first attempt filled the channel with near-black over a
+  // recessed shadow, which on VOID — base #04050a, seam #020306 — drew
+  // nothing at all for the cost of drawing it every frame. Both marks are
+  // in the theme's chevron colour instead, which every theme defines as
+  // its brightest warning tone.
+  const brY = top ? FIELD_TOP + reach : FIELD_BOT - reach;
+  g.fillStyle = t.rivet;
+  g.globalAlpha = 0.22;
+  g.fillRect(o.x - 2, chanY, 1, reach);
+  g.fillRect(o.x + o.w + 1, chanY, 1, reach);
+  g.globalAlpha = 1;
+  // the reach line: where the striking face will be when it is shut
+  g.fillStyle = t.chevron;
+  g.globalAlpha = 0.5;
+  g.fillRect(o.x - 4, top ? brY - 1 : brY, 4, 1);
+  g.fillRect(o.x + o.w, top ? brY - 1 : brY, 4, 1);
+  g.globalAlpha = 1;
+
+  // cast shadow, matching the one the box-filling shapes get
+  g.fillStyle = '#05070a';
+  g.globalAlpha = 0.7;
+  g.fillRect(o.x + 7, o.y + 7, o.w, o.h);
+  g.globalAlpha = 0.4;
+  g.fillRect(o.x + 3, o.y + 3, o.w + 6, o.h + 6);
+  g.globalAlpha = 1;
+
+  g.fillStyle = t.blockEdge;
+  g.fillRect(o.x - 1, o.y - 1, o.w + 2, o.h + 2);
+  g.fillStyle = t.block;
+  g.fillRect(o.x, o.y, o.w, o.h);
+
+  // A ram cylinder down the middle of the body: the part that says this is
+  // driven rather than built. Pistons behind the jaw were the first attempt
+  // and drew nothing — a jaw is anchored to its girder, so there is never
+  // any rod showing between the two.
+  const cw = Math.max(6, Math.round(o.w * 0.34));
+  const cx = Math.round(o.x + (o.w - cw) / 2);
+  g.fillStyle = t.blockLo;
+  g.fillRect(cx, o.y, cw, o.h);
+  g.fillStyle = t.blockHi;
+  g.globalAlpha = 0.5;
+  g.fillRect(cx + 1, o.y, 2, o.h);
+  g.globalAlpha = 1;
+
+  // ribs across the body, broken by the cylinder
+  for (let ry = o.y + 5; ry < o.y + o.h - 7; ry += 11) {
+    g.fillStyle = t.blockLo;
+    g.fillRect(o.x + 2, ry, o.w - 4, 2);
+    g.fillStyle = t.rivet;
+    g.globalAlpha = 0.5;
+    g.fillRect(o.x + 3, ry, 2, 2);
+    g.fillRect(o.x + o.w - 5, ry, 2, 2);
+    g.globalAlpha = 1;
+  }
+
+  // side rails, so the jaw reads as running in the track
+  g.fillStyle = t.edgeHi;
+  g.globalAlpha = 0.4;
+  g.fillRect(o.x, o.y, 1, o.h);
+  g.fillRect(o.x + o.w - 1, o.y, 1, o.h);
+  g.globalAlpha = 1;
+
+  // The striking face: the edge that will arrive, marked as such. Bright
+  // enough to pick out against the hull it is bolted to, because the gap
+  // between two of these is what the pilot is steering for.
+  const fy = top ? o.y + o.h - 7 : o.y;
+  g.fillStyle = '#0a0c10';
+  g.fillRect(o.x - 1, fy, o.w + 2, 7);
+  g.fillStyle = t.hazard;
+  g.fillRect(o.x - 1, fy + 1, o.w + 2, 5);
+  for (let sx = 0; sx < o.w + 2; sx += 8) {
+    g.fillStyle = t.chevron;
+    g.fillRect(o.x - 1 + sx, fy + 1, 4, 5);
+  }
+  g.fillStyle = t.chevron;
+  g.fillRect(o.x - 1, top ? fy + 6 : fy, o.w + 2, 1);
+}
+
+// Every jaw in view, after the cached hull and under everything that sits
+// on it. Culled on x, which never changes for a jaw — only its y and height
+// do, which is what keeps the broad-phase bucket index valid for them.
+export function drawMovers(ctx, level, camX, viewW) {
+  const list = level.movers;
+  if (!list || !list.length) return;
+  const t = THEMES[level.spec.theme] || THEMES.steel;
+  for (const o of list) {
+    if (o.x + o.w < camX - 16 || o.x > camX + viewW + 16) continue;
+    if (o.h <= 0) continue;
+    drawRam(ctx, o, t);
   }
 }
 
