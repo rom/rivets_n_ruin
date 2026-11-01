@@ -2343,10 +2343,10 @@ refused by the server. Both are fixed. Everything below is what one
 playthrough does not settle.
 
 - **Balance is mostly still first guesses, and there is a great deal of
-  it.** Twenty-five hulls, twenty-five bosses, four minibosses, eight
-  attacker types, six tower types, laser gates, deflector shields, four
-  treasure tiers, eleven mods, the coin economy, the refit curve, the
-  end-of-hull bonus and the four difficulty settings were picked by
+  it.** Twenty-five hulls, twenty-five bosses, four minibosses, sixteen
+  attacker types, fifteen tower types, laser gates, deflector shields,
+  four treasure tiers, thirteen mods, the coin economy, the refit curve,
+  the end-of-hull bonus and the four difficulty settings were picked by
   reasoning about them. Only the opening hulls have actually been flown.
 - **The two things that were just retuned are retuned by simulation, not
   by playing.** Gun upgrades now decay in the crate table and the free
@@ -2401,6 +2401,25 @@ playthrough does not settle.
   on top at the window's own resolution and is never upscaled. The first
   attempt kept one canvas and upscaled an offscreen world buffer in
   software: correct, and it halved the frame rate.
+- **Switching the canvas composite mode is the expensive thing**, by a
+  distance, and far out of proportion to the pixels it blends. Eight
+  MONITORs on screen cost **15.7ms a frame** when each of their three
+  engine plumes switched to `lighter` on its own, and **0.3ms** when
+  the ship switches once and draws all three — for pixel-identical
+  output, verified by rendering every body in both builds and
+  comparing the PNGs.
+
+  Why canvas2d punishes it so heavily is not something this project
+  can answer; the measurement is repeatable and that is what the code
+  is written against. `engine()` is split into a bell and a plume so a
+  multi-engined ship can batch, and a test asserts one round trip per
+  ship rather than one per engine — timing cannot be asserted on a
+  shared machine, but the invariant behind it can.
+
+  Measured with an interleaved A/B harness. A first attempt measured A
+  then B and reported that six weavers cost as much as six monitors,
+  which is nonsense; a container whose speed drifts over seconds
+  attributes the drift to whichever change was measured second.
 - **HUD text uses the system monospace font**, not a bitmap font, so it does
   not scale as crisply as the rest of the art.
 - **Anti-cheat is defence in depth, not proof.** See the backend section for

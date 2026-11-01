@@ -6,6 +6,7 @@ import {
   LEVELS, BOSSES, SHIP, LEVEL_UP, PICKUP, HULL_BONUS, DIFFICULTY, ARMORY, VERSION, TOWERS,
 } from '../src/config.js';
 import { MODS } from '../src/shop.js';
+import { SPEC as FOE_SPEC } from '../src/foes.js';
 import { MAX_COINS, MAX_MOD_LEVEL } from '../src/hangar.js';
 import { BODY_KINDS } from '../src/foeart.js';
 import { KINDS as MINI_KINDS } from '../src/miniboss.js';
@@ -493,4 +494,33 @@ test('the client cannot bank more mods than the server will keep', () => {
   const sold = Object.keys(MODS).length;
   assert.ok(sold <= cap,
     `the armourer sells ${sold} mods and the server keeps at most ${cap}`);
+});
+
+// --- the gap list counts what there is
+//
+// "Known gaps" opens by saying a stale gap list is worse than none,
+// and then went stale: it claimed eight attackers and six towers long
+// after there were sixteen and fifteen. The tables elsewhere in the
+// README are checked row by row; this paragraph is prose and was not,
+// which is exactly why it drifted.
+
+test('the known-gaps paragraph counts what the game has', () => {
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
+    'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen',
+    'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty',
+    'twenty-one', 'twenty-two', 'twenty-three', 'twenty-four', 'twenty-five'];
+  const gaps = readme.slice(readme.indexOf('## Known gaps'));
+  for (const [label, n] of [
+    ['hulls', LEVELS.length],
+    ['bosses', BOSSES.length],
+    ['attacker types', Object.keys(FOE_SPEC).length],
+    ['tower types', Object.keys(TOWERS).length],
+    ['mods', Object.keys(MODS).length],
+  ]) {
+    // Whitespace-tolerant: this is wrapped prose, so "sixteen" and
+    // "attacker types" are routinely on different lines.
+    const pattern = `${words[n]} ${label}`.replace(/-/g, '[- ]').replace(/ /g, '\\s+');
+    assert.ok(new RegExp(pattern, 'i').test(gaps),
+      `Known gaps does not say "${words[n]} ${label}" — the game has ${n}`);
+  }
 });
