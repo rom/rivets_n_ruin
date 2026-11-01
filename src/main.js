@@ -1,5 +1,6 @@
 import { VIEW_W, VIEW_H } from './config.js';
-import { fitCanvas, applyTransform, reportFrame, setStatic } from './display.js';
+import { fitCanvas, applyTransform, applyUiTransform, reportFrame,
+  setStatic } from './display.js';
 import {
   initInput, tapped, endFrame, setSynthetic, realAnyTapped,
 } from './input.js';
@@ -27,11 +28,20 @@ import { LEVELS, BUILD } from './config.js';
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false });
 
-// The canvas backing store tracks the window and the device pixel ratio, and
-// the context carries a matching transform, so everything — sprites, strokes
-// and especially text — is rasterised at display resolution rather than
-// drawn into 640x360 and blown up. See display.js.
-function fit() { fitCanvas(canvas, ctx); }
+// Two layers. The world canvas carries the adaptive scale and the
+// compositor stretches it to the box for free; the UI canvas sits on top
+// at the window's own resolution, so the HUD and the menus are never
+// upscaled. Before this the cap took the whole backing store down with
+// it and the HUD text went blocky the moment gameplay started. See
+// display.js.
+const uiCanvas = document.getElementById('ui');
+const uiCtx = uiCanvas ? uiCanvas.getContext('2d') : null;
+const ui = uiCtx ? { canvas: uiCanvas, ctx: uiCtx } : null;
+// Everything that is not the world draws here. Falls back to the world
+// canvas if the page has no UI layer, so an old index.html still plays.
+const hudCtx = uiCtx || ctx;
+
+function fit() { fitCanvas(canvas, ctx, ui); }
 
 // Launching the demo is launching a run: the same reset, the same states.
 // It starts on the furthest hull reached, because that is the hull worth
@@ -297,13 +307,20 @@ startLoop(
     if (setStatic(isOverlay())) fit();
     applyTransform(ctx);   // a resize resets context state; re-establish it
     drawWorld(ctx, game);
-    drawHud(ctx, game, { muted: isMuted(), audio: ready() });
-    if (demoOn) drawDemoBadge(ctx, game);
-    if (shopOpen) drawShop(ctx, game, shopSel, shopNote);
-    else if (helpOpen) drawHelp(ctx, helpPage);
-    else if (settingsOpen) drawSettings(ctx, game, settingsSel, { wipeArmed, wipeNote });
-    else if (game.quitting) drawQuitPrompt(ctx, game);
-    else if (paused) drawPaused(ctx);
+
+    // Everything from here up is text, and text is what the adaptive
+    // scale must never touch.
+    if (hudCtx !== ctx) {
+      applyUiTransform(hudCtx);
+      hudCtx.clearRect(0, 0, VIEW_W, VIEW_H);
+    }
+    drawHud(hudCtx, game, { muted: isMuted(), audio: ready() });
+    if (demoOn) drawDemoBadge(hudCtx, game);
+    if (shopOpen) drawShop(hudCtx, game, shopSel, shopNote);
+    else if (helpOpen) drawHelp(hudCtx, helpPage);
+    else if (settingsOpen) drawSettings(hudCtx, game, settingsSel, { wipeArmed, wipeNote });
+    else if (game.quitting) drawQuitPrompt(hudCtx, game);
+    else if (paused) drawPaused(hudCtx);
     // Frame-to-frame interval, not draw time: canvas2d records lazily, so
     // the real cost of a resolution shows up as a longer frame, not a longer
     // draw call.

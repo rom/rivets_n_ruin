@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   decideScale, computeScale, TUNING,
   setStatic, fitCanvas, renderScale, wantedScale, scaleCap, reportFrame,
+  hullScale, uiScale,
 } from '../src/display.js';
 
 // Enough of a canvas for fitCanvas: it sets width/height and style, and
@@ -68,44 +69,110 @@ test('computeScale tracks the window and respects the cap', () => {
   assert.ok(computeScale(1280, 720, 2) >= computeScale(1280, 720, 1), 'higher DPR wants more pixels');
 });
 
-// --- static mode
+// --- two scales
 //
-// Menus used to render at whatever cap gameplay had settled on. On a 2560px
-// window that meant a 960x540 backing store blown up 2.6x by the browser:
-// the text on the overview, the armourer and the settings page was the most
-// blurred thing in the game, and the one thing made entirely of text.
+// The adaptive cap used to shrink the whole backing store. On a 2560px
+// window at cap 1 that meant a 640px canvas stretched to fill, and the
+// HUD — the one part of the screen made entirely of text — went to mush
+// the moment gameplay started and came back sharp in the menus.
+// Reported from play as "the text in the HUD gets blocky".
+//
+// So there are two scales now: the canvas always gets the window's, and
+// only the world buffer follows the cap. These tests hold that line,
+// because the tempting one-line "fix" for a frame-rate problem is to
+// take the canvas down with it again.
 
-test('a menu renders at the window scale, not at gameplay\'s cap', () => {
+// Drives the scaler down the way a dense hull does, and reports the
+// scale it settles at.
+function underLoad(canvas, ctx, ui) {
+  const want = wantedScale();
+  for (let i = 0; i < 3000 && scaleCap() < want; i++) reportFrame(16.6, canvas, ctx);
+  const climbed = scaleCap();
+  assert.ok(climbed > 1, `the cap never climbed off 1 (got ${climbed})`);
+  for (let i = 0; i < 3000 && scaleCap() >= climbed; i++) reportFrame(90, canvas, ctx);
+  fitCanvas(canvas, ctx, ui);
+  return want;
+}
+
+test('load takes the world down and leaves the UI layer alone', () => {
   const canvas = fakeCanvas();
   const ctx = canvas.getContext('2d');
+  const ui = { canvas: fakeCanvas(), ctx: fakeCanvas().getContext('2d') };
   window.innerWidth = 2560;
   window.innerHeight = 1480;
 
   setStatic(false);
-  fitCanvas(canvas, ctx);
-  const want = wantedScale();
+  fitCanvas(canvas, ctx, ui);
+  const want = underLoad(canvas, ctx, ui);
   assert.ok(want > 1.5, `a 2560px window wants more than 1.5x, got ${want}`);
 
-  // Fast frames first, so the scaler has a refresh estimate and climbs...
-  for (let i = 0; i < 3000 && scaleCap() < want; i++) reportFrame(16.6, canvas, ctx);
-  const climbed = scaleCap();
-  assert.ok(climbed > 1, `the cap never climbed off 1 (got ${climbed})`);
+  assert.ok(renderScale() < want,
+    `the world did not come down under load (${renderScale()} of ${want}) — the cap is doing nothing`);
+  assert.equal(canvas.width, Math.round(640 * renderScale()),
+    'the world canvas is not sized for the world scale');
 
-  // ...then slow ones, the way a dense hull would produce.
-  for (let i = 0; i < 3000 && scaleCap() >= climbed; i++) reportFrame(90, canvas, ctx);
-  fitCanvas(canvas, ctx);
+  assert.equal(uiScale(), want,
+    `the UI dropped to ${uiScale()} under load; the HUD text is blocky again`);
+  assert.equal(ui.canvas.width, Math.round(640 * want),
+    'the UI backing store followed the world scale instead of the window');
+  // Both layers are stacked on the same box, so their CSS size must agree
+  // to the pixel or the HUD lands somewhere other than over the world.
+  assert.equal(ui.canvas.style.width, canvas.style.width);
+  assert.equal(ui.canvas.style.height, canvas.style.height);
+});
+
+test('a menu spends the full scale on the world too', () => {
+  const canvas = fakeCanvas();
+  const ctx = canvas.getContext('2d');
+  const ui = { canvas: fakeCanvas(), ctx: fakeCanvas().getContext('2d') };
+  window.innerWidth = 2560;
+  window.innerHeight = 1480;
+
+  setStatic(false);
+  fitCanvas(canvas, ctx, ui);
+  const want = underLoad(canvas, ctx, ui);
   const capped = renderScale();
-  assert.ok(capped < want, `the cap did not come down under load (${capped} of ${want})`);
+  assert.ok(capped < want);
 
+  // A menu is a dim rect and some text over a frozen world. There is
+  // nothing there to protect.
   assert.equal(setStatic(true), true, 'entering static mode reported no change');
-  fitCanvas(canvas, ctx);
-  assert.equal(renderScale(), want,
-    `a menu rendered at ${renderScale()} when the window wants ${want}`);
-  assert.equal(canvas.width, Math.round(640 * want));
+  fitCanvas(canvas, ctx, ui);
+  assert.equal(renderScale(), want, `a menu rendered its world at ${renderScale()}, not ${want}`);
+  assert.equal(uiScale(), want);
 
   assert.equal(setStatic(false), true);
-  fitCanvas(canvas, ctx);
+  fitCanvas(canvas, ctx, ui);
   assert.equal(renderScale(), capped, 'leaving a menu left gameplay at the menu scale');
+  assert.equal(uiScale(), want, 'leaving a menu shrank the UI layer');
+});
+
+test('a page with no UI layer still plays', () => {
+  // fitCanvas takes the layer as an optional argument precisely so an
+  // older index.html, or a test, can leave it out.
+  const canvas = fakeCanvas();
+  const ctx = canvas.getContext('2d');
+  window.innerWidth = 1280;
+  window.innerHeight = 760;
+  setStatic(false);
+  assert.doesNotThrow(() => fitCanvas(canvas, ctx));
+  assert.ok(canvas.width > 0);
+});
+
+test('the hull cache follows the world, not the window', () => {
+  // The hull is drawn into the world buffer, so caching it at the
+  // sharper canvas scale would spend memory on pixels that get
+  // downsampled on the way in.
+  const canvas = fakeCanvas();
+  const ctx = canvas.getContext('2d');
+  window.innerWidth = 2560;
+  window.innerHeight = 1480;
+  setStatic(false);
+  fitCanvas(canvas, ctx);
+  assert.ok(hullScale() <= renderScale() + 1e-9,
+    `hull cached at ${hullScale()} for a world rendered at ${renderScale()}`);
+  assert.ok(hullScale() <= uiScale() + 1e-9);
+  assert.ok(hullScale() <= 2, 'the hull cache broke its own ceiling');
 });
 
 test('setStatic reports only real changes', () => {

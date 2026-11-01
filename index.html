@@ -15,12 +15,28 @@
     display: grid; place-items: center;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
-  canvas {
-    display: block;
-    image-rendering: auto;
+  /* Two layers, deliberately.
+     The world is rendered at whatever scale the machine can sustain and
+     stretched by the compositor, which is free. The UI sits on top at the
+     window's own resolution, so the HUD text is never upscaled. Doing it
+     with one canvas means upscaling the world in software every frame,
+     which halved the frame rate when it was tried. */
+  #stack {
+    position: relative;
     background: #05070a;
     box-shadow: 0 0 0 1px #1b212b, 0 24px 80px -20px #000;
   }
+  #stack canvas {
+    display: block;
+    image-rendering: auto;
+    background: transparent;
+  }
+  #ui {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  #game { background: #05070a; }
   #hint {
     position: fixed; bottom: 10px; left: 0; right: 0;
     text-align: center; color: #39424e; font-size: 11px; letter-spacing: .09em;
@@ -29,7 +45,10 @@
 </style>
 </head>
 <body>
-  <canvas id="game" width="640" height="384"></canvas>
+  <div id="stack">
+    <canvas id="game" width="640" height="384"></canvas>
+    <canvas id="ui" width="640" height="384"></canvas>
+  </div>
   <div id="hint">ARROWS / WASD MOVE &nbsp;·&nbsp; Z / SPACE FIRE &nbsp;·&nbsp; ENTER START &nbsp;·&nbsp; P PAUSE &nbsp;·&nbsp; M MUTE &nbsp;·&nbsp; R RESTART</div>
   <script type="module" src="./src/main.js"></script>
 </body>
