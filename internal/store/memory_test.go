@@ -632,3 +632,43 @@ func TestDroppedScoresDoNotLeak(t *testing.T) {
 		}
 	}
 }
+
+func TestSnapshotDoesNotRaceWithWrites(t *testing.T) {
+	// SnapshotPart used to hand the JSON encoder the live *model.Player
+	// pointers and then release the lock before encoding, so any
+	// request arriving mid-snapshot wrote the fields the encoder was
+	// reading. Run under -race this failed; it is the reason the
+	// players are cloned under the lock now.
+	m := NewMemory()
+	var players []*model.Player
+	for i := 0; i < 20; i++ {
+		players = append(players, mustPlayer(t, m, fmt.Sprintf("RACER%02d", i)))
+	}
+	dir := t.TempDir()
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			p := players[i%len(players)]
+			_ = m.TouchPlayer(p.ID)
+			_ = m.AddScore(&model.Score{
+				ID: fmt.Sprintf("r%d", i), PlayerID: p.ID, Name: p.Name, Points: i, Levels: 1,
+			})
+		}
+	}()
+	for i := 0; i < 25; i++ {
+		if err := m.SnapshotPart(filepath.Join(dir, "a.json"), Accounts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(stop)
+	wg.Wait()
+}

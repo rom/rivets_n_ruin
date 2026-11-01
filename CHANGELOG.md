@@ -60,12 +60,42 @@ worth learning from.
 
 ### Fixed
 
+- **The page lost every CSS rule.** Two branches changed the same region
+  of `index.html`; the merge kept one's inline `<style>` and the other's
+  policy forbidding inline styles. The two canvases stopped overlapping
+  and the HUD, splash and title rendered below the fold, which looked
+  like booting straight into a run.
+- **`upgrade-insecure-requests` broke every deployment not on
+  localhost**, rewriting the game's own modules to `https://` on a
+  server with no TLS listener.
+- **The legacy `-data` layout served the account database again** — the
+  same hashes, by the same route, as the bug the split was written to
+  fix. So did `-state` pointed at the web root.
+- A file whose name merely began with a writable directory's name
+  (`statements.html` beside `state/`) was answered `404`.
+- Signing in after page load pushed the browser's hangar over the
+  account it had just signed into. The reconciliation now follows every
+  identity change rather than running once at startup.
+- Snapshots handed the JSON encoder live player pointers after releasing
+  the lock — a data race against any request arriving mid-write.
+- The boss refit reset `globalAlpha` to 1 instead of restoring it,
+  cancelling the fade on a dying boss.
+- `-hash-password` and `-admin-password-file` trimmed differently, so a
+  password with surrounding spaces could be set and never accepted.
 - The persistence snapshot was never written back for hangars — read on
   load, never saved. Caught by a store-level test after the browser
   round-trip passed, because the server never restarted during it.
 
 ### Security
 
+- `Config.AdminAllowRemote` replaces `AdminLocalOnly`, so the zero value
+  is loopback-only. The old field's zero value allowed every address
+  while its comment claimed the opposite and pointed at a constructor
+  that did not exist.
+- `X-Forwarded-Proto` is only believed with `-trust-proxy`; without it
+  any client could turn HSTS on by sending a header.
+- Expired admin sessions are swept rather than held until their own
+  token comes back.
 - **The account database was served over HTTP.** `-dir` defaulted to `.`
   and `-data` to `data/rnr.json` underneath it, so running the release
   tree as documented put the password hashes where the static handler

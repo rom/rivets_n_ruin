@@ -1881,7 +1881,18 @@ subdirectory of `-state`. On Linux the sandbox is told the same thing:
 content read-only, the other two read-write, everything else invisible.
 
 `-data` still works and names a single combined file, for a deployment
-that predates the split. It warns, and nothing else changes.
+that predates the split. It warns, and nothing else changes — and
+whatever layout it produces is still blocked from being served, which
+took two attempts to get right: the first version recorded the
+*directory* and skipped the files inside it as already covered, so when
+that directory was the web root (which `-data ./rnr.json` makes it) the
+guard dropped it to avoid hiding the game and nothing was left hidden.
+
+The server also **refuses to start** if it finds a pre-split
+`data/rnr.json` and no path flag was given. Ignoring it looks exactly
+like every account having been deleted; reading it would put the
+credential database back under the web root. Neither is a decision this
+program should make for you.
 
 **None of it is ever served**, however the paths are arranged. The
 defaults overlap — `-dir` is `.`, so running the release tree the way it
@@ -1925,10 +1936,22 @@ going to try — so a test fails if an inline `<style>` or a `style=""`
 attribute ever comes back.
 
 `Strict-Transport-Security` is behind `-hsts` and is only ever sent on a
-request that arrived over TLS. Announced on a plain-HTTP origin it is
-ignored by browsers, but a proxy that terminates TLS and forwards
-cleartext would make it stick — and an HSTS pin you did not mean is a
+request that arrived over TLS. `X-Forwarded-Proto` is consulted only
+with `-trust-proxy`, because on a directly exposed server any client can
+send that header and satisfy the very check that is supposed to
+establish the request was encrypted. An HSTS pin you did not mean is a
 site you cannot reach.
+
+**`upgrade-insecure-requests` is deliberately absent.** It rewrites every
+same-origin subresource URL to `https://`, and this server speaks plain
+HTTP — `-addr 0.0.0.0:8000` is the documented way to play over a LAN. On
+`http://192.168.1.5:8000` the browser would upgrade `/src/main.js`,
+`/src/game.css` and every image to a port with no TLS listener and load
+nothing at all. It bought nothing in exchange: the game has no
+third-party resources and no absolute `http://` URLs, so there is no
+mixed content to fix. It shipped once and the smoke test never saw it,
+because `127.0.0.1` is a potentially-trustworthy origin and the
+directive exempts those.
 
 **systemd** users get `deploy/rivets-n-ruin.service`, which does the
 things a process cannot do to itself: an empty `CapabilityBoundingSet`,

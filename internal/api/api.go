@@ -32,9 +32,14 @@ type Config struct {
 	// surface to find and nothing to brute-force. There is deliberately
 	// no built-in credential.
 	AdminPasswordHash string
-	// AdminLocalOnly restricts those routes to loopback. Defaults to on
-	// via NewWithAdmin; most of what they do is irreversible.
-	AdminLocalOnly bool
+	// AdminAllowRemote lets the operator routes answer requests from
+	// off this machine. Named for the dangerous option rather than the
+	// safe one, so the zero value is loopback-only: most of what those
+	// routes do cannot be undone, and a caller who forgets the field
+	// should get the restriction, not the exposure. It read
+	// AdminLocalOnly before, whose zero value was "reachable from
+	// anywhere" while its comment claimed the opposite.
+	AdminAllowRemote bool
 }
 
 type Server struct {
@@ -45,11 +50,11 @@ type Server struct {
 	errs        *errorRing
 	requireRuns bool
 
-	adminHash      string
-	adminLocalOnly bool
-	adminMu        sync.Mutex
-	adminSessions  map[string]*adminSession
-	clock          func() time.Time
+	adminHash        string
+	adminAllowRemote bool
+	adminMu          sync.Mutex
+	adminSessions    map[string]*adminSession
+	clock            func() time.Time
 	// A bucket of its own for the name check, far tighter than the rest
 	// of the API. See available.go.
 	nameRL *rateLimiter
@@ -71,10 +76,10 @@ func New(s store.Store, log *slog.Logger, cfg Config) *Server {
 		errs:        newErrorRing(),
 		requireRuns: cfg.RequireRuns,
 
-		adminHash:      cfg.AdminPasswordHash,
-		adminLocalOnly: cfg.AdminLocalOnly,
-		adminSessions:  map[string]*adminSession{},
-		nameRL:         newRateLimiter(NameCheckPerSec, NameCheckBurst),
+		adminHash:        cfg.AdminPasswordHash,
+		adminAllowRemote: cfg.AdminAllowRemote,
+		adminSessions:    map[string]*adminSession{},
+		nameRL:           newRateLimiter(NameCheckPerSec, NameCheckBurst),
 	}
 }
 

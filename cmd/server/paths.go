@@ -118,17 +118,59 @@ func ResolvePaths(dir, state, accounts, legacy string, wantLog bool) (Paths, err
 		p.AccountsFile = abs
 	}
 
+	// Every writable path that falls inside the served tree, listed
+	// individually — the files as well as the directories holding them.
+	//
+	// The first version skipped a file whose directory was already on
+	// the list, which looked like tidiness and was a hole: when that
+	// directory IS the web root, the static guard has to drop it (or it
+	// would hide the game), and the files it was standing in for had
+	// been skipped. `-data ./rnr.json` and `-state .` both land there,
+	// and the account database went back to being served. Listing both
+	// is redundant in the common case and correct in every case.
 	for _, d := range []string{p.State, p.Accounts} {
-		if under(p.Content, d) && !contains(p.Exposed, d) {
+		// The web root itself is never hideable, so recording it would
+		// only create the false sense that something had been covered.
+		if d != p.Content && under(p.Content, d) && !contains(p.Exposed, d) {
 			p.Exposed = append(p.Exposed, d)
 		}
 	}
 	for _, f := range []string{p.Scores, p.Runs, p.AccountsFile, p.Log} {
-		if f != "" && under(p.Content, f) && !coveredBy(p.Exposed, f) {
+		if f != "" && under(p.Content, f) && !contains(p.Exposed, f) {
 			p.Exposed = append(p.Exposed, f)
 		}
 	}
 	return p, nil
+}
+
+// LegacyDefault is where -data used to point before the split. A
+// deployment that never passed the flag was reading this file, and
+// after the split nothing would: the server would come up on an empty
+// state/ and accounts/ and look as though every account, score and mod
+// had been deleted.
+const LegacyDefault = "data/rnr.json"
+
+// StrandedLegacyFile reports a pre-split snapshot that nothing is going
+// to read.
+//
+// Only when none of the three path flags was given — anyone who passed
+// one has said where their data is and does not need telling. Returns
+// the path so the caller can name it; empty means there is nothing
+// stranded.
+func StrandedLegacyFile(dir, state, accounts, legacy string) string {
+	if state != "" || accounts != "" || legacy != "" {
+		return ""
+	}
+	// Relative to the working directory, which is where the old default
+	// resolved from, not to -dir.
+	abs, err := filepath.Abs(LegacyDefault)
+	if err != nil {
+		return ""
+	}
+	if fi, err := os.Stat(abs); err != nil || fi.IsDir() || fi.Size() == 0 {
+		return ""
+	}
+	return abs
 }
 
 // EnsureDirs creates the two writable roots, 0700. Content is never
@@ -175,15 +217,6 @@ func under(root, path string) bool {
 	return strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
-func coveredBy(list []string, path string) bool {
-	for _, d := range list {
-		if under(d, path) {
-			return true
-		}
-	}
-	return false
-}
-
 func contains(list []string, s string) bool {
 	for _, x := range list {
 		if x == s {
@@ -202,9 +235,17 @@ func contains(list []string, s string) bool {
 // A file can be chmod 600 and can hold the hash instead of the password,
 // so the plaintext need never exist on the server at all.
 //
-// Whitespace is trimmed because the overwhelmingly common way to make
-// one of these is `echo secret > file`, and a trailing newline that
+// A trailing newline is stripped because the overwhelmingly common way
+// to make one of these is `echo secret > file`, and a newline that
 // silently changes the password is a bad afternoon.
+//
+// Only the trailing newline, and only for the password: leading and
+// inner spaces are part of a password and TrimSpace would eat them.
+// It used to TrimSpace here while -hash-password stripped just CR/LF,
+// so the same bytes produced two different hashes depending on which
+// path you came in by — a credential that verifies under one
+// configuration and refuses every login under the other. trimSecret is
+// shared with -hash-password so the two cannot drift again.
 func readAdminSecret(hashFile, pwFile string) (string, error) {
 	if hashFile != "" && pwFile != "" {
 		return "", fmt.Errorf("give -admin-password-hash-file or -admin-password-file, not both")
@@ -217,14 +258,28 @@ func readAdminSecret(hashFile, pwFile string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("reading %s: %w", f, err)
 		}
-		v := strings.TrimSpace(string(b))
-		if v == "" {
-			return "", fmt.Errorf("%s is empty", f)
-		}
 		if f == hashFile {
+			// A hash has no spaces in it, so this one can be strict.
+			v := strings.TrimSpace(string(b))
+			if v == "" {
+				return "", fmt.Errorf("%s is empty", f)
+			}
 			return v, nil
+		}
+		v := trimSecret(string(b))
+		// Spaces inside or around a password are kept, because they are
+		// part of it. A file that is nothing BUT whitespace is a
+		// mistake, not a password of four spaces, and starting with a
+		// credential nobody can type is worse than refusing.
+		if strings.TrimSpace(v) == "" {
+			return "", fmt.Errorf("%s is empty", f)
 		}
 		return hashAdminPassword(v)
 	}
 	return "", nil
 }
+
+// trimSecret takes the trailing newline off a password and nothing
+// else. Shared by -admin-password-file and -hash-password so a
+// password hashed by one is accepted by the other.
+func trimSecret(s string) string { return strings.TrimRight(s, "\r\n") }

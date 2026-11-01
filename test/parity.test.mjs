@@ -6,6 +6,7 @@ import {
   LEVELS, BOSSES, SHIP, LEVEL_UP, PICKUP, HULL_BONUS, DIFFICULTY, ARMORY, VERSION,
 } from '../src/config.js';
 import { MODS } from '../src/shop.js';
+import { MAX_COINS, MAX_MOD_LEVEL } from '../src/hangar.js';
 import { BODY_KINDS } from '../src/foeart.js';
 import { KINDS as MINI_KINDS } from '../src/miniboss.js';
 import { MARKS } from '../src/shipart.js';
@@ -445,4 +446,39 @@ test('every changelog link reference is defined', () => {
     assert.ok(defined.has(label),
       `the changelog links to [${label}] in a heading but never defines it`);
   }
+});
+
+// --- the hangar caps, on both sides
+//
+// The client clamps what it stores and the server clamps what it
+// accepts, and the two have to agree: a client that banks more than the
+// server will keep loses the difference on every sync, silently, with
+// nothing failing anywhere. internal/store/memory.go's comment claimed
+// this file already checked that. It did not.
+
+test('the hangar caps match between the client and the server', () => {
+  const go = readFileSync(new URL('../internal/store/memory.go', import.meta.url), 'utf8');
+  const num = (name) => {
+    const m = go.match(new RegExp(name + '\\s*=\\s*([0-9_]+)'));
+    assert.ok(m, `internal/store/memory.go has no ${name}`);
+    return Number(m[1].replace(/_/g, ''));
+  };
+  assert.equal(num('MaxCoins'), MAX_COINS,
+    'the server and src/hangar.js disagree about the coin cap');
+  assert.equal(num('MaxModLevel'), MAX_MOD_LEVEL,
+    'the server and src/hangar.js disagree about the mod level cap');
+});
+
+test('the client cannot bank more mods than the server will keep', () => {
+  // MaxMods has no counterpart in src/hangar.js, so the only thing
+  // holding this together is that the shop cannot sell more than the
+  // server accepts. If MODS ever outgrows the cap, a pilot who buys
+  // them all loses the overflow on every save.
+  const go = readFileSync(new URL('../internal/store/memory.go', import.meta.url), 'utf8');
+  const m = go.match(/MaxMods\s*=\s*([0-9_]+)/);
+  assert.ok(m, 'internal/store/memory.go has no MaxMods');
+  const cap = Number(m[1].replace(/_/g, ''));
+  const sold = Object.keys(MODS).length;
+  assert.ok(sold <= cap,
+    `the armourer sells ${sold} mods and the server keeps at most ${cap}`);
 });

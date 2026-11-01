@@ -48,6 +48,8 @@ func main() {
 		adminAnywhere = flag.Bool("admin-anywhere", false,
 			"allow the admin routes from any address; they are loopback-only without it")
 		hsts       = flag.Bool("hsts", false, "send Strict-Transport-Security on HTTPS requests; only for a TLS deployment")
+		trustProxy = flag.Bool("trust-proxy", false,
+			"believe X-Forwarded-Proto; only when something in front of this sets it")
 		saveTick   = flag.Duration("save-interval", 30*time.Second, "how often to snapshot to disk")
 		verbose    = flag.Bool("v", false, "log every request, including static assets")
 		rlRate     = flag.Float64("rate-limit", 10, "sustained API requests per second, per IP")
@@ -74,7 +76,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "reading the password from stdin:", err)
 			os.Exit(1)
 		}
-		trimmed := strings.TrimRight(string(pw), "\r\n")
+		trimmed := trimSecret(string(pw))
 		if trimmed == "" {
 			fmt.Fprintln(os.Stderr, "no password on stdin")
 			os.Exit(1)
@@ -90,6 +92,21 @@ func main() {
 
 	level := slog.LevelInfo
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+
+	// Refuse to start on top of a pre-split snapshot nobody is going to
+	// read. Silently ignoring it looks exactly like every account and
+	// score having been deleted; silently reading it would put the
+	// credential database back under the web root, which is the bug the
+	// split exists to fix. Neither is a decision this program should
+	// make on the operator's behalf.
+	if stranded := StrandedLegacyFile(*dir, *state, *accounts, *data); stranded != "" {
+		log.Error("found a snapshot from before the account/state split, and nothing here "+
+			"will read it; the data is intact, this server just will not use it",
+			"file", stranded,
+			"keep the old layout", "-data "+LegacyDefault,
+			"or move to the new one", "-state <dir> -accounts <dir>, after importing it once with -data")
+		os.Exit(1)
+	}
 
 	paths, err := ResolvePaths(*dir, *state, *accounts, *data, *logFile)
 	if err != nil {
@@ -220,7 +237,7 @@ func main() {
 		RateBurst:         *rlBurst,
 		RequireRuns:       *strictRuns,
 		AdminPasswordHash: adminHash,
-		AdminLocalOnly:    !*adminAnywhere,
+		AdminAllowRemote:  *adminAnywhere,
 	})
 
 	// Open runs, restored alongside the store. A campaign takes longer
@@ -250,7 +267,7 @@ func main() {
 			"paths", strings.Join(paths.Exposed, " "), "root", root,
 			"fix", "-state /var/lib/rivets-n-ruin -accounts /var/lib/rivets-n-ruin/private")
 	}
-	handler := secureHeaders(*hsts, mux)
+	handler := secureHeaders(*hsts, *trustProxy, mux)
 
 	srv := &http.Server{
 		Addr:              *addr,
@@ -401,10 +418,22 @@ const CSP = "default-src 'self'; " +
 	"object-src 'none'; " +
 	"base-uri 'none'; " +
 	"form-action 'none'; " +
-	"frame-ancestors 'none'; " +
-	"upgrade-insecure-requests"
+	"frame-ancestors 'none'"
 
-func secureHeaders(hsts bool, next http.Handler) http.Handler {
+// upgrade-insecure-requests is deliberately absent.
+//
+// It rewrites every same-origin subresource URL to https://, and this
+// server speaks plain HTTP — the README documents -addr 0.0.0.0:8000
+// for playing over a LAN. On http://192.168.1.5:8000 the browser would
+// upgrade /src/main.js, /src/game.css and every image to a port with no
+// TLS listener and the page would load nothing at all.
+//
+// It bought nothing in exchange: the game has no third-party resources
+// and no absolute http:// URLs, so there is no mixed content for it to
+// fix. The smoke test did not catch it because 127.0.0.1 is a
+// potentially-trustworthy origin, which the directive exempts.
+
+func secureHeaders(hsts, trustProxy bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-Security-Policy", CSP)
@@ -425,12 +454,15 @@ func secureHeaders(hsts bool, next http.Handler) http.Handler {
 			"accelerometer=(), camera=(), geolocation=(), gyroscope=(), "+
 				"magnetometer=(), microphone=(), payment=(), usb=(), "+
 				"interest-cohort=(), browsing-topics=()")
-		// Behind a flag, and only ever sent over TLS. Announced on a
-		// plain-HTTP origin it is ignored by the browser, but a
-		// misconfigured proxy that terminates TLS and forwards cleartext
-		// would make it stick — and an HSTS pin you did not mean is a
-		// site you cannot reach.
-		if hsts && (r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https") {
+		// Behind a flag, and only ever sent over TLS. An HSTS pin you
+		// did not mean is a site you cannot reach.
+		//
+		// X-Forwarded-Proto is only consulted when -trust-proxy says
+		// something in front is setting it. Without that, any client
+		// can send the header and satisfy the very check that is meant
+		// to establish the request arrived over TLS, which makes the
+		// guard decoration.
+		if hsts && (r.TLS != nil || (trustProxy && r.Header.Get("X-Forwarded-Proto") == "https")) {
 			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
 		next.ServeHTTP(w, r)
@@ -456,3 +488,7 @@ func staticLog(log *slog.Logger, verbose bool, next http.Handler) http.Handler {
 // Indirection so paths.go does not have to import the api package just
 // to hash one string.
 var hashAdminPassword = api.HashPassword
+
+// Exposed for the trimming test: the two ways of supplying the admin
+// password have to agree on which bytes they are.
+var verifyAdminPassword = api.VerifyPassword

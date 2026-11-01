@@ -464,8 +464,13 @@ func (m *Memory) SnapshotPart(path string, part Part) error {
 		for id, h := range m.hangars {
 			snap.Hangars[id] = h
 		}
+		// Copies, not the live pointers. The encode below happens after
+		// the lock is released, and a player record is mutated in place
+		// by AddScore (Runs, Best) and TouchPlayer (LastSeen) — so
+		// handing the encoder the originals is a data race against any
+		// request arriving while a snapshot is being written.
 		for _, p := range m.players {
-			snap.Players = append(snap.Players, p)
+			snap.Players = append(snap.Players, clonePlayer(p))
 			snap.Tokens[p.TokenHash] = p.ID
 			if p.PassHash != "" {
 				snap.Pass[p.ID] = p.PassHash
@@ -473,6 +478,8 @@ func (m *Memory) SnapshotPart(path string, part Part) error {
 		}
 	}
 	if part == Public || part == Everything {
+		// Scores are never mutated after AddScore, so the pointers are
+		// safe to share; the slice header is not, hence the copy.
 		snap.Scores = append(snap.Scores, m.scores...)
 		for _, mod := range m.mods {
 			snap.Mods = append(snap.Mods, mod)
@@ -561,8 +568,9 @@ func (m *Memory) Load(path string) error {
 // Caps on what can be read back in or written. Not game rules — there is
 // no coin cap in play — but a hand-edited or corrupted value must not be
 // able to put the HUD into a state it cannot render or the shop into one
-// where everything is free. The same numbers as src/hangar.js, and
-// parity.test.mjs checks they stay the same.
+// where everything is free. The same numbers as src/hangar.js, which
+// parity.test.mjs now actually checks — the comment claimed that long
+// before the test existed.
 const (
 	MaxCoins    = 1_000_000_000
 	MaxModLevel = 99
