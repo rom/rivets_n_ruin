@@ -70,7 +70,8 @@ Then open http://127.0.0.1:8000/. For anything real, put the state and the accou
 
 The server-only builds are static and `CGO_ENABLED=0`; point them at the game with `-dir`.
 
-Built in a pristine checkout with `-trimpath` and `CGO_ENABLED=0`. Verify the download with `sha256sum -c SHA256SUMS.txt`. Rebuilding byte-for-byte needs the same Go toolchain (go1.27.2) `go version -m` on the binary shows the toolchain, commit and clean-tree flag it was built with. 
+Built in a pristine checkout with `-trimpath` and `CGO_ENABLED=0`. Verify the download with `sha256sum -c SHA256SUMS.txt`. Rebuilding byte-for-byte needs the same Go toolchain (go1.27.2) 
+`go version -m` on the binary shows the toolchain, commit and clean-tree flag it was built with. 
 
 ```
 $ go version -m rnr-server-1.1.0-linux-amd64
