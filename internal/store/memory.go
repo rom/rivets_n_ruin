@@ -414,29 +414,59 @@ func (m *Memory) Stats() Stats {
 
 // -------------------------------------------------------------- persistence
 
+// One struct, two files.
+//
+// The credential half — players, password hashes, token hashes — and the
+// published half — scores and mods — are written separately so they can
+// live on different disks with different permissions and different
+// backups. They share a shape because a single-file snapshot is still a
+// valid thing to read: that is what every deployment before the split
+// has on disk, and omitempty means a file written by either half parses
+// as the other with nothing in it.
 type snapshot struct {
-	Players []*model.Player   `json:"players"`
-	Pass    map[string]string `json:"pass"`
-	Tokens  map[string]string `json:"tokens"`
-	Scores  []*model.Score    `json:"scores"`
-	Mods    []*model.Mod      `json:"mods"`
+	Players []*model.Player   `json:"players,omitempty"`
+	Pass    map[string]string `json:"pass,omitempty"`
+	Tokens  map[string]string `json:"tokens,omitempty"`
+	Scores  []*model.Score    `json:"scores,omitempty"`
+	Mods    []*model.Mod      `json:"mods,omitempty"`
 }
 
-// Snapshot writes the dataset via a temp file and rename, so a crash midway
-// through cannot leave a half-written file where the data used to be.
-func (m *Memory) Snapshot(path string) error {
+// What a snapshot file is for. Accounts holds what can log you in;
+// Public holds what the API already serves to anybody.
+type Part int
+
+const (
+	Accounts Part = iota
+	Public
+	Everything
+)
+
+// Snapshot writes the whole dataset to one file. Kept for the single-file
+// layout that predates the account/state split.
+func (m *Memory) Snapshot(path string) error { return m.SnapshotPart(path, Everything) }
+
+// SnapshotPart writes the dataset via a temp file and rename, so a crash
+// midway through cannot leave a half-written file where the data used to
+// be. part says which half goes in.
+func (m *Memory) SnapshotPart(path string, part Part) error {
 	m.mu.RLock()
-	snap := snapshot{Tokens: map[string]string{}, Pass: map[string]string{}}
-	for _, p := range m.players {
-		snap.Players = append(snap.Players, p)
-		snap.Tokens[p.TokenHash] = p.ID
-		if p.PassHash != "" {
-			snap.Pass[p.ID] = p.PassHash
+	snap := snapshot{}
+	if part == Accounts || part == Everything {
+		snap.Tokens = map[string]string{}
+		snap.Pass = map[string]string{}
+		for _, p := range m.players {
+			snap.Players = append(snap.Players, p)
+			snap.Tokens[p.TokenHash] = p.ID
+			if p.PassHash != "" {
+				snap.Pass[p.ID] = p.PassHash
+			}
 		}
 	}
-	snap.Scores = append(snap.Scores, m.scores...)
-	for _, mod := range m.mods {
-		snap.Mods = append(snap.Mods, mod)
+	if part == Public || part == Everything {
+		snap.Scores = append(snap.Scores, m.scores...)
+		for _, mod := range m.mods {
+			snap.Mods = append(snap.Mods, mod)
+		}
 	}
 	m.mu.RUnlock()
 

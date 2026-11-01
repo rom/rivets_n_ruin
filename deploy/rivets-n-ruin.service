@@ -27,22 +27,35 @@ Group=rivets
 ExecStart=/usr/local/bin/rnr-server \
     -addr 127.0.0.1:8000 \
     -dir /usr/local/share/rivets-n-ruin \
-    -data /var/lib/rivets/rnr.json \
+    -state /var/lib/rivets/state \
+    -accounts /var/lib/rivets/accounts \
     -harden require
 
 Restart=on-failure
 RestartSec=2s
 
 # --- filesystem
-# The server writes exactly one directory. StateDirectory creates and
-# owns it; everything else is read-only or invisible.
-StateDirectory=rivets
+# Three roots with three different jobs.
+#
+# -dir is the game. It is never written to, so it is left out of
+# ReadWritePaths entirely and ProtectSystem=strict makes it read-only
+# even to root. It can be a read-only mount or a squashfs; the server
+# does not care and will not notice.
+#
+# -state is leaderboards, open runs and the log. Losing it costs a
+# scoreboard.
+#
+# -accounts is password and token hashes. Separate from state so it can
+# have its own backup policy and its own permissions, and so that
+# nothing holding a credential sits in the directory whose entire job is
+# to be published.
+StateDirectory=rivets rivets/state rivets/accounts
 StateDirectoryMode=0700
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
-ReadWritePaths=/var/lib/rivets
+ReadWritePaths=/var/lib/rivets/state /var/lib/rivets/accounts
 
 # --- privileges
 # It binds a high port as an unprivileged user and needs nothing else.
