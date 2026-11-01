@@ -62,6 +62,80 @@ HUD_ARMORY.slotW = HUD_ARMORY.pad * 2 + (HUD_ARMORY.labelChars + HUD_ARMORY.coun
   + HUD_ARMORY.gap;
 HUD_ARMORY.pitch = HUD_ARMORY.slotW + 3;
 
+// Is this run, right now, worth something on the board?
+//
+// The score readout is the one number a pilot watches, and it said the
+// same thing at four hundred points as at four million. Telling them
+// mid-run that they are on course for the board is the cheapest tension
+// the HUD can buy — and it has to be *mid-run*, because afterwards it is
+// just a result.
+//
+// Returned as data rather than drawn inline so it can be tested: the
+// interesting cases are the empty board, the board with room left on it,
+// and the one where the pilot is about to take first, and none of those
+// is reachable by looking at a screenshot.
+//
+// Against the runs board, not the pilots board: a run is what is
+// happening, and the pilots board folds to one row each, so a pilot
+// improving on their own entry would place nowhere on it.
+export const BOARD_ROWS = 10;
+
+export function scoreStanding(score, net, personalBest = 0) {
+  if (!score || score <= 0) return null;
+
+  const rows = (net && Array.isArray(net.runs) ? net.runs : [])
+    .map((r) => (r && r.score ? r.score.points : 0))
+    .filter((n) => Number.isFinite(n) && n > 0)
+    .sort((a, b) => b - a);
+
+  if (net && net.online && rows.length) {
+    if (score > rows[0]) return 'first';
+    // Room left on the board, or better than the worst thing on it.
+    if (rows.length < BOARD_ROWS || score > rows[rows.length - 1]) return 'board';
+  } else if (net && net.online) {
+    // An empty board: the first run to finish takes all of it.
+    return 'first';
+  }
+
+  // Offline, or not good enough for the board yet. Beating your own best
+  // is still worth saying, and it is the only thing that can be said
+  // when there is no backend at all.
+  if (personalBest > 0 && score > personalBest) return 'best';
+  return null;
+}
+
+// What each standing looks like: a heat ramp, coolest claim to hottest.
+//
+// None of these may be COL.cool. The first version made the board tell
+// COL.cool, which is the HUD's ordinary accent — so "you are on the
+// board" was drawn in exactly the colour of the hull name sitting beside
+// it, and on screen it read as nothing at all. Seen in a browser, not in
+// a test, which is why there is now a test for it below.
+//
+// Green and gold are both already spoken here: green is this HUD's
+// "done, and well" (the boosted readouts, the all-guns-broken counter)
+// and gold its "something is happening" (the hull readout with a boss
+// up). Orange sits between them.
+//
+// Flashing is a real accessibility concern, so REDUCE FLASHING keeps the
+// colour and drops the pulse: the information survives, the strobe does
+// not.
+export const SCORE_TELL = {
+  first: { colour: COL.warmHi, hz: 4.5 },
+  board: { colour: COL.warm, hz: 3.0 },
+  best: { colour: '#5fe08a', hz: 2.2 },
+};
+
+export function scoreTell(standing, t, steady = false) {
+  const tell = SCORE_TELL[standing];
+  if (!tell) return { colour: COL.hudBright, alpha: 1 };
+  if (steady) return { colour: tell.colour, alpha: 1 };
+  // Never dim enough to be unreadable: a number that fades away is a
+  // number you cannot read at the moment you most want to. The first
+  // version of this swung to 0.24 and its own test caught it.
+  return { colour: tell.colour, alpha: 0.78 + 0.22 * Math.sin(t * tell.hz * Math.PI * 2) };
+}
+
 export function drawHud(ctx, game, audio = {}) {
   const p = game.player;
   const y0 = HUD_Y;
@@ -135,8 +209,14 @@ export function drawHud(ctx, game, audio = {}) {
   });
 
   // --- score
-  text(ctx, 'SCORE', X.score, L);
-  text(ctx, String(game.score).padStart(8, '0'), X.score, V, COL.hudBright);
+  // The score, and whether it is currently worth anything.
+  const standing = scoreStanding(game.score, netState(), game.best);
+  const tell = scoreTell(standing, game.time || 0, !!setting('reduceFlash'));
+  text(ctx, 'SCORE', X.score, L, standing ? tell.colour : COL.hudText);
+  const wasAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = wasAlpha * tell.alpha;
+  text(ctx, String(game.score).padStart(8, '0'), X.score, V, tell.colour);
+  ctx.globalAlpha = wasAlpha;
 
   // --- the hull, and the two running totals the end-of-hull bonus pays on.
   // Where you are is the radar's job; this is how well you are doing it.

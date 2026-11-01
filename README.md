@@ -631,6 +631,14 @@ So the arena stays open for **ten seconds** after the boss dies, with the
 clock on the HUD, and `ENTER` leaves early for anyone who has already
 swept it. `BOSS.lootWindow` in `src/config.js`.
 
+That window is also why an arena has to remember that it is spent.
+Killing the boss clears `game.boss` so the camera unpins and the wall
+comes down — and the spawn, which only asked whether there was a boss in
+the arena, put an identical one there on the very next frame, banner and
+arrival sound and all. Every boss was fought twice. `game.bossDown`
+marks the hull's arena as done; `reset()` and `loadNextHull()` clear it,
+because the flag belongs to the hull and not to the campaign.
+
 ## Clearing a hull
 
 ![The overview between hulls](docs/overview.png)
@@ -1012,7 +1020,7 @@ everyone is a redesign and not an accommodation.
 | --- | --- |
 | **AUTO FIRE** | Holding a key down for an entire run. The rate is the gun's, not the key's, so this is exactly what holding fire already did. |
 | **GAME SPEED** | Reaction-time pressure. 50–100%, and it scales the time fed to the fixed-step loop rather than the step, so the physics cannot change — only how much of it happens per second. Menus and the attract demo always run at full rate. |
-| **REDUCE FLASHING** | The full-screen flash on hits and big explosions, damped to 22%. Not to zero: the flash is feedback, and removing it takes information away from the player it is meant to help. |
+| **REDUCE FLASHING** | The full-screen flash on hits and big explosions, damped to 22%, and the pulse on a record-beating score. Neither goes to zero: the flash is feedback and the score keeps its colour, because removing them takes information away from the player the setting is meant to help. |
 | **HIGH CONTRAST** | Hunting for enemy fire. Incoming shots get a neutral-grey outline — grey rather than white because under the `lighter` composite a white ring blooms into the shot it is framing. |
 | **FIRING LINE** | Guessing where the ship is actually aiming, which otherwise means learning a 24px sprite. |
 
@@ -1092,6 +1100,32 @@ then a plain `YY-MM-DD` once a score is over a month old):
   is best*.
 - **HIGH SCORES** lists the best individual runs with no folding, so one
   exceptional pilot can hold several places. Answers *what are the best runs*.
+
+### The score, while you are still flying it
+
+The score readout said the same thing at four hundred points as at four
+million. Mid-run it now says where you stand, by colour and by a slow
+pulse:
+
+| | |
+| --- | --- |
+| plain | places nowhere |
+| **green**, 2.2 Hz | beating your own best |
+| **orange**, 3.0 Hz | would place on the board |
+| **gold**, 4.5 Hz | would take first outright |
+
+Judged against **HIGH SCORES**, not TOP PILOTS: a pilot improving on their
+own entry places nowhere on a board that folds to one row each, which is
+not what they want to be told. Ties do not count — matching the leader is
+a tie, not first place, and the HUD should not promise a placing the
+backend will not give. With the backend unreachable the cached rows are
+not claimed against either; your own best is the one honest thing left to
+say.
+
+`REDUCE FLASHING` keeps the colour and drops the pulse. The colour is
+carrying the information; the strobe is decoration.
+
+`scoreStanding()` and `SCORE_TELL` in `src/hud.js`.
 
 ## Picking up where you left off
 

@@ -4,12 +4,13 @@ import assert from 'node:assert/strict';
 import {
   HELP, HELP_LAYOUT, HELP_PAGES, SETTINGS_LAYOUT, END_LAYOUT, endLayout,
   rankLine, REASON_CHARS, settingsWindow, HUD_X, HUD_ARMORY, TITLE_HULL,
+  scoreStanding, scoreTell, SCORE_TELL, BOARD_ROWS,
   drawHelp, drawSettings, drawHud,
 } from '../src/hud.js';
 import {
   DEFS, GROUPS, get as setting, set as setSetting, nudge, reset, display,
 } from '../src/settings.js';
-import { LEVELS, VIEW_W, FIELD_H, SHIP, PICKUP, ARMORY } from '../src/config.js';
+import { LEVELS, VIEW_W, FIELD_H, SHIP, PICKUP, ARMORY, COL } from '../src/config.js';
 import { makeGame } from '../src/game.js';
 import { TUNES } from '../src/music.js';
 
@@ -572,6 +573,89 @@ test('the HUD draws at its widest without throwing', () => {
   assert.doesNotThrow(() => drawHud(c, game, { muted: false, audio: true }));
 });
 
+// --- the tell, as the HUD actually draws it
+//
+// scoreStanding() and scoreTell() can both be right while the HUD draws
+// the score in the ordinary colour, because nothing above this point
+// looks at drawHud at all. The shared canvas stub records nothing, so
+// this one records: every fillText with the fillStyle and globalAlpha in
+// force when it ran.
+
+function recordingCtx() {
+  const calls = [];
+  const state = { fillStyle: '#000', globalAlpha: 1, font: '', textAlign: '', textBaseline: '' };
+  const noop = () => {};
+  const c = new Proxy(state, {
+    get(t, k) {
+      if (k in t) return t[k];
+      if (k === 'fillText') return (str) => calls.push({ str: String(str), colour: t.fillStyle, alpha: t.globalAlpha });
+      if (k === 'calls') return calls;
+      if (k === 'canvas') return { width: 0, height: 0 };
+      if (k === 'createLinearGradient' || k === 'createRadialGradient') return () => ({ addColorStop: noop });
+      if (k === 'createPattern') return () => ({});
+      if (k === 'measureText') return () => ({ width: 0 });
+      if (k === 'getImageData') return (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) });
+      return noop;
+    },
+    set(t, k, v) { t[k] = v; return true; },
+  });
+  return c;
+}
+
+// Offline with a personal best is the one standing reachable without a
+// backend, which is exactly why it is the one used here.
+function drawnScore(score, best, time) {
+  const c = recordingCtx();
+  const game = makeGame();
+  // In flight, not on the title screen: the title overlay runs its own
+  // fade through globalAlpha, and the first version of the leak test
+  // below read that fade as the score's pulse leaking.
+  game.state = 'play';
+  game.score = score;
+  game.best = best;
+  game.time = time;
+  drawHud(c, game, { muted: false, audio: true });
+  const want = String(score).padStart(8, '0');
+  return { ctx: c, hit: c.calls.find((k) => k.str === want) };
+}
+
+test('the HUD draws a record-beating score in the tell colour, dimmed by the pulse', () => {
+  // sin() at its trough, so the alpha is the floor of the pulse rather
+  // than a value that happens to sit at 1 and would pass either way.
+  const trough = 0.75 / SCORE_TELL.best.hz;
+  const { hit } = drawnScore(5000, 4000, trough);
+  assert.ok(hit, 'the score was never drawn');
+  assert.equal(hit.colour, SCORE_TELL.best.colour,
+    `the score was drawn in ${hit.colour}, not the tell colour — scoreTell is not wired to the HUD`);
+  assert.ok(hit.alpha < 0.99 && hit.alpha > 0.4,
+    `the score was drawn at alpha ${hit.alpha}; the pulse is not reaching the canvas`);
+});
+
+test('an ordinary score is drawn plainly, at full strength', () => {
+  const { hit } = drawnScore(1000, 999999, 0.3);
+  assert.ok(hit, 'the score was never drawn');
+  assert.notEqual(hit.colour, SCORE_TELL.best.colour, 'an also-ran score was dressed up');
+  assert.notEqual(hit.colour, SCORE_TELL.board.colour);
+  assert.notEqual(hit.colour, SCORE_TELL.first.colour);
+  assert.equal(hit.alpha, 1, 'an ordinary score was drawn faded');
+});
+
+test('the pulse does not leak onto the rest of the HUD', () => {
+  // globalAlpha is shared. Dimming the score and forgetting to put it
+  // back faded every readout drawn after it, and the ones drawn after it
+  // are the hull, the clock and the haul.
+  const trough = 0.75 / SCORE_TELL.best.hz;
+  const { ctx: c, hit } = drawnScore(5000, 4000, trough);
+  const i = c.calls.indexOf(hit);
+  assert.ok(i >= 0);
+  const after = c.calls.slice(i + 1);
+  assert.ok(after.length > 0, 'nothing is drawn after the score, so this test proves nothing');
+  const faded = after.filter((k) => k.alpha < 1);
+  assert.equal(faded.length, 0,
+    `${faded.length} readouts after the score were left dimmed, starting with "${faded[0] && faded[0].str}"`);
+  assert.equal(c.globalAlpha, 1, 'drawHud left globalAlpha turned down');
+});
+
 // --- the title screen's hull selector
 //
 // Two rows of very different widths: a hull name is at most ten
@@ -597,4 +681,161 @@ test('the longest subtitle fits its box, and nothing shares its row', () => {
   // The counter is on the name row precisely so that it cannot collide
   // with this one; if it moves back, the collision comes back.
   assert.equal(TITLE_HULL.nameY < TITLE_HULL.subY, true);
+});
+
+// --- the score tell
+//
+// The score readout said the same thing at four hundred points as at
+// four million. Telling a pilot mid-run that they are on course for the
+// board is the cheapest tension the HUD can buy, and it has to be
+// mid-run: afterwards it is just a result.
+
+const board = (...points) => ({
+  online: true,
+  runs: points.map((p) => ({ score: { points: p } })),
+});
+
+test('a score that would take first says so', () => {
+  assert.equal(scoreStanding(9000, board(5000, 4000, 1000)), 'first');
+});
+
+test('a score that would place, but not first, says that instead', () => {
+  const full = board(...Array.from({ length: BOARD_ROWS }, (_, i) => 10000 - i * 100));
+  assert.equal(scoreStanding(9500, full), 'board');
+  assert.equal(scoreStanding(10500, full), 'first');
+});
+
+test('a score that would place nowhere is not dressed up', () => {
+  const full = board(...Array.from({ length: BOARD_ROWS }, (_, i) => 10000 - i * 10));
+  assert.equal(scoreStanding(500, full), null);
+});
+
+test('matching a score is not beating it', () => {
+  // Equal to the leader is a tie, not first place, and equal to the worst
+  // thing on a full board does not displace it. Both have to be strict,
+  // or the HUD promises a placing the backend will not give.
+  assert.equal(scoreStanding(5000, board(5000, 4000, 1000)), 'board',
+    'tying the leader was reported as taking first');
+  const full = board(...Array.from({ length: BOARD_ROWS }, (_, i) => 10000 - i * 100));
+  assert.equal(scoreStanding(10000, full), 'board', 'tying the leader of a full board took first');
+  assert.equal(scoreStanding(9100, full), null,
+    'tying the last place on a full board was reported as placing');
+});
+
+test('a board with room left on it takes anything', () => {
+  // Three entries and ten places: a modest run really is on course.
+  assert.equal(scoreStanding(10, board(9000, 8000, 7000)), 'board');
+});
+
+test('the board does not have to arrive in order', () => {
+  // Nothing promises the backend hands these back sorted, and the two
+  // comparisons that matter read the ends of the list. Given a full board
+  // bottom-up, an unsorted version of this calls a mid-table run first
+  // place, because the first row it looks at is the worst one.
+  const ascending = board(...Array.from({ length: BOARD_ROWS }, (_, i) => 9000 + i * 100));
+  assert.equal(scoreStanding(9550, ascending), 'board',
+    'a mid-table run was read off the wrong end of an unsorted board');
+  assert.equal(scoreStanding(10000, ascending), 'first');
+  assert.equal(scoreStanding(8000, ascending), null);
+});
+
+test('junk rows do not pad the board into looking beatable', () => {
+  // A full board with three unreadable rows alongside it has thirteen
+  // entries, and the worst of them reads as zero — so without the filter
+  // every score on earth places, and a four-hundred-point run is told it
+  // is on the board.
+  const full = Array.from({ length: BOARD_ROWS }, (_, i) => ({ score: { points: 10000 - i * 100 } }));
+  const net = { online: true, runs: [...full, null, {}, { score: {} }] };
+  assert.equal(scoreStanding(500, net), null, 'junk rows made a full board look beatable');
+  assert.equal(scoreStanding(9950, net), 'board');
+  assert.equal(scoreStanding(10500, net), 'first');
+});
+
+test('a board cached from before going offline is not claimed against', () => {
+  // The leaderboard sticks around on screen after the backend drops, so
+  // the rows are still there to read. They are no longer something this
+  // run can place on, and saying otherwise promises a placing that will
+  // never appear. Your own best is all that can honestly be claimed.
+  const stale = { online: false, runs: [{ score: { points: 9000 } }, { score: { points: 8000 } }] };
+  assert.equal(scoreStanding(100, stale, 0), null,
+    'an offline run was told it had placed on a board it cannot reach');
+  assert.equal(scoreStanding(5000, stale, 4000), 'best',
+    'offline, beating your own best is the one thing left to say');
+});
+
+test('an empty board is all yours', () => {
+  assert.equal(scoreStanding(1, { online: true, runs: [] }), 'first');
+});
+
+test('offline, it falls back to your own best and says nothing without one', () => {
+  const off = { online: false, runs: [] };
+  assert.equal(scoreStanding(5000, off, 4000), 'best');
+  assert.equal(scoreStanding(3000, off, 4000), null);
+  assert.equal(scoreStanding(3000, off, 0), null,
+    'with no board and no personal best there is nothing to claim');
+});
+
+test('a score of nothing never claims anything', () => {
+  for (const s of [0, -1, NaN, undefined]) {
+    assert.equal(scoreStanding(s, board(1), 1), null, `score ${s} claimed a standing`);
+  }
+});
+
+test('a malformed board does not crash or over-claim', () => {
+  for (const net of [undefined, {}, { online: true }, { online: true, runs: null },
+    { online: true, runs: [null, {}, { score: {} }] }]) {
+    assert.doesNotThrow(() => scoreStanding(100, net, 0), `threw on ${JSON.stringify(net)}`);
+  }
+});
+
+test('each standing has its own colour, and none is the ordinary one', () => {
+  // "None is the ordinary one" is the half that was missing. The board
+  // tell started out as COL.cool, which is the colour of the hull name
+  // drawn an inch to its right and of half the rest of the HUD, so the
+  // one thing the tell has to do — look different — it did not do.
+  const ordinary = { 'COL.cool': COL.cool, 'COL.hudBright': COL.hudBright,
+    'COL.hudText': COL.hudText, 'COL.coolHi': COL.coolHi };
+  const seen = new Set();
+  for (const [name, tell] of Object.entries(SCORE_TELL)) {
+    assert.match(tell.colour, /^#[0-9a-f]{6}$/i, `${name} has no colour`);
+    assert.ok(tell.hz > 0 && tell.hz < 8, `${name} flashes at ${tell.hz}Hz`);
+    assert.ok(!seen.has(tell.colour), `${name} shares a colour with another standing`);
+    seen.add(tell.colour);
+    for (const [cname, c] of Object.entries(ordinary)) {
+      assert.notEqual(tell.colour.toLowerCase(), c.toLowerCase(),
+        `the ${name} tell is ${cname}, the colour the HUD already draws everything else in`);
+    }
+  }
+  // Taking first should be the most urgent of them.
+  assert.ok(SCORE_TELL.first.hz > SCORE_TELL.board.hz);
+  assert.ok(SCORE_TELL.board.hz > SCORE_TELL.best.hz);
+});
+
+test('the tell flashes, and never flashes the number away', () => {
+  let min = 1;
+  let max = 0;
+  for (let t = 0; t < 2; t += 1 / 120) {
+    const { alpha } = scoreTell('first', t, false);
+    min = Math.min(min, alpha);
+    max = Math.max(max, alpha);
+  }
+  assert.ok(max - min > 0.3, `the pulse only varies by ${(max - min).toFixed(2)}; it will not read as flashing`);
+  assert.ok(min > 0.4,
+    `the number fades to ${min.toFixed(2)} alpha — unreadable at the moment it most matters`);
+});
+
+// Flashing is an accessibility concern and the game has a setting for
+// it. The colour carries the information; the strobe is decoration.
+test('REDUCE FLASHING keeps the colour and drops the pulse', () => {
+  for (let t = 0; t < 2; t += 0.1) {
+    const { colour, alpha } = scoreTell('first', t, true);
+    assert.equal(alpha, 1, 'it still pulses with flashing reduced');
+    assert.equal(colour, SCORE_TELL.first.colour, 'it lost the colour as well as the pulse');
+  }
+});
+
+test('an ordinary score is drawn the ordinary way', () => {
+  const { colour, alpha } = scoreTell(null, 1.2, false);
+  assert.equal(alpha, 1);
+  assert.notEqual(colour, SCORE_TELL.first.colour);
 });

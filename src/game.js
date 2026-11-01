@@ -77,6 +77,7 @@ export function makeGame(modSpec = null) {
     runTime: 0,     // clock for the whole campaign, which is what gets submitted
     toast: null,
     boss: null,            // set once the arena at the far end is entered
+    bossDown: false,       // this hull's boss has been beaten; see the arena check
     lootT: 0,              // seconds left to sweep a beaten boss's wreck
     leaving: false,        // the loot window closed; run out through the end
     bossWreck: null,       // where it died, for the countdown readout
@@ -195,6 +196,7 @@ function reset(game) {
   game.spawnCd = 1.2;
   game.foeCd = 3.0;
   game.boss = null;
+  game.bossDown = false;
   game.lootT = 0;
   game.leaving = false;
   game.bossWreck = null;
@@ -285,6 +287,7 @@ function loadNextHull(game) {
 
   game.submitted = false;
   game.boss = null;
+  game.bossDown = false;
   game.lootT = 0;
   game.leaving = false;
   game.bossWreck = null;
@@ -527,8 +530,14 @@ export function update(game, dt) {
     game.boss && !bossBeaten(game.boss) ? arenaLeft(game) : null);
 
   // --- the arena at the far end
+  // `bossDown` and not just `!game.boss`: killing the boss sets
+  // game.boss to null so the camera unpins and the wall comes down, and
+  // the player is then standing in the arena sweeping the wreck for ten
+  // seconds with nothing holding the spawn back. A second, identical
+  // boss arrived on the very next frame, banner and all. Reported from
+  // play as "all bosses occur twice", and exactly right.
   const inArena = p.x > arenaLeft(game) + 70;
-  if (inArena && !game.boss) {
+  if (inArena && !game.boss && !game.bossDown) {
     game.boss = makeBoss(game);
     banner(game, game.boss.name, game.boss.spec.tag, 3.0);
     sfxArrival();
@@ -555,6 +564,7 @@ export function update(game, dt) {
     game.lootT = BOSS.lootWindow;
     game.bossWreck = { x: game.boss.x, y: game.boss.y };
     game.boss = null;
+    game.bossDown = true;      // this hull's arena is spent
     banner(game, 'WRECK CLEARED', 'COLLECT — ENTER TO LAUNCH EARLY', 2.4);
   }
   if (game.lootT > 0) {
