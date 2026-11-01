@@ -958,15 +958,24 @@ cannot sit on the hull-clear screen forever.
 
 ## Help
 
-`H` or `/` from anywhere that is not flight. Three pages, and all three are
-here because a page you cannot see is a page nobody checks:
+`H` or `/` from anywhere that is not flight, arrows to page. Four pages,
+and all four are here because a page you cannot see is a page nobody
+checks:
 
 | | |
 | --- | --- |
 | ![Controls](docs/help-1.png) | ![The run](docs/help-2.png) |
 | **CONTROLS** | **THE RUN** — what a hull asks of you, what pays and what costs |
-| ![Reading the screen](docs/help-3.png) | |
-| **READING THE SCREEN** — the radar legend, the loot legend, and the tells that say what is about to shoot you | |
+| ![Reading the screen](docs/help-3.png) | ![Flying it well](docs/help-4.png) |
+| **READING THE SCREEN** — the radar legend, the loot legend, and the tells that say what is about to shoot you | **FLYING IT WELL** — what the hull rewards once you can stay alive |
+
+The fourth page is strategy rather than reference, which is the thing a
+control list cannot tell you: that reverse thrust brakes before it flips,
+that the lane between the surfaces is the calm part, that killing a warden
+first makes its neighbours killable at all, that you are *allowed* to
+outrun a miniboss and should count the cost of stopping, that two mods at
+tier III change a run where five at tier I do not, and that a hull which
+is killing you is a hull whose sweep bonus is not worth it.
 
 A test measures each page against the layout and fails if one runs past
 its own footer, checks every row fits its column, and asserts that every
@@ -1347,37 +1356,84 @@ registering the same name while holding that token.
 
 ### Anti-cheat — what it does and does not do
 
-**You cannot verify a score from a client you do not control.** The only real
-verification is re-simulating the run server-side from an input trace, and
-this does not do that: the game is several thousand lines of JavaScript and
-the server is Go.
+**You cannot verify a score from a client you do not control.** The only
+real verification is re-simulating the run server-side from an input
+trace, and this does not do that: the game is several thousand lines of
+JavaScript and the server is Go. Everything below makes cheating *cost*
+something; none of it makes a score *proof* of anything.
 
-What it does is make cheating cost something, removing the easy routes in
-roughly ascending order of effort to defeat:
+Worth being clear about who is being stopped. In rough order of effort:
 
-1. **A run must be opened before it can be submitted**, and each run can be
-   submitted once. Replaying a captured request stops working.
-2. **The server times the run itself.** A claimed 400-second campaign that
-   took eleven seconds of wall clock is rejected. This is the check the
-   physics bounds cannot make, because they only see the numbers the client
-   chose to send.
-3. **The submission is signed** with a secret issued at run start and never
-   present in the page source. Forging a request means reading it out of a
-   live session rather than reading the code.
-4. **Progress heartbeats are counted.** A long run that never once reported
-   being in flight did not happen the way it claims.
+| | Who | Stopped by |
+| --- | --- | --- |
+| 1 | Someone who finds `/api/scores` in devtools and posts a number | the run requirement, the signature |
+| 2 | Someone who replays a captured submission | single-use runs |
+| 3 | Someone who posts an absurd number from a real run | the plausibility bounds |
+| 4 | Someone who fast-forwards the client clock | the server's own wall clock |
+| 5 | Someone who opens a run and submits without playing | the heartbeat count |
+| 6 | **Someone who modifies the client, plays slowly, and lies a little at the end** | **nothing here** |
 
-Someone running a modified client can still defeat all four by playing
-slowly and lying at the end. That is inherent. The honest position is to say
-so rather than imply the leaderboard proves anything.
+Six is inherent, and the honest position is to say so rather than imply
+the board proves anything.
 
-`-require-runs` rejects any score not tied to an opened run, which closes the
-simplest bypass of all: not opening one. It is off by default so an older
-client keeps working.
+#### The five layers
 
-A rejected submission deliberately does **not** burn the run — a client bug
-or a mangled request would otherwise void a legitimate campaign, and without
-the secret an attacker gains nothing by retrying.
+**A run must be opened first, and spent once.** `POST /api/runs/start`
+mints a run id and a 256-bit secret. A submission naming a run that was
+already submitted gets `409`. Replaying a captured request therefore stops
+working after the first time.
+
+**The submission is signed.** The secret never appears in the page source
+— it is handed out per run over the wire and imported straight into
+WebCrypto as a non-extractable HMAC key. The client signs
+`runId|points|timeSec|levels`, with the time to exactly two decimals,
+and `sign()` in `internal/api/runs.go` reproduces that byte for byte;
+anything else is `422`. Forging a submission means reading the secret out
+of a live session rather than reading the code.
+
+**The server times the run itself.** It knows when the run was opened, so
+a claimed 400-second campaign that took eleven seconds of wall clock is
+rejected regardless of what the client says its clock did. There is
+**25 seconds** of slack for pauses, loading and a sloppy frame clock. This
+is the check the physics bounds cannot make, because they only ever see
+the numbers the client chose to send.
+
+**Progress heartbeats are counted.** `POST /api/presence` is sent while
+flying anyway, for the "who is out there" list; a run longer than a
+minute is expected to have reported in at least **three times a minute**.
+A long run that never once said it was in flight did not happen the way
+it claims. The rate is deliberately forgiving — a dropped connection
+should not void a campaign.
+
+**The numbers themselves have to be physically possible.** That is
+`internal/validate`, and it has its own section below, because getting it
+*wrong* has cost real players real runs twice.
+
+#### Everything else about the surface
+
+- A run expires after **8 hours**, swept every 15 minutes, and open runs
+  are snapshotted so a restart does not void the campaigns in flight.
+- Every `/api/` route is behind a per-IP token bucket, **10 requests a
+  second sustained with a burst of 40** by default (`-rate-limit`,
+  `-rate-burst`).
+- Bodies are capped and unknown JSON fields are rejected outright, so a
+  submission cannot smuggle a field a later version might read.
+- `-require-runs` rejects any score not tied to an opened run, closing the
+  simplest bypass of all: not opening one. Off by default so an older
+  client keeps working.
+- A rejected submission deliberately does **not** burn the run. A client
+  bug or a mangled request would otherwise void a legitimate campaign, and
+  without the secret an attacker gains nothing by retrying.
+- Tokens are 256-bit and the server stores only their SHA-256, so the
+  database does not contain anything that logs anyone in.
+
+#### What would actually prove a score
+
+Submitting the input trace and re-simulating it server-side against the
+same seed. The game is deterministic from each hull's `seed` and a fixed
+120Hz timestep, so it is achievable — it needs the simulation to exist in
+Go as well as JavaScript, or the server to run the JavaScript. It is a
+separate piece of work and it is not done here.
 
 ### Legacy identity
 

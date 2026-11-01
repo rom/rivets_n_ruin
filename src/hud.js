@@ -562,6 +562,17 @@ function drawBonus(ctx, game, x, y) {
 // them — the mod list used to grow a row per mod with no bound, and with
 // everything fitted it ran straight through "ENTER TO LAUNCH" and the
 // armourer prompt underneath it.
+// The hull selector on the title screen. Its two rows have very
+// different widths — a hull name is at most ten characters, a subtitle
+// up to thirty-six — so where the counter can go depends on which row it
+// is on, and it was on the wrong one.
+export const TITLE_HULL = {
+  boxHalf: 140,
+  countX: 128,      // right edge of the counter, from the centre
+  nameY: 104,
+  subY: 118,
+};
+
 export const OVERVIEW = {
   top: 142,
   pitch: 11,
@@ -673,7 +684,12 @@ export function drawScreen(ctx, game) {
     text(ctx, canRight ? '>' : ' ', cx + 118, 104, canRight ? COL.cool : '#20262e', FONT_BIG, 'center');
     text(ctx, sel.name, cx, 104, COL.hudBright, FONT, 'center');
     text(ctx, sel.subtitle, cx, 118, COL.hudText, FONT, 'center');
-    text(ctx, (game.startHull + 1) + '/' + game.specs.length, cx + 96, 118, COL.coolHi, FONT, 'right');
+    // On the name row, not the subtitle row. The subtitles run to 36
+    // characters — "THE LAST NAME — FLAGSHIP OF THE LINE" — which is
+    // 216px centred, and the counter at the old position was drawn
+    // through the last letters of it: "PATROL HUL1/25".
+    text(ctx, (game.startHull + 1) + '/' + game.specs.length,
+      cx + TITLE_HULL.countX, 104, COL.coolHi, FONT, 'right');
 
     ctx.globalAlpha = pulse;
     text(ctx, 'ENTER TO LAUNCH', cx, 142, COL.warmHi, FONT, 'center');
@@ -1134,6 +1150,31 @@ export const HELP = [
       { k: 'A FACETED BUBBLE', v: 'A deflector. Put damage through it' },
       { k: 'A LENGTHENING LINE', v: 'A lancer, about to charge down it' },
       { k: 'A PINK MISSILE', v: 'It follows. Out-turn it, or shoot it down' },
+      { k: 'A BRIGHT PLATE', v: 'A mirror. It sends your shots back. Flank it' },
+      { k: 'A LIT WIRE', v: 'A chainer pair. The wire hurts; kill either end' },
+    ],
+  },
+  {
+    title: 'FLYING IT WELL',
+    sub: 'WHAT THE HULL REWARDS, ONCE YOU CAN STAY ALIVE',
+    rows: [
+      { head: 'MOMENTUM IS THE GAME' },
+      { k: 'COAST, DO NOT HOLD', v: 'Horizontal drag is low. Tap and glide' },
+      { k: 'STOP BEFORE YOU TURN', v: 'Reverse thrust brakes first, then flips' },
+      { k: 'HEIGHT IS SAFETY', v: 'Most fire comes from the surfaces. The lane is calm' },
+      { head: 'PICK YOUR FIGHTS' },
+      { k: 'GUNS PAY TWICE', v: 'Score now, and the sweep bonus at the dock' },
+      { k: 'KILL WARDENS FIRST', v: 'Their neighbours take nothing while they live' },
+      { k: 'OUTRUN A MINIBOSS', v: 'You are allowed to. Count the cost of stopping' },
+      { k: 'LEAVE THE LAST GUN', v: 'If a hull is killing you, the bonus is not worth it' },
+      { head: 'THE ECONOMY' },
+      { k: 'BANK BETWEEN HULLS', v: 'Coins and bars survive the run and the tab' },
+      { k: 'BARS BUY SYSTEMS', v: 'The permanent mods cost bars, not coins' },
+      { k: 'TWO MODS BEAT FIVE', v: 'A tier III changes a run. Five tier Is do not' },
+      { k: 'SWEEP THE WRECK', v: 'A dead boss sheds its hold for ten seconds' },
+      { head: 'WHEN IT GOES WRONG' },
+      { k: 'A LEECH IS TIMED', v: 'It lets go. Keep flying rather than panicking' },
+      { k: 'SHIELD UNDER A THIRD', v: 'Break off. A refill is 40 and the hull is full of them' },
     ],
   },
 ];

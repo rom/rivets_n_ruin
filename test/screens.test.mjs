@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   HELP, HELP_LAYOUT, HELP_PAGES, SETTINGS_LAYOUT, END_LAYOUT, endLayout,
-  rankLine, REASON_CHARS, settingsWindow, HUD_X, HUD_ARMORY,
+  rankLine, REASON_CHARS, settingsWindow, HUD_X, HUD_ARMORY, TITLE_HULL,
   drawHelp, drawSettings, drawHud,
 } from '../src/hud.js';
 import {
@@ -36,8 +36,11 @@ test('no help page overruns its own footer', () => {
     for (const row of p.rows) {
       y += row.head ? HELP_LAYOUT.headGap + HELP_LAYOUT.headPitch : HELP_LAYOUT.pitch;
     }
-    assert.ok(y <= HELP_LAYOUT.bottom,
-      `"${p.title}" ends at y=${y}, past the footer at ${HELP_LAYOUT.bottom}`);
+    // A margin, not just "does not overrun": a page whose last row sits
+    // on the footer reads as one block of text with the key hints.
+    assert.ok(y + HELP_LAYOUT.pitch <= HELP_LAYOUT.bottom,
+      `"${p.title}" ends at y=${y} against a footer at ${HELP_LAYOUT.bottom} — `
+      + `${HELP_LAYOUT.bottom - y}px clear, which is under one row`);
   }
 });
 
@@ -567,4 +570,31 @@ test('the HUD draws at its widest without throwing', () => {
   game.score = 99999999;
   game.hullHaul = { coins: 999, bars: 9, coffins: 9, treasures: 9, value: 1 };
   assert.doesNotThrow(() => drawHud(c, game, { muted: false, audio: true }));
+});
+
+// --- the title screen's hull selector
+//
+// Two rows of very different widths: a hull name is at most ten
+// characters, a subtitle up to thirty-six. The hull counter sat on the
+// subtitle row and was drawn straight through the end of it — the title
+// screen read "SILVER CLASS — PATROL HUL1/25".
+
+test('the hull counter clears the longest name', () => {
+  const longest = Math.max(...LEVELS.map((l) => l.name.length));
+  const half = (longest * CHAR) / 2;
+  const counter = `${LEVELS.length}/${LEVELS.length}`.length * CHAR;
+  assert.ok(half + 6 <= TITLE_HULL.countX - counter,
+    `the longest hull name reaches x=${half} from centre and the counter starts at `
+    + `${TITLE_HULL.countX - counter}`);
+});
+
+test('the longest subtitle fits its box, and nothing shares its row', () => {
+  const longest = Math.max(...LEVELS.map((l) => l.subtitle.length));
+  const half = (longest * CHAR) / 2;
+  assert.ok(half <= TITLE_HULL.boxHalf - 4,
+    `"${LEVELS.find((l) => l.subtitle.length === longest).subtitle}" is ${longest} `
+    + `characters and runs ${half}px either side of centre, in a box ${TITLE_HULL.boxHalf} wide`);
+  // The counter is on the name row precisely so that it cannot collide
+  // with this one; if it moves back, the collision comes back.
+  assert.equal(TITLE_HULL.nameY < TITLE_HULL.subY, true);
 });
