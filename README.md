@@ -229,17 +229,66 @@ announced rather than left to be noticed.
 
 ## Gun towers
 
-Six kinds, introduced hull by hull. Each is a different problem rather than
-a tougher version of the same one.
+Introduced hull by hull. Each is a different problem rather than a
+tougher version of the same one.
 
 | Tower | From | Behaviour |
 | --- | --- | --- |
 | **GUN** | ARGENTUM | Aimed three-round burst with lead prediction |
+| **POPGUN** | OSMIUM | The same gun, small and quick. A speed bump |
 | **FLAK** | TANTALUM | A wide fan — cannot be beaten by sitting off its line |
+| **POST** | TANTALUM | An observation post. Unarmed; the interceptors keep coming while it stands |
 | **LANCE** | CUPRUM | Charges visibly, then one very fast shot. Respect the tell |
 | **ROCKET** | CUPRUM | Launches homing missiles. The only one that follows you |
+| **RADAR** | CUPRUM | A spinning dish. Everything near it sees you sooner and swings faster |
 | **MORTAR** | PYRITE | Lobs heavy shells on an arc that ignores your altitude |
+| **BASTION** | PYRITE | The same gun at three times the weight. Slow to come round; punishing if you loiter |
+| **ARRAY** | WOLFRAM | A sweeping phased array. A radar with half the hull inside it |
 | **WARDEN** | WOLFRAM | Shields its neighbours. Changes the order you must kill in |
+| **SILO** | FERRUM | Long-range missiles, opened from the far side of the screen |
+
+### Three weights of the same gun
+
+POPGUN, GUN and BASTION ask the same question — do not be in front of
+me — at 0.45×, 1× and 3.2× the hit points. Size is the message: one
+reads as something to drive past and one as something to plan around,
+before either has fired. `r` in the spec drives the art and the
+mounting and nothing else, so a size is not a different tower
+pretending to be one.
+
+### The ones that do not shoot
+
+Every tower above answers the same question: how do I avoid being in
+front of it. These ask a different one — whether it is worth spending
+time on something that is not shooting at you.
+
+A **RADAR** or an **ARRAY** paints its neighbours: while it stands,
+every tower inside its reach wakes earlier and comes round faster, and
+shows a ring in the dish's colour so the effect is visible rather than
+inferred. Same shape of rule as the warden's aura, and for the same
+reason — it changes the order you kill things in. A **POST** keeps the
+interceptor stream thick. Cheap to kill and easy to ignore, which is
+the trap.
+
+### Spaceports
+
+A place rather than a pattern. A flat apron with the port's traffic
+control at one end, fuel standing in the middle and whatever was parked
+when the shooting started.
+
+| | |
+| --- | --- |
+| **CONTROL** | Directs: paints the apron and calls interceptors |
+| **FUEL** | Does nothing until hit, and then a great deal |
+| **LANDER** | Parked, unarmed, worth more than it looks |
+
+The tanks are placed close enough that one going up reaches the next,
+so a port can be taken apart with a single shot in the right place — or
+taken apart around you, if you came in close to shoot the lander. The
+chain goes through the same blast queue as a grenade, which is what
+makes it work: the blast kills the next tank, which queues its own. It
+is queued rather than recursive, because a tank igniting a tank that
+ignites the first one back is a stack overflow dressed as a feature.
 
 A hull's roster is `LEVELS[].towers`. While a warden lives, nearby towers
 take no damage and visibly shimmer — so the question stops being "what is
@@ -2031,6 +2080,7 @@ src/enemies.js    turret and interceptor behaviour
 src/miniboss.js   the four mid-hull minibosses
 src/miniart.js    their bodies, from the same vocabulary as the attackers
 src/boss.js       boss arenas, phases, weak points and the wreck window
+src/towerart.js   what each hull installation looks like
 src/bossart.js    the eight boss shapes and their destructible sections
 src/gates.js      laser gates: the wall, the emitter, and what breaks it
 src/foeart.js     the twelve attacker bodies

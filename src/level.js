@@ -130,6 +130,39 @@ function layout(r, spec) {
       sx += w + rr(r, 40, 76);
     }
     advance = sx;
+  } else if (roll < 0.935) {
+    // A spaceport: a place rather than a pattern.
+    //
+    // Everything else on a hull is something to get past. This is
+    // somewhere to decide about — a flat apron with the port's traffic
+    // control at one end, fuel standing in the middle and whatever was
+    // parked when the shooting started. The tanks chain, so the whole
+    // installation can come apart from one shot in the right place,
+    // including around you if you take it at close range.
+    const fromTop = r() < 0.5;
+    const dir = fromTop ? 1 : -1;
+    const deck = rr(r, 26, 40);
+    const y = fromTop ? FIELD_TOP + deck : FIELD_BOT - deck;
+    const w = rr(r, 250, 340);
+    obstacles.push({
+      x: 0, y: fromTop ? FIELD_TOP : FIELD_BOT - deck, w, h: deck,
+      face: dir,
+    });
+    // Control at one end, so the port has a front door.
+    turrets.push({ x: rr(r, 22, 40), y, dir, kind: 'control' });
+    // Tanks in a cluster, close enough that one going up reaches the
+    // next. Spaced by hand rather than randomly: a chain that only
+    // sometimes chains is a mechanic nobody learns.
+    const tanks = ri(r, 2, 3);
+    const t0 = w * 0.34;
+    for (let i = 0; i < tanks; i++) {
+      turrets.push({ x: t0 + i * 54, y, dir, kind: 'tank' });
+    }
+    // ...and something parked at the far end, which is the reason to
+    // come in rather than go round.
+    turrets.push({ x: w - rr(r, 40, 70), y, dir, kind: 'lander' });
+    if (r() < 0.5) turrets.push({ x: w * 0.6, y, dir, kind: 'post' });
+    advance = w;
   } else if (roll < 0.96) {
     // A narrows: the corridor itself closes down for a long stretch and
     // opens again. Single obstacles are dodged; this has to be flown.
@@ -201,14 +234,23 @@ export function buildLevel(spec) {
     .filter((t) => !buried(t.x, t.y + t.dir * 6))
     .map((t, i) => {
       const roster = spec.towers && spec.towers.length ? spec.towers : ['gun'];
-      // Deterministic from position, so a hull always mounts the same guns.
-      const kind = roster[Math.floor(hash2(Math.round(t.x), 97) * roster.length)];
+      // A spot may name its own kind — a spaceport is an arrangement of
+      // specific things, not a row of whatever the hull happens to
+      // field. Everything else is deterministic from position, so a
+      // hull always mounts the same guns in the same places.
+      const kind = t.kind && TOWERS[t.kind]
+        ? t.kind
+        : roster[Math.floor(hash2(Math.round(t.x), 97) * roster.length)];
       const tw = TOWERS[kind] || TOWERS.gun;
       return {
       x: t.x, y: t.y, dir: t.dir, kind, tower: tw,
       angle: t.dir * Math.PI / 2,
       hp: Math.round(spec.turretHp * tw.hpMul), dead: false,
-      charge: 0, shielded: false,
+      charge: 0, shielded: false, painted: null,
+      // Offset so a row of identical structures does not blink in
+      // lockstep, which reads as one object repeated rather than
+      // several standing near each other.
+      t: hash2(Math.round(t.x), 31) * 6,
       cd: Math.random() * 0.8,
       burstLeft: 0, burstTimer: 0,
       };

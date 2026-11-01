@@ -122,12 +122,37 @@ test('every tower a hull mounts is implemented, and rosters grow', async () => {
   assert.ok(counts[counts.length - 1] >= 4, 'the last hull should mount most kinds');
 });
 
+// The pieces a spaceport is built from. They arrive as a place, not as
+// a roster entry, which is the one way a tower reaches a hull that did
+// not ask for it.
+const PORT_PARTS = new Set(['control', 'tank', 'lander', 'post']);
+
 test('every tower spec is complete and distinct', async () => {
   const { TOWERS } = await import('../src/config.js');
+  // Two shapes of tower now. The ones that shoot need the firing
+  // fields; the ones that do not — a dish, a fuel tank, a parked
+  // lander — have no business carrying a burst count, and requiring
+  // one would mean inventing numbers nothing reads.
+  const common = ['name', 'hpMul', 'score', 'colour'];
+  const firing = ['burst', 'burstGap', 'cooldownMul', 'bulletSpeed'];
   const names = new Set();
   for (const [kind, tw] of Object.entries(TOWERS)) {
-    for (const f of ['name', 'hpMul', 'score', 'burst', 'burstGap', 'cooldownMul', 'bulletSpeed', 'colour']) {
+    for (const f of common) {
       assert.ok(tw[f] !== undefined, `TOWERS.${kind}.${f} is missing`);
+    }
+    for (const f of firing) {
+      if (tw.inert) {
+        assert.equal(tw[f], undefined,
+          `TOWERS.${kind} is inert but carries ${f}; one of the two is wrong`);
+      } else {
+        assert.ok(tw[f] !== undefined, `TOWERS.${kind}.${f} is missing`);
+      }
+    }
+    // An inert tower has to justify itself: something other than
+    // standing there, or it is scenery with hit points.
+    if (tw.inert) {
+      assert.ok(tw.paint || tw.watch || tw.volatile || kind === 'lander',
+        `TOWERS.${kind} neither shoots nor does anything else`);
     }
     assert.match(tw.colour, /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, `${kind} colour`);
     assert.ok(!names.has(tw.colour), `${kind} shares a colour with another tower`);
@@ -142,7 +167,12 @@ test('generated towers carry a kind and a scaled hit-point total', async () => {
     const lvl = buildLevel(spec);
     for (const t of lvl.turrets) {
       assert.ok(t.kind && TOWERS[t.kind], `${spec.name} produced a tower with kind ${t.kind}`);
-      assert.ok((spec.towers || ['gun']).includes(t.kind),
+      // A hull mounts what its roster says, with one exception: a
+      // spaceport is an arrangement of specific structures rather than
+      // a row of whatever the hull happens to field, so its parts are
+      // allowed anywhere a port is. Named explicitly, so a roster leak
+      // is still caught.
+      assert.ok((spec.towers || ['gun']).includes(t.kind) || PORT_PARTS.has(t.kind),
         `${spec.name} mounted a ${t.kind}, which is not on its roster`);
       assert.equal(t.hp, Math.round(spec.turretHp * TOWERS[t.kind].hpMul));
     }
@@ -351,4 +381,228 @@ test('every new attacker has a body of its own', async () => {
     assert.ok(BODY_KINDS.includes(kind), `${kind} has no body and would draw as a warder`);
     assert.ok(SPEC[kind], `${kind} has no spec`);
   }
+});
+
+// --- the installations that are not guns
+//
+// Each of these asks something the gun towers do not, so each is tested
+// against the thing it asks rather than against its hit points.
+
+function rig(kinds, opts = {}) {
+  // A bare level with the towers placed where the test wants them, so
+  // the behaviour under test is not at the mercy of the generator.
+  const turrets = kinds.map((k, i) => ({
+    x: (opts.x || 500) + i * (opts.gap === undefined ? 40 : opts.gap),
+    y: 100, dir: 1, kind: k.kind || k, tower: null,
+    angle: Math.PI / 2, hp: k.hp || 10, dead: false,
+    charge: 0, shielded: false, painted: null, t: 0,
+    cd: 0, burstLeft: 0, burstTimer: 0,
+  }));
+  return turrets;
+}
+
+test('a radar paints its neighbours and stops the moment it dies', async () => {
+  const { TOWERS, DT } = await import('../src/config.js');
+  const { updateTurrets } = await import('../src/enemies.js');
+  const turrets = rig(['radar', 'gun'], { gap: 100 });
+  for (const t of turrets) t.tower = TOWERS[t.kind];
+  const game = {
+    state: 'play', level: { turrets, spec: { turretCooldown: 2, turretRange: 300 }, gates: [] },
+    player: { x: 400, y: 200, alive: true, vx: 0, vy: 0 },
+  };
+
+  updateTurrets(game, DT);
+  assert.ok(turrets[1].painted, 'a gun next to a live dish is not painted');
+  assert.equal(turrets[1].painted.name, 'RADAR');
+  // The dish does not paint itself, which would be a buff with no
+  // counterplay attached to it.
+  assert.equal(turrets[0].painted, null, 'the dish painted itself');
+
+  turrets[0].dead = true;
+  updateTurrets(game, DT);
+  assert.equal(turrets[1].painted, null,
+    'the paint outlived the dish — a buff that survives its source reads as the game cheating');
+});
+
+test('paint lands only on things that can use it', async () => {
+  // A fuel tank has no aim to sharpen and no wake to bring forward, so
+  // painting one changes nothing — and the renderer draws a ring
+  // around whatever is painted, which would promise a buff that does
+  // not exist. Found by looking at a spaceport on screen: the tanks
+  // were haloed by their own control tower.
+  const { TOWERS, DT } = await import('../src/config.js');
+  const { updateTurrets } = await import('../src/enemies.js');
+  const turrets = rig(['control', 'tank', 'lander', 'gun'], { gap: 40 });
+  for (const t of turrets) t.tower = TOWERS[t.kind];
+  const game = {
+    state: 'play', level: { turrets, spec: { turretCooldown: 2, turretRange: 300 }, gates: [] },
+    player: { x: 400, y: 200, alive: true, vx: 0, vy: 0 },
+  };
+  updateTurrets(game, DT);
+  for (const t of turrets) {
+    if (t.tower.inert) {
+      assert.equal(t.painted, null, `a ${t.kind} was painted, and cannot use it`);
+    }
+  }
+  assert.ok(turrets[3].painted, 'the gun beside the control tower was not painted');
+});
+
+test('paint reaches only as far as it says it does', async () => {
+  const { TOWERS, DT } = await import('../src/config.js');
+  const { updateTurrets } = await import('../src/enemies.js');
+  const far = TOWERS.radar.paint + 60;
+  const turrets = rig(['radar', 'gun'], { gap: far });
+  for (const t of turrets) t.tower = TOWERS[t.kind];
+  const game = {
+    state: 'play', level: { turrets, spec: { turretCooldown: 2, turretRange: 300 }, gates: [] },
+    player: { x: 0, y: 200, alive: true, vx: 0, vy: 0 },
+  };
+  updateTurrets(game, DT);
+  assert.equal(turrets[1].painted, null, `a gun ${far}px away was painted by a ${TOWERS.radar.paint}px dish`);
+});
+
+test('a dish turns on its own, and an array sweeps instead', async () => {
+  const { TOWERS, DT } = await import('../src/config.js');
+  const { updateTurrets } = await import('../src/enemies.js');
+  const turrets = rig(['radar', 'array'], { gap: 900 });
+  for (const t of turrets) t.tower = TOWERS[t.kind];
+  const game = {
+    state: 'play', level: { turrets, spec: { turretCooldown: 2, turretRange: 300 }, gates: [] },
+    // Nobody anywhere near: machinery that only moves when watched is
+    // scenery, and reads as it.
+    player: { x: -5000, y: 200, alive: true, vx: 0, vy: 0 },
+  };
+  const a0 = turrets[0].angle;
+  const seen = new Set();
+  for (let i = 0; i < 400; i++) { updateTurrets(game, DT); seen.add(Math.round(turrets[1].angle * 20)); }
+  assert.notEqual(turrets[0].angle, a0, 'the dish never turned');
+  assert.ok(seen.size > 5, 'the array never swept');
+  // A sweep stays on its own face; a spin does not.
+  const sweep = [...seen].map((v) => v / 20);
+  assert.ok(Math.max(...sweep) - Math.min(...sweep) < Math.PI * 2,
+    'the array went all the way round, which is what the dish is for');
+});
+
+test('a dish keeps turning with the ship right on top of it', async () => {
+  // The spin test above parks the player far away, so the aiming code
+  // never runs and a dish that secretly aims would still look right.
+  // This is the case that separates them: standing next to a radar, it
+  // must go on sweeping past you rather than tracking you, because a
+  // dish that points at you is a gun as far as the eye is concerned.
+  const { TOWERS, DT } = await import('../src/config.js');
+  const { updateTurrets } = await import('../src/enemies.js');
+  const turrets = rig(['radar', 'tank'], { gap: 900 });
+  for (const t of turrets) t.tower = TOWERS[t.kind];
+  const game = {
+    state: 'play', level: { turrets, spec: { turretCooldown: 2, turretRange: 300 }, gates: [] },
+    player: { x: 510, y: 180, alive: true, vx: 0, vy: 0 },
+  };
+  const angles = new Set();
+  for (let i = 0; i < 300; i++) { updateTurrets(game, DT); angles.add(Math.round(turrets[0].angle * 8)); }
+  assert.ok(angles.size > 20,
+    `the dish settled on ${angles.size} angle(s) with the ship beside it — it is tracking, not turning`);
+
+  // ...and the fuel tank next to it never acquires anything at all.
+  assert.equal(turrets[1].burstLeft, 0, 'a fuel tank opened fire');
+  assert.equal(turrets[1].charge, 0, 'a fuel tank started charging');
+});
+
+test('a silo opens from far outside everything else', async () => {
+  const { TOWERS } = await import('../src/config.js');
+  assert.ok(TOWERS.silo.wake > 700, 'a long-range launcher that wakes at normal range is a rocket');
+  assert.ok(TOWERS.silo.range > TOWERS.rocket.bulletSpeed,
+    'the silo has no reach of its own');
+  // Slow enough to be shot down, which is the counterplay.
+  assert.ok(TOWERS.silo.bulletSpeed < TOWERS.rocket.bulletSpeed,
+    'a long-range missile you cannot out-fly or shoot down is just damage');
+  assert.ok(TOWERS.silo.seekHp >= 1, 'the missile cannot be destroyed');
+});
+
+test('a fuel tank takes its neighbours with it', async () => {
+  const { TOWERS, DT } = await import('../src/config.js');
+  const { hitTurret } = await import('../src/enemies.js');
+  const { makeGame, update } = await import('../src/game.js');
+
+  const game = makeGame();
+  const turrets = rig(['tank', 'tank', 'tank'], { gap: 50, x: 300 });
+  for (const t of turrets) { t.tower = TOWERS[t.kind]; t.hp = 4; }
+  game.level.turrets = turrets;
+  game.state = 'play';
+  game.player.x = 900;      // well clear, so the chain is not about us
+
+  hitTurret(game, turrets[0], 99);
+  assert.ok(turrets[0].dead, 'the tank survived a direct hit');
+  assert.ok((game.pendingBlast || []).length > 0, 'a tank went up without a blast');
+
+  update(game, DT);   // drains the queue, which chains
+  const standing = turrets.filter((t) => !t.dead).length;
+  assert.equal(standing, 0,
+    `${standing} of three tanks still standing — the chain did not carry`);
+});
+
+test('a chain of tanks terminates', async () => {
+  // A tank igniting a tank that ignites the first one back is a stack
+  // overflow dressed as a feature. The queue is what stops it, and a
+  // long row is where it would show.
+  const { TOWERS, DT } = await import('../src/config.js');
+  const { hitTurret } = await import('../src/enemies.js');
+  const { makeGame, update } = await import('../src/game.js');
+  const game = makeGame();
+  const turrets = rig(Array(12).fill('tank'), { gap: 40, x: 300 });
+  for (const t of turrets) { t.tower = TOWERS[t.kind]; t.hp = 4; }
+  game.level.turrets = turrets;
+  game.state = 'play';
+  game.player.x = 3000;
+
+  hitTurret(game, turrets[0], 99);
+  assert.doesNotThrow(() => update(game, DT), 'the chain did not terminate');
+  assert.equal(turrets.filter((t) => !t.dead).length, 0, 'the chain stopped partway');
+  assert.equal((game.pendingBlast || []).length, 0, 'the blast queue was left full');
+});
+
+test('every spaceport has fuel, control and something parked', async () => {
+  const { buildLevel } = await import('../src/level.js');
+  let ports = 0;
+  for (const spec of LEVELS) {
+    const lvl = buildLevel(spec);
+    const controls = lvl.turrets.filter((t) => t.kind === 'control');
+    for (const c of controls) {
+      ports++;
+      // The parts of one port are within a few hundred px of its
+      // control tower; anything further is a different port.
+      const near = lvl.turrets.filter((t) => Math.abs(t.x - c.x) < 360 && t.y === c.y);
+      assert.ok(near.some((t) => t.kind === 'tank'), `a port on ${spec.name} has no fuel`);
+      assert.ok(near.some((t) => t.kind === 'lander'), `a port on ${spec.name} has nothing parked`);
+    }
+  }
+  assert.ok(ports > 0, 'no hull in the campaign has a spaceport');
+});
+
+test('fuel tanks are placed close enough to chain', async () => {
+  // A chain that only sometimes chains is a mechanic nobody learns.
+  const { buildLevel } = await import('../src/level.js');
+  const { TOWERS } = await import('../src/config.js');
+  const reach = TOWERS.tank.volatile.r;
+  let checked = 0;
+  for (const spec of LEVELS) {
+    const lvl = buildLevel(spec);
+    const byPort = new Map();
+    for (const t of lvl.turrets) {
+      if (t.kind !== 'tank') continue;
+      const key = Math.round(t.x / 400);
+      if (!byPort.has(key)) byPort.set(key, []);
+      byPort.get(key).push(t);
+    }
+    for (const tanks of byPort.values()) {
+      if (tanks.length < 2) continue;
+      tanks.sort((a, b) => a.x - b.x);
+      for (let i = 1; i < tanks.length; i++) {
+        checked++;
+        assert.ok(tanks[i].x - tanks[i - 1].x < reach,
+          `${spec.name}: tanks ${Math.round(tanks[i - 1].x)} and ${Math.round(tanks[i].x)} `
+          + `are ${Math.round(tanks[i].x - tanks[i - 1].x)}px apart, past the ${reach}px blast`);
+      }
+    }
+  }
+  assert.ok(checked > 10, `only ${checked} tank pairs across the campaign; the test proves little`);
 });

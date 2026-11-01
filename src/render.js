@@ -10,6 +10,7 @@ import { renderScale, scaleGeneration, hullScale, isStatic } from './display.js'
 import { pickups, tint, isTreasure } from './pickups.js';
 
 import { drawBossBody, drawBossParts } from './bossart.js';
+import { drawTowerBody, hasBarrel, hasMount } from './towerart.js';
 import { drawGates } from './gates.js';
 import { drawFoeBody, drawInterceptorBody } from './foeart.js';
 import { drawShipBody, markOf } from './shipart.js';
@@ -445,51 +446,44 @@ function drawTurrets(ctx, game, camX) {
 
     ctx.save();
     ctx.translate(Math.round(t.x), Math.round(t.y));
+    const d = t.dir;
+    const tw0 = t.tower || {};
+    const scale = (tw0.r || 8) / 8;
 
-    // barrel
-    ctx.save();
-    ctx.rotate(t.angle);
-    ctx.fillStyle = '#3c4450';
-    ctx.fillRect(0, -2, 13, 4);
-    ctx.fillStyle = COL.edgeHi;
-    ctx.fillRect(10, -2, 3, 1);
-    ctx.fillStyle = COL.warm;
-    ctx.fillRect(12, -1, 2, 2);
-    ctx.restore();
+    // barrel — only on the things that have one. A dish, a fuel tank
+    // and a parked lander do not, and giving them one was what made
+    // every installation read as a gun wearing a hat.
+    if (hasBarrel(t.kind)) {
+      ctx.save();
+      ctx.rotate(t.angle);
+      ctx.scale(scale, scale);
+      ctx.fillStyle = '#3c4450';
+      ctx.fillRect(0, -2, 13, 4);
+      ctx.fillStyle = COL.edgeHi;
+      ctx.fillRect(10, -2, 3, 1);
+      ctx.fillStyle = COL.warm;
+      ctx.fillRect(12, -1, 2, 2);
+      ctx.restore();
+    }
 
     // base, seated on the mounting surface
-    const d = t.dir;
-    ctx.fillStyle = '#272d36';
-    ctx.beginPath();
-    ctx.moveTo(-8, 0);
-    ctx.lineTo(8, 0);
-    ctx.lineTo(6, d * 7);
-    ctx.lineTo(-6, d * 7);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = '#4b5462';
-    ctx.fillRect(-7, d === 1 ? 0 : -1, 14, 1);
-
-    // housing, tinted by kind so the gun you are approaching is identifiable
-    const tw = t.tower || {};
-    if (tw.seek) {
-      // a launcher rack: four tubes, so it is obvious at a glance that this
-      // one does not fire bullets
-      ctx.fillStyle = '#596372';
-      ctx.fillRect(-8, d === 1 ? 0 : -8, 16, 8);
-      ctx.fillStyle = '#20262e';
-      for (let k = 0; k < 4; k++) ctx.fillRect(-7 + k * 4, d === 1 ? 2 : -6, 3, 4);
-      ctx.fillStyle = tw.colour;
-      ctx.fillRect(-8, d === 1 ? 0 : -1, 16, 1);
-      ctx.fillRect(-7 + (t.burstLeft > 0 ? 0 : 8), d === 1 ? 3 : -5, 3, 2);
-    } else {
-      ctx.fillStyle = '#596372';
+    if (hasMount(t.kind)) {
+      const bw = 8 * scale;
+      ctx.fillStyle = '#272d36';
       ctx.beginPath();
-      ctx.arc(0, d * 1, tw.aura ? 7 : 5.5, 0, Math.PI * 2);
+      ctx.moveTo(-bw, 0);
+      ctx.lineTo(bw, 0);
+      ctx.lineTo(bw - 2, d * 7);
+      ctx.lineTo(-bw + 2, d * 7);
+      ctx.closePath();
       ctx.fill();
-      ctx.fillStyle = tw.colour || COL.danger;
-      ctx.fillRect(-1, d * 1 - 1, 2, 2);
+      ctx.fillStyle = '#4b5462';
+      ctx.fillRect(-bw + 1, d === 1 ? 0 : -1, bw * 2 - 2, 1);
     }
+
+    // The housing is per kind: see towerart.js for why.
+    const tw = tw0;
+    drawTowerBody(ctx, t, d);
 
     // a lance winding up: an unmissable tell, because the shot itself is
     // too fast to react to
@@ -511,6 +505,18 @@ function drawTurrets(ctx, game, camX) {
       ctx.strokeStyle = '#b45ce0';
       ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(0, d * 1, 10, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    // A painted tower sees you sooner and swings faster. Shown for the
+    // same reason the warden's shimmer is: a buff you cannot see is
+    // indistinguishable from the game cheating.
+    if (t.painted) {
+      ctx.globalAlpha = 0.35 + 0.25 * Math.sin((t.t || 0) * 5);
+      ctx.strokeStyle = t.painted.colour;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(0, d * 1, 12 * scale, 0, Math.PI * 2);
+      ctx.stroke();
       ctx.globalAlpha = 1;
     }
 

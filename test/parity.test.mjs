@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  LEVELS, BOSSES, SHIP, LEVEL_UP, PICKUP, HULL_BONUS, DIFFICULTY, ARMORY, VERSION,
+  LEVELS, BOSSES, SHIP, LEVEL_UP, PICKUP, HULL_BONUS, DIFFICULTY, ARMORY, VERSION, TOWERS,
 } from '../src/config.js';
 import { MODS } from '../src/shop.js';
 import { MAX_COINS, MAX_MOD_LEVEL } from '../src/hangar.js';
@@ -202,14 +202,18 @@ const firstHullFielding = (key) => {
 };
 
 test('the README tower table lists every tower, from the right hull', () => {
+  // Matched on the tower's own name rather than its config key: the
+  // key is an implementation detail (`pop`, `tank`) and the README is
+  // written for someone who will see POPGUN and FUEL on the screen.
   const rows = [...readme.matchAll(/\|\s*\*\*([A-Z]+)\*\*\s*\|\s*([A-Z]+)\s*\|[^|]*\|/g)]
-    .map((m) => ({ name: m[1].toLowerCase(), from: m[2] }));
+    .map((m) => ({ name: m[1], from: m[2] }));
   const real = firstHullFielding('towers');
   for (const [kind, from] of Object.entries(real)) {
-    const row = rows.find((r) => r.name === kind);
-    assert.ok(row, `the README never lists the ${kind.toUpperCase()} tower`);
+    const shown = TOWERS[kind].name;
+    const row = rows.find((r) => r.name === shown);
+    assert.ok(row, `the README never lists the ${shown} tower`);
     assert.equal(row.from, from,
-      `README says ${kind.toUpperCase()} arrives on ${row.from}, config says ${from}`);
+      `README says ${shown} arrives on ${row.from}, config says ${from}`);
   }
 });
 
