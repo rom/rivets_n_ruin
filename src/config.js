@@ -4,7 +4,7 @@
 // /api/health answers {"ok":true} and nothing else, so a player reporting a
 // bug and the server they hit cannot yet be lined up. This comment used to
 // claim otherwise.
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';
 export const BUILD = 'RIVETS';
 
 export const VIEW_W = 640;

@@ -12,6 +12,14 @@ worth learning from.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.1.0] — 2026-11-01
+
+A HUD you can read, bosses you can tell apart, three filesystem roots,
+accounts that keep your progress, an operator's door, and a way to
+start over.
+
 ### Added
 
 - **`F` twice on the settings screen starts you over**: the hangar, the
@@ -169,5 +177,6 @@ The ones worth remembering, all found by playing or by looking at pixels:
 - Clearing the hangar did not clear it: the game saved again on
   `pagehide` and wrote everything straight back.
 
-[Unreleased]: https://github.com/rom/rivets_n_ruin/compare/v1.0.0...rom
+[Unreleased]: https://github.com/rom/rivets_n_ruin/compare/v1.1.0...rom
+[1.1.0]: https://github.com/rom/rivets_n_ruin/releases/tag/v1.1.0
 [1.0.0]: https://github.com/rom/rivets_n_ruin/releases/tag/v1.0.0

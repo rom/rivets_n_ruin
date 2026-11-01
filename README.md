@@ -2066,7 +2066,7 @@ tools/smoke.cjs   the browser smoke test: flies the game and reads pixels
 tools/coverage.sh the coverage gate, so CI and your machine agree
 tools/make_gallery.cjs  regenerates the README images from the live game
 tools/make_icons.py     regenerates favicon.ico
-tools/release-1.0.0.sh  builds, attacks and publishes the 1.0.0 artifacts
+tools/release.sh        builds, attacks and publishes a release
 test/             the client tests; see below
 .github/workflows/ci.yml
 deploy/rivets-n-ruin.service  a hardened systemd unit
