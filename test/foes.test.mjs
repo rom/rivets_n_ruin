@@ -606,3 +606,155 @@ test('fuel tanks are placed close enough to chain', async () => {
   }
   assert.ok(checked > 10, `only ${checked} tank pairs across the campaign; the test proves little`);
 });
+
+// --- the ends of the scale
+//
+// Size is not a difficulty knob with art attached: a thing twice as
+// big is twice as easy to hit, so weight has to buy something. Each of
+// these is tested against what its weight bought.
+
+test('the roster spans a real range of weight and speed', async () => {
+  const { SPEC } = await import('../src/foes.js');
+  const rows = Object.entries(SPEC).filter(([k]) => k !== 'shard');
+  const rs = rows.map(([, v]) => v.r);
+  assert.ok(Math.max(...rs) / Math.min(...rs) >= 3,
+    `the biggest attacker is only ${(Math.max(...rs) / Math.min(...rs)).toFixed(1)}x the smallest`);
+
+  // Heavier means slower, or weight is free. Checked as a trend
+  // across the extremes rather than pairwise, because a mine is slow
+  // and small on purpose.
+  const big = rows.filter(([, v]) => v.r >= 20).map(([, v]) => v.speed);
+  const small = rows.filter(([, v]) => v.r <= 8).map(([, v]) => v.speed);
+  assert.ok(big.length && small.length, 'the roster has no extremes to compare');
+  assert.ok(Math.max(...big) < Math.min(...small),
+    `the heaviest attacker (${Math.max(...big)}px/s) is not slower than the lightest `
+    + `(${Math.min(...small)}px/s)`);
+
+  // ...and heavier has to be worth more, or there is no reason to
+  // shoot it rather than go round.
+  const bigScore = rows.filter(([, v]) => v.r >= 20).map(([, v]) => v.score);
+  const smallScore = rows.filter(([, v]) => v.r <= 8).map(([, v]) => v.score);
+  assert.ok(Math.min(...bigScore) > Math.max(...smallScore),
+    'a heavy attacker is not worth more than a light one');
+});
+
+test('a gnat arrives with company', async () => {
+  // One gnat is a non-event: one hit point, no gun, nothing to make
+  // you move. Three is a wall to pick a side of, which is the whole
+  // of what it contributes.
+  const { SPEC, spawnFoeForLevel, foes, resetFoes } = await import('../src/foes.js');
+  const { makeGame } = await import('../src/game.js');
+  const game = makeGame();
+  game.level.spec = { ...game.level.spec, foes: ['gnat'] };
+  resetFoes();
+  spawnFoeForLevel(game);
+  const n = [...Array(foes.count).keys()].filter((i) => foes.items[i].kind === 'gnat').length;
+  assert.equal(n, SPEC.gnat.swarm, `one spawn produced ${n} gnats, want ${SPEC.gnat.swarm}`);
+
+  // ...and not stacked on one spot, which would be one object drawn
+  // three times rather than three things in the way.
+  const ys = new Set();
+  for (let i = 0; i < foes.count; i++) ys.add(Math.round(foes.items[i].baseY));
+  assert.ok(ys.size > 1, 'the swarm spawned on top of itself');
+});
+
+test('a dart makes one pass and does not come back', async () => {
+  const { SPEC, spawnFoe, foes, resetFoes, updateFoes } = await import('../src/foes.js');
+  const { makeGame } = await import('../src/game.js');
+  const { DT } = await import('../src/config.js');
+  const game = makeGame();
+  game.state = 'play';
+  resetFoes();
+  const f = spawnFoe(game, 'dart');
+  f.x = game.player.x + 300;
+  f.baseY = game.player.y + 4;
+  f.y = f.baseY;
+  f.facing = -1;
+
+  let shots = 0;
+  const seen = [];
+  for (let i = 0; i < 240; i++) {
+    const before = f.shotsLeft;
+    updateFoes(game, DT);
+    if (f.dead || !foes.count) break;
+    if (before !== undefined && f.shotsLeft < before) shots++;
+    seen.push(f.x);
+  }
+  assert.ok(shots > 0, 'the dart never fired');
+  assert.ok(shots <= SPEC.dart.strafeShots,
+    `the dart fired ${shots} times, more than the ${SPEC.dart.strafeShots} it carries`);
+  // Committed to a direction: it never reverses.
+  const reversals = seen.slice(1).filter((x, i) => x > seen[i]).length;
+  assert.equal(reversals, 0, 'the dart turned round, which is what separates it from a chaser');
+});
+
+test('a barge opens with a fan, not an aimed shot', async () => {
+  // Sitting still off its line beats an aimed gun. The fan is what
+  // stops that working, so the thing to test is the spread.
+  const { SPEC, spawnFoe, resetFoes, updateFoes } = await import('../src/foes.js');
+  const { enemyShots } = await import('../src/projectiles.js');
+  const { makeGame } = await import('../src/game.js');
+  const { DT } = await import('../src/config.js');
+  const game = makeGame();
+  game.state = 'play';
+  resetFoes();
+  enemyShots.clear();
+  const f = spawnFoe(game, 'barge');
+  f.x = game.player.x + 200;
+  f.baseY = game.player.y;
+  f.y = f.baseY;
+  f.cd = 0;
+  updateFoes(game, DT);
+
+  assert.equal(enemyShots.count, SPEC.barge.spread,
+    `the barge fired ${enemyShots.count} shots, want a fan of ${SPEC.barge.spread}`);
+  const angles = [];
+  for (let i = 0; i < enemyShots.count; i++) {
+    const s = enemyShots.items[i];
+    angles.push(Math.atan2(s.vy, s.vx));
+  }
+  const spread = Math.max(...angles) - Math.min(...angles);
+  assert.ok(spread > 0.5,
+    `the fan spans ${spread.toFixed(2)} rad; that is an aimed burst, not a spread`);
+});
+
+test('a monitor fires from both ends', async () => {
+  // Two mounts at opposite ends is the whole point: it means there is
+  // no side of it that is quiet, so going round costs ground rather
+  // than being free.
+  const { SPEC, spawnFoe, resetFoes, updateFoes } = await import('../src/foes.js');
+  const { enemyShots } = await import('../src/projectiles.js');
+  const { makeGame } = await import('../src/game.js');
+  const { DT } = await import('../src/config.js');
+  const game = makeGame();
+  game.state = 'play';
+  resetFoes();
+  const f = spawnFoe(game, 'monitor');
+  f.x = game.player.x + 220;
+  f.baseY = game.player.y;
+  f.y = f.baseY;
+
+  const origins = new Set();
+  for (let i = 0; i < 1400; i++) {
+    enemyShots.clear();
+    f.cd = Math.min(f.cd, 0);
+    updateFoes(game, DT);
+    for (let k = 0; k < enemyShots.count; k++) origins.add(Math.round(enemyShots.items[k].y));
+    if (origins.size >= 2) break;
+  }
+  assert.ok(origins.size >= 2,
+    `every shot came from the same place (${[...origins]}); the second mount is decoration`);
+  assert.ok(Math.max(...origins) - Math.min(...origins) > SPEC.monitor.r,
+    'the two mounts are not at opposite ends of the hull');
+});
+
+test('every attacker in a roster has a body to draw', async () => {
+  // A kind fielded with no body falls back to the warder's, which is
+  // how an attacker ships looking like a different attacker.
+  const { BODY_KINDS } = await import('../src/foeart.js');
+  const { SPEC } = await import('../src/foes.js');
+  for (const kind of Object.keys(SPEC)) {
+    assert.ok(BODY_KINDS.includes(kind),
+      `${kind} has no body in foeart.js and would be drawn as a warder`);
+  }
+});

@@ -53,6 +53,30 @@ export const SPEC = {
   // through the tether hurts; killing either end drops it. Go round, or
   // break a link.
   chainer: { hp: 4, speed: 128, score: 300, r: 10, tetherDmg: 22, tetherGap: 96 },
+
+  // --- weight
+  //
+  // The twelve above are all roughly ship-sized, so the roster reads as
+  // one fleet with twelve jobs. These four are the ends of a scale.
+  //
+  // Size here is not a difficulty knob with art attached: a thing twice
+  // as big is twice as easy to hit, so weight has to buy something. A
+  // GNAT is almost free to kill and arrives in numbers; a MONITOR is
+  // slow enough to go round and punishing if you do not.
+
+  // Tiny and quick. No gun at all — it exists to be in the way, and it
+  // comes in threes.
+  gnat:    { hp: 1, speed: 360, score: 60, r: 6, amp: 34, freq: 7.5, swarm: 3 },
+  // A single strafing pass: lines up, runs flat out, empties its gun on
+  // the way through and does not come back round.
+  dart:    { hp: 2, speed: 330, score: 150, r: 8, strafeEvery: 0.22, strafeShots: 4 },
+  // Slow and heavy, lobbing a wide spread. Nothing to out-think; the
+  // answer is to not be in the fan when it opens.
+  barge:   { hp: 14, speed: 54, score: 520, r: 21, fireEvery: 2.1, spread: 5, arcDeg: 46 },
+  // The heaviest thing that is not a miniboss. Two firing positions
+  // that alternate, so there is no safe side, and slow enough that
+  // going round it is always available and always costs you ground.
+  monitor: { hp: 22, speed: 38, score: 760, r: 25, fireEvery: 1.6, mounts: 2, burst: 3 },
 };
 
 // A deflector bubble, fitted to some attackers on later hulls. Unlike a
@@ -155,6 +179,21 @@ export function spawnFoeForLevel(game) {
   if (!list || !list.length) return null;
   const kind = list[Math.floor(Math.random() * list.length)];
   const f = spawnFoe(game, kind);
+  // A gnat on its own is a non-event: one hit point, no gun, and
+  // nothing to make you move. Three of them is a wall you have to pick
+  // a side of, which is the whole of what it contributes.
+  if (f && kind === 'gnat') {
+    for (let k = 1; k < (SPEC.gnat.swarm || 1); k++) {
+      const mate = spawnFoe(game, 'gnat');
+      if (!mate) break;      // pool is full; however many arrived will do
+      mate.x = f.x + k * 18;
+      mate.baseY = clamp(f.baseY + (k % 2 ? -1 : 1) * 26 * k, FIELD_TOP + 20, FIELD_BOT - 20);
+      mate.y = mate.baseY;
+      mate.facing = f.facing;
+      mate.t = f.t + k * 0.4;   // out of phase, so they do not fly as one shape
+    }
+  }
+
   // A chainer is half of a thing. One on its own is a weak weaver; the
   // pair and the live tether between them is the attacker.
   if (f && kind === 'chainer') {
@@ -409,7 +448,86 @@ export function updateFoes(game, dt) {
         break;
       }
 
-      default: { // warder
+        case 'gnat': {
+        // A weaver with nothing on board. It does not shoot, so the
+        // only thing it can do is be somewhere you wanted to be.
+        f.x += f.facing * spec.speed * dt;
+        f.baseY += clamp(p.y - f.baseY, -70 * dt, 70 * dt);
+        f.y = f.baseY + Math.sin(f.t * spec.freq) * spec.amp;
+        break;
+      }
+
+      case 'dart': {
+        // One pass. It commits to a line, empties its gun along it and
+        // leaves; it never turns round, which is what separates it
+        // from everything else that chases.
+        if (f.state === 0) {
+          // Line up on the ship's height, then commit.
+          f.baseY += clamp(p.y - f.baseY, -150 * dt, 150 * dt);
+          f.y = f.baseY;
+          f.x += f.facing * spec.speed * 0.3 * dt;
+          if (Math.abs(p.y - f.baseY) < 10 || f.t > 1.6) {
+            f.state = 1;
+            f.shotsLeft = spec.strafeShots;
+            f.cd = 0;
+          }
+        } else {
+          f.x += f.facing * spec.speed * dt;
+          f.y = f.baseY;
+          f.cd -= dt;
+          if (f.cd <= 0 && f.shotsLeft > 0 && game.state === 'play') {
+            f.cd = spec.strafeEvery;
+            f.shotsLeft--;
+            fire(enemyShots, f.x, f.y, f.facing * 260, 0, 4, 8, 2);
+            sfxTurretShot();
+          }
+        }
+        break;
+      }
+
+      case 'barge': {
+        // Heavy and slow, and it opens with a fan rather than an aimed
+        // shot — so sitting still off its line does not work, and
+        // neither does charging it down the middle.
+        f.x += f.facing * spec.speed * dt;
+        f.baseY += clamp(p.y - f.baseY, -22 * dt, 22 * dt);
+        f.y = f.baseY;
+        f.cd -= dt;
+        if (f.cd <= 0 && game.state === 'play') {
+          f.cd = spec.fireEvery;
+          const a = Math.atan2(p.y - f.y, p.x - f.x);
+          const step = (spec.arcDeg * Math.PI / 180) / (spec.spread - 1);
+          for (let k = 0; k < spec.spread; k++) {
+            const ang = a - (spec.arcDeg * Math.PI / 180) / 2 + k * step;
+            fire(enemyShots, f.x, f.y, Math.cos(ang) * 165, Math.sin(ang) * 165, 5, 10, 2);
+          }
+          sfxTurretShot();
+        }
+        break;
+      }
+
+      case 'monitor': {
+        // Two mounts, fired alternately from opposite ends of the hull,
+        // so there is no side of it that is quiet.
+        f.x += f.facing * spec.speed * dt;
+        f.baseY += clamp(p.y - f.baseY, -16 * dt, 16 * dt);
+        f.y = f.baseY;
+        f.cd -= dt;
+        if (f.cd <= 0 && game.state === 'play') {
+          f.cd = spec.fireEvery;
+          f.mount = ((f.mount || 0) + 1) % spec.mounts;
+          const my = f.y + (f.mount === 0 ? -spec.r * 0.55 : spec.r * 0.55);
+          const a = Math.atan2(p.y - my, p.x - f.x);
+          for (let k = 0; k < spec.burst; k++) {
+            const ang = a + (k - (spec.burst - 1) / 2) * 0.11;
+            fire(enemyShots, f.x, my, Math.cos(ang) * 200, Math.sin(ang) * 200, 5, 11, 2);
+          }
+          sfxTurretShot();
+        }
+        break;
+      }
+
+    default: { // warder
         f.x += f.facing * spec.speed * dt;
         f.baseY += clamp(p.y - f.baseY, -46 * dt, 46 * dt);
         f.y = f.baseY;

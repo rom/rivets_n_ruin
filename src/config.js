@@ -270,7 +270,7 @@ const CORE_LEVELS = [
     gapScale: 0.78, clearChance: 0.07,
     turretHp: 9, turretCooldown: 1.20, turretRange: 360,
     interceptorSpeed: 220, interceptorSpawn: 0.98, interceptorHp: 3,
-    foes: ['mine', 'lancer', 'weaver'],
+    foes: ['mine', 'lancer', 'weaver', 'gnat'],
     enemyDmg: 1.10,
     towers: ['gun', 'pop', 'flak', 'post'], lasers: 1, laserHp: 2, tune: 4 },
 
@@ -279,7 +279,7 @@ const CORE_LEVELS = [
     gapScale: 0.72, clearChance: 0.06,
     turretHp: 11, turretCooldown: 1.10, turretRange: 380,
     interceptorSpeed: 236, interceptorSpawn: 0.90, interceptorHp: 4,
-    foes: ['mine', 'lancer', 'orbiter', 'weaver'],
+    foes: ['mine', 'lancer', 'orbiter', 'weaver', 'gnat', 'dart'],
     enemyDmg: 1.16,
     towers: ['gun', 'pop', 'flak', 'lance', 'rocket', 'radar'], lasers: 2, laserHp: 3, tune: 2 },
 
@@ -288,7 +288,7 @@ const CORE_LEVELS = [
     gapScale: 0.67, clearChance: 0.05,
     turretHp: 13, turretCooldown: 1.00, turretRange: 400,
     interceptorSpeed: 252, interceptorSpawn: 0.82, interceptorHp: 4,
-    foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter'],
+    foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'dart', 'barge'],
     enemyDmg: 1.22,
     towers: ['gun', 'flak', 'lance', 'mortar', 'rocket', 'radar', 'bastion'], lasers: 2, laserHp: 4, tune: 5 },
 
@@ -297,7 +297,7 @@ const CORE_LEVELS = [
     gapScale: 0.63, clearChance: 0.04,
     turretHp: 15, turretCooldown: 0.92, turretRange: 420,
     interceptorSpeed: 266, interceptorSpawn: 0.75, interceptorHp: 5,
-    foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech', 'mirror'],
+    foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech', 'mirror', 'barge'],
     enemyDmg: 1.28,
     towers: ['gun', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array'], lasers: 3, laserHp: 5, tune: 3 },
 
@@ -306,7 +306,7 @@ const CORE_LEVELS = [
     gapScale: 0.59, clearChance: 0.035,
     turretHp: 16, turretCooldown: 0.86, turretRange: 440,
     interceptorSpeed: 280, interceptorSpawn: 0.70, interceptorHp: 5,
-    foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech', 'chainer'],
+    foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech', 'chainer', 'monitor'],
     enemyDmg: 1.34,
     towers: ['gun', 'flak', 'mortar', 'warden', 'rocket', 'array', 'silo'], lasers: 3, laserHp: 6, tune: 6 },
 
@@ -315,7 +315,8 @@ const CORE_LEVELS = [
     gapScale: 0.55, clearChance: 0.03,
     turretHp: 18, turretCooldown: 0.80, turretRange: 460,
     interceptorSpeed: 294, interceptorSpawn: 0.64, interceptorHp: 6,
-    foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech', 'carrier'],
+    foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech', 'carrier',
+      'gnat', 'dart', 'barge', 'monitor'],
     enemyDmg: 1.40,
     towers: ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array', 'silo'], lasers: 4, laserHp: 7, tune: 7 },
 ];
@@ -330,7 +331,8 @@ const CORE_LEVELS = [
 
 const THEME_CYCLE = Object.keys(THEMES);
 const ALL_FOES = ['mine', 'lancer', 'orbiter', 'warder', 'weaver', 'splitter',
-  'bomber', 'leech', 'mirror', 'carrier', 'chainer'];
+  'bomber', 'leech', 'mirror', 'carrier', 'chainer',
+  'gnat', 'dart', 'barge', 'monitor'];
 const ALL_TOWERS = ['gun', 'pop', 'bastion', 'flak', 'lance', 'mortar', 'warden', 'rocket',
   'radar', 'array', 'post', 'silo'];
 

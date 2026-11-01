@@ -228,8 +228,12 @@ test('the README attacker table lists every attacker, from the right hull', () =
   }
   // ...and claims the right number of them.
   const count = Object.keys(real).length;
+  // Long enough for the roster to grow into. Running off the end gives
+  // "undefined more types", which is a confusing way to be told the
+  // README is stale.
   const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
-    'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen'];
+    'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen',
+    'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
   assert.ok(new RegExp(`${words[count]} more types`, 'i').test(readme),
     `the README does not say "${words[count]} more types" for ${count} attackers`);
 });
@@ -307,8 +311,12 @@ test('the README layout block names every client module', () => {
 });
 
 test('the README counts the art it claims to count', () => {
+  // Long enough for the roster to grow into. Running off the end gives
+  // "undefined more types", which is a confusing way to be told the
+  // README is stale.
   const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
-    'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen'];
+    'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen',
+    'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
   assert.ok(readme.includes(`the ${words[BODY_KINDS.length]} attacker bodies`),
     `the layout block miscounts the ${BODY_KINDS.length} attacker bodies`);
   const minis = Object.keys(MINI_KINDS).length;

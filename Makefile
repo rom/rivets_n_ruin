@@ -4,7 +4,11 @@
 
 BINARY      := rnr-server
 BUILD_DIR   := build
-DATA        := data/rnr.json
+# Where the server keeps things. Three roots rather than one file:
+# the game's own tooling should model the arrangement the README
+# recommends, not the deprecated one it warns about on every run.
+STATE       ?= data/state
+ACCOUNTS    ?= data/accounts
 ADDR        ?= 127.0.0.1:8000
 GOFILES     := $(shell find . -name '*.go' -not -path './$(BUILD_DIR)/*')
 JSFILES     := $(wildcard src/*.js)
@@ -38,7 +42,7 @@ help: ## Show this help
 	@echo "  ADDR=0.0.0.0:8000 make run    expose on your network"
 
 run: ## Build and run the game + backend (ADDR to override the bind address)
-	@$(GO) run ./cmd/server -addr $(ADDR) -data $(DATA)
+	@$(GO) run ./cmd/server -addr $(ADDR) -state $(STATE) -accounts $(ACCOUNTS)
 
 build: $(BUILD_DIR)/$(BINARY) ## Compile the server binary
 
@@ -131,7 +135,8 @@ define wait_for
 endef
 
 smoke: build ## Launch the game and assert it actually renders and scrolls
-	@./$(BUILD_DIR)/$(BINARY) -addr 127.0.0.1:$(SMOKE_PORT) -data $(BUILD_DIR)/smoke.json & \
+	@./$(BUILD_DIR)/$(BINARY) -addr 127.0.0.1:$(SMOKE_PORT) \
+	    -state $(BUILD_DIR)/smoke-state -accounts $(BUILD_DIR)/smoke-accounts & \
 	pid=$$!; \
 	trap "kill $$pid 2>/dev/null" EXIT; \
 	$(call wait_for,$(SMOKE_PORT)); \
@@ -141,7 +146,8 @@ tidy: ## Tidy go.mod
 	$(GO) mod tidy
 
 gallery: build ## Regenerate the README images from the live game
-	@./$(BUILD_DIR)/$(BINARY) -addr 127.0.0.1:$(SMOKE_PORT) -data $(BUILD_DIR)/gallery.json & \
+	@./$(BUILD_DIR)/$(BINARY) -addr 127.0.0.1:$(SMOKE_PORT) \
+	    -state $(BUILD_DIR)/gallery-state -accounts $(BUILD_DIR)/gallery-accounts & \
 	pid=$$!; \
 	trap "kill $$pid 2>/dev/null" EXIT; \
 	$(call wait_for,$(SMOKE_PORT)); \

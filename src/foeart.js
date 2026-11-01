@@ -541,6 +541,89 @@ function pod(ctx, f, lit, whole) {
 // draws — as a warder — which is the right answer for something unknown
 // and the wrong one for a leech, so it is asserted rather than left to be
 // noticed on screen.
+// --- the ends of the scale
+//
+// Built from the same vocabulary as the twelve above — plated hulls,
+// lit top edges, rivets, engine bells, canopies — so the fleet still
+// looks like one fleet. What changes is proportion: a gnat is a nose
+// and an engine with nothing between them, and a monitor is mostly
+// between them.
+
+BODIES.gnat = (ctx, f, spec, lit) => {
+  // Almost nothing: a dart of a thing with one engine and no gun. It
+  // has to read as harmless-but-in-the-way at a glance, or killing
+  // three of them feels like work rather than housekeeping.
+  engine(ctx, -5, 0, 3, f.t, '#9ad94e', 1.1);
+  hull(ctx, [[7, 0], [-1, -3], [-5, -2], [-5, 2], [-1, 3]],
+    lit ? HOT : '#4a5560', '#8e9aa9', 1);
+  litTop(ctx, [[7, 0], [-1, -3], [-5, -2]], '#aeb9c6');
+  light(ctx, 2, 0, f.t, '#9ad94e', 9);
+};
+
+BODIES.dart = (ctx, f, spec, lit) => {
+  // A needle with swept fins, nose-heavy, with the gun under the nose
+  // where you can see it. Reads as committed to a direction even when
+  // it is still lining up.
+  engine(ctx, -7, 0, 4, f.t, '#ff9a3a', f.state === 1 ? 1.6 : 0.7);
+  hull(ctx, [[11, 0], [1, -3], [-7, -3], [-7, 3], [1, 3]],
+    lit ? HOT : '#515c69', '#9aa6b4', 1.5);
+  // fins
+  hull(ctx, [[-2, -3], [-6, -8], [-8, -7], [-5, -3]], '#39414e', '#7a8794', 1);
+  hull(ctx, [[-2, 3], [-6, 8], [-8, 7], [-5, 3]], '#39414e', '#7a8794', 1);
+  litTop(ctx, [[11, 0], [1, -3], [-7, -3]], '#b9c4d1');
+  ctx.fillStyle = '#20262e';
+  ctx.fillRect(4, -1, 6, 2);
+  if (f.state === 1 && (f.shotsLeft || 0) > 0) light(ctx, 10, 0, f.t, '#ff9a3a', 14);
+};
+
+BODIES.barge = (ctx, f, spec, lit) => {
+  // Wide and slab-sided, with the spread launcher across the front.
+  // Nothing sleek about it: this is a thing that was built to carry a
+  // gun rather than to fly.
+  for (const y of [-9, 9]) engine(ctx, -18, y, 5, f.t, '#ff7a2f', 0.8);
+  hull(ctx, [[18, -6], [20, 0], [18, 6], [-14, 13], [-18, 11], [-18, -11], [-14, -13]],
+    lit ? HOT : '#4c5663', '#8e9aa9', 2);
+  litTop(ctx, [[18, -6], [-14, -13], [-18, -11]], '#aeb9c6');
+  // the fan launcher, five tubes across the bow
+  ctx.fillStyle = '#2a313b';
+  ctx.fillRect(12, -10, 7, 20);
+  ctx.fillStyle = '#ff7a2f';
+  for (let k = -2; k <= 2; k++) ctx.fillRect(17, k * 4 - 1, 3, 2);
+  rivets(ctx, -12, -9, 10, 5, '#6b7682');
+  rivets(ctx, -12, 9, 10, 5, '#6b7682');
+  canopy(ctx, 2, -4, 7, 4);
+  light(ctx, -6, 10, f.t, '#ff7a2f', 2.5);
+};
+
+BODIES.monitor = (ctx, f, spec, lit) => {
+  // The heaviest thing short of a miniboss: a long armoured spine with
+  // a turret at each end, so neither side of it is quiet. Drawn with
+  // the mounts standing proud of the hull, because which one just
+  // fired is information worth having.
+  for (const y of [-11, 0, 11]) engine(ctx, -23, y, 5, f.t, '#e8434f', 0.7);
+  hull(ctx, [[22, -8], [25, 0], [22, 8], [-16, 16], [-23, 13], [-23, -13], [-16, -16]],
+    lit ? HOT : '#49525f', '#9aa6b4', 2);
+  litTop(ctx, [[22, -8], [-16, -16], [-23, -13]], '#b1bcc9');
+  // the armoured belt
+  ctx.fillStyle = '#39414e';
+  ctx.fillRect(-16, -5, 30, 10);
+  rivets(ctx, -14, -3, 12, 6, '#7a8794');
+  // two mounts, the live one lit
+  for (const [my, idx] of [[-14, 0], [14, 1]]) {
+    ctx.fillStyle = '#2a313b';
+    ctx.beginPath();
+    ctx.arc(4, my, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#7a8794';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = (f.mount || 0) === idx ? '#e8434f' : '#5c6775';
+    ctx.fillRect(6, my - 1.5, 9, 3);
+  }
+  canopy(ctx, 10, -3, 8, 5);
+  light(ctx, -10, 14, f.t, '#e8434f', 2);
+};
+
 export const BODY_KINDS = Object.keys(BODIES);
 
 export function drawFoeBody(ctx, f, spec, lit) {
