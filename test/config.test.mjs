@@ -1,7 +1,7 @@
 import './_setup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LEVELS, BOSSES, THEMES, LEVEL_UP, PICKUP, SHIP } from '../src/config.js';
+import { LEVELS, BOSSES, THEMES, LEVEL_UP, PICKUP, SHIP, TURRET} from '../src/config.js';
 
 const HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
@@ -144,4 +144,68 @@ test('gunblaze adds barrels at every level', () => {
 test('ship starts with sane values', () => {
   assert.ok(SHIP.shieldMax > 0 && SHIP.lives > 0 && SHIP.maxVX > 0);
   assert.ok(SHIP.brakeX > SHIP.accelX, 'reverse thrust should be stronger than forward');
+});
+
+// --- the difficulty curve, as a curve
+//
+// Every enemy number scaled with depth except the one that decides
+// whether you are in danger. Turret health went 6 to 52 and the spawn
+// interval 1.5s to 0.34s, but a turret bullet did 9 damage on the first
+// hull and 9 on the last — while the refit took the shield from 100 to
+// 1180. The ship got twelve times harder to kill while the enemies only
+// got harder to kill back, which is what made the deep hulls long rather
+// than dangerous.
+
+test('the refit shield is bounded, and reaches its bound inside the campaign', () => {
+  let refit = SHIP.shieldMax;
+  for (let h = 1; h < LEVELS.length; h++) {
+    refit = Math.min(SHIP.shieldCap, refit + LEVEL_UP.shieldMax);
+  }
+  assert.equal(refit, SHIP.shieldCap,
+    `the refit tops out at ${refit}, never reaching the ${SHIP.shieldCap} cap — `
+    + 'the ceiling is doing nothing');
+
+  // ...but not so early that twenty hulls go by with no growth at all.
+  let hullsToCap = 0;
+  let s = SHIP.shieldMax;
+  while (s < SHIP.shieldCap && hullsToCap < LEVELS.length) {
+    s = Math.min(SHIP.shieldCap, s + LEVEL_UP.shieldMax);
+    hullsToCap++;
+  }
+  assert.ok(hullsToCap > LEVELS.length / 2,
+    `the shield stops growing after hull ${hullsToCap} of ${LEVELS.length}`);
+});
+
+test('every hull says what a hit costs on it', () => {
+  for (const L of LEVELS) {
+    assert.ok(Number.isFinite(L.enemyDmg) && L.enemyDmg > 0,
+      `${L.name} has no enemyDmg`);
+  }
+});
+
+test('what a hit costs rises with the hull, and never falls', () => {
+  for (let i = 1; i < LEVELS.length; i++) {
+    assert.ok(LEVELS[i].enemyDmg >= LEVELS[i - 1].enemyDmg,
+      `${LEVELS[i].name} hits softer than ${LEVELS[i - 1].name}`);
+  }
+  assert.equal(LEVELS[0].enemyDmg, 1, 'the first hull should be the baseline');
+  const last = LEVELS[LEVELS.length - 1].enemyDmg;
+  assert.ok(last >= 1.8, `the last hull only hits ${last}x as hard as the first`);
+  assert.ok(last <= 3, `the last hull hits ${last}x as hard, which is a wall`);
+});
+
+// The point of both halves together: a turret burst must stay a real
+// fraction of the shield bar all the way through, rather than dwindling
+// to a rounding error.
+test('a turret burst stays dangerous on the deepest hull', () => {
+  const burst = TURRET.burst * 9;          // three rounds, 9 each
+  const shieldOn = (h) => Math.min(SHIP.shieldCap, SHIP.shieldMax + h * LEVEL_UP.shieldMax);
+
+  const first = (burst * LEVELS[0].enemyDmg) / shieldOn(0);
+  const last = (burst * LEVELS[LEVELS.length - 1].enemyDmg) / shieldOn(LEVELS.length - 1);
+  assert.ok(last > first / 3,
+    `a burst takes ${(first * 100).toFixed(0)}% of the bar on hull 1 and only `
+    + `${(last * 100).toFixed(0)}% on hull ${LEVELS.length} — the ship outgrows the game`);
+  assert.ok(last < first,
+    'the deepest hull is no more survivable than the first, so the refit buys nothing');
 });

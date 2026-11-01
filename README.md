@@ -491,7 +491,7 @@ difficulty curve is met with a power curve rather than just better flying:
 
 | | When |
 | --- | --- |
-| Shield maximum +45 | every hull |
+| Shield maximum +15, to a ceiling of 400 | every hull |
 | Acceleration ×1.09 | every hull |
 | Top speed +24 horizontal, +18 vertical | every hull |
 | Muzzle velocity +50 | every hull |

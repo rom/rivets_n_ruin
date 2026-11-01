@@ -248,6 +248,8 @@ test('the README refit table matches the grant schedule', () => {
     assert.ok(readme.includes(`${label} +${value}`),
       `the README does not say "${label} +${value}"`);
   }
+  assert.ok(readme.includes(`ceiling of ${SHIP.shieldCap}`),
+    `the README does not state the shield ceiling of ${SHIP.shieldCap}`);
 });
 
 test('the README crate table matches the drop weights', () => {

@@ -1,6 +1,7 @@
 import './_setup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { hullDmg, diff } from '../src/score.js';
 import {
   SPEC, SHIELD, shieldChanceFor, foes, resetFoes, spawnFoe, hitFoe,
 } from '../src/foes.js';
@@ -221,8 +222,16 @@ test('dying with a leech on does not hand it to the next ship', async () => {
   // to trip the ram check as well — 18 damage every 0.35s, about five times
   // its drain — and the invulnerability that ram sets then suppressed the
   // drain it is actually specified to do.
-  assert.ok(Math.abs(lost - SPEC.leech.drain) < 1,
-    `a second of draining cost ${lost.toFixed(1)}, the spec says ${SPEC.leech.drain}`);
+  // Against the spec rate scaled by the hull, not the raw number: a hit
+  // costs more the deeper you are, and a leech is a hit that keeps
+  // arriving. What this is really guarding is that it drains at its own
+  // rate rather than the generic ram rate, which is five times higher.
+  const want = SPEC.leech.drain * hullDmg(game) * diff().enemyDmg;
+  assert.ok(Math.abs(lost - want) < 1,
+    `a second of draining cost ${lost.toFixed(1)}, expected ${want.toFixed(1)} `
+    + `(${SPEC.leech.drain}/s scaled for this hull)`);
+  assert.ok(lost < SPEC.leech.drain * 3,
+    `${lost.toFixed(1)} a second is the ram rate, not the drain rate`);
   assert.equal(p.invuln, 0, 'being drained granted invulnerability');
 
   // the hull is lost
@@ -307,4 +316,104 @@ test('losing a hull in the real update loop takes the leech with it', async () =
   for (let i = 0; i < 120; i++) update(game, 1 / 120);
   assert.ok(game.player.shield >= shield - 1,
     'the new ship is being drained by the old ship\'s leech');
+});
+
+// --- a leech lets go
+//
+// It held on until something shot it off. In a corridor with nothing to
+// scrape against, that is a drain with no answer and the only move left
+// is to fly into the hull and hope. Reported from play: "the leeching
+// mines should have a time limit, so they dont get stuck forever."
+
+test('an attached leech lets go once it has fed', async () => {
+  const { updateFoes } = await import('../src/foes.js');
+  const game = fakeGame(5);
+  const p = game.player;
+  p.invuln = 0;
+  p.shield = 10000;          // outlast it, so detaching is what ends this
+
+  const f = spawnFoe(game, 'leech');
+  f.x = p.x + 8;
+  f.baseY = p.y;
+  f.y = p.y;
+  for (let i = 0; i < 60 && f.state === 0; i++) updateFoes(game, 1 / 120);
+  assert.equal(f.state, 1, 'the leech never attached');
+
+  // Run well past the hold time and watch for it to come off.
+  let heldFor = 0;
+  for (let i = 0; i < 120 * 20 && f.state === 1; i++) {
+    updateFoes(game, 1 / 120);
+    heldFor += 1 / 120;
+  }
+  assert.equal(f.state, 0,
+    `the leech was still attached after ${heldFor.toFixed(1)}s; holdTime is `
+    + `${SPEC.leech.holdTime}s`);
+  assert.ok(Math.abs(heldFor - SPEC.leech.holdTime) < 0.5,
+    `it let go after ${heldFor.toFixed(1)}s, expected about ${SPEC.leech.holdTime}s`);
+});
+
+test('a leech that has fed does not immediately grab again', async () => {
+  const { updateFoes } = await import('../src/foes.js');
+  const game = fakeGame(5);
+  const p = game.player;
+  p.invuln = 0;
+  p.shield = 10000;
+
+  const f = spawnFoe(game, 'leech');
+  f.x = p.x + 8; f.baseY = p.y; f.y = p.y;
+  for (let i = 0; i < 60 && f.state === 0; i++) updateFoes(game, 1 / 120);
+  for (let i = 0; i < 120 * 20 && f.state === 1; i++) updateFoes(game, 1 / 120);
+  assert.equal(f.state, 0, 'it never let go');
+
+  // Another five seconds sitting next to the ship: it must not re-attach,
+  // or the hold time buys nothing at all.
+  const after = p.shield;
+  for (let i = 0; i < 120 * 5; i++) updateFoes(game, 1 / 120);
+  assert.equal(f.state, 0, 'a fed leech grabbed again, so the limit means nothing');
+  assert.equal(p.shield, after, 'a fed leech went on draining');
+});
+
+test('the total a single leech can take is bounded', async () => {
+  const { updateFoes } = await import('../src/foes.js');
+  const game = fakeGame(5);
+  const p = game.player;
+  p.invuln = 0;
+  p.shield = 10000;
+  const before = p.shield;
+
+  const f = spawnFoe(game, 'leech');
+  f.x = p.x + 8; f.baseY = p.y; f.y = p.y;
+  for (let i = 0; i < 120 * 40; i++) updateFoes(game, 1 / 120);
+
+  const lost = before - p.shield;
+  const ceiling = SPEC.leech.drain * SPEC.leech.holdTime
+    * hullDmg(game) * diff().enemyDmg * 1.1;
+  assert.ok(lost <= ceiling,
+    `one leech took ${lost.toFixed(0)} shield over forty seconds; a single hold `
+    + `should cost at most about ${ceiling.toFixed(0)}`);
+  assert.ok(lost > 0, 'the leech did nothing at all, so this bounds nothing');
+});
+
+// A pool slot that last held a fed leech must not hand the next one a
+// full stomach — it would never attach.
+test('a recycled leech starts hungry', async () => {
+  const { updateFoes } = await import('../src/foes.js');
+  const game = fakeGame(5);
+  const p = game.player;
+  p.invuln = 0;
+  p.shield = 10000;
+
+  const first = spawnFoe(game, 'leech');
+  first.x = p.x + 8; first.baseY = p.y; first.y = p.y;
+  for (let i = 0; i < 60 && first.state === 0; i++) updateFoes(game, 1 / 120);
+  for (let i = 0; i < 120 * 20 && first.state === 1; i++) updateFoes(game, 1 / 120);
+  assert.ok(first.fed, 'the first leech never fed');
+  resetFoes();
+
+  const second = spawnFoe(game, 'leech');
+  assert.equal(second.fed, false, 'a recycled slot came back already fed');
+  assert.equal(second.held, 0, 'a recycled slot came back part-way through a hold');
+  second.x = p.x + 8; second.baseY = p.y; second.y = p.y;
+  for (let i = 0; i < 60 && second.state === 0; i++) updateFoes(game, 1 / 120);
+  assert.equal(second.state, 1, 'the second leech could not attach at all');
 });

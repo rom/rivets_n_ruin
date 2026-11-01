@@ -20,8 +20,7 @@ import { sparks, explode, addLight } from './particles.js';
 import { kick } from './camera.js';
 import { sfxExplode, sfxEnemyHit, sfxScrape } from './sfx.js';
 import { spoils } from './pickups.js';
-import { award } from './score.js';
-import { diff } from './score.js';
+import { award, hurt } from './score.js';
 
 // Deterministic from the hull's own rng, so a hull always has the same
 // gates in the same places.
@@ -133,7 +132,7 @@ export function updateGates(game, dt) {
     g.burnCd = (g.burnCd || 0) - dt;
     if (p.invuln <= 0 && g.burnCd <= 0) {
       g.burnCd = LASER.burnEvery;
-      p.shield -= LASER.burn * diff().enemyDmg;
+      hurt(game, LASER.burn);
       game.flash = Math.max(game.flash, 0.35);
       kick(game.cam, 4);
       sparks(edge, p.y, -side, 0, 7, LASER.colour);

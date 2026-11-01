@@ -25,3 +25,29 @@ export function award(game, points) {
   game.score += n;
   return n;
 }
+
+// What one enemy hit costs on this hull, as a multiplier.
+//
+// Lives next to diff() for the same reason diff() lives here: several
+// modules deal damage to the player and routing them through the
+// orchestrator would make import cycles out of nothing. Both multipliers
+// apply — the hull says how dangerous the ship's surroundings are, the
+// difficulty says how dangerous the player asked for.
+//
+// Only enemies scale. Flying into the hull does not: the hull is the hull,
+// and a slam costing more on ORICHALCUM than on ARGENTUM would be the game
+// lying about its own geometry. Nor does your own ordnance going off in
+// your face, which is a mistake with a fixed price.
+export function hullDmg(game) {
+  const n = game && game.level && game.level.spec && game.level.spec.enemyDmg;
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+// The one way the player takes damage from something hostile, so neither
+// multiplier can be forgotten at one of the places that deals it.
+export function hurt(game, amount) {
+  const p = game.player;
+  const n = amount * diff().enemyDmg * hullDmg(game);
+  p.shield -= n;
+  return n;
+}

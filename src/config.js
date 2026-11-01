@@ -251,6 +251,7 @@ const CORE_LEVELS = [
     turretHp: 6, turretCooldown: 1.75, turretRange: 300,
     interceptorSpeed: 172, interceptorSpawn: 1.50, interceptorHp: 2,
     foes: [],
+    enemyDmg: 1.00,
     towers: ['gun'], lasers: 0, laserHp: 0, tune: 0 },
 
   { name: 'OSMIUM', subtitle: 'DENSEST ALLOY AFLOAT — LINE HULL',
@@ -259,6 +260,7 @@ const CORE_LEVELS = [
     turretHp: 8, turretCooldown: 1.45, turretRange: 330,
     interceptorSpeed: 196, interceptorSpawn: 1.20, interceptorHp: 3,
     foes: ['mine'],
+    enemyDmg: 1.05,
     towers: ['gun'], lasers: 0, laserHp: 1, tune: 1 },
 
   { name: 'TANTALUM', subtitle: 'CORROSION PROOF — FLAGSHIP HULL',
@@ -267,6 +269,7 @@ const CORE_LEVELS = [
     turretHp: 9, turretCooldown: 1.20, turretRange: 360,
     interceptorSpeed: 220, interceptorSpawn: 0.98, interceptorHp: 3,
     foes: ['mine', 'lancer', 'weaver'],
+    enemyDmg: 1.10,
     towers: ['gun', 'flak'], lasers: 1, laserHp: 2, tune: 4 },
 
   { name: 'CUPRUM', subtitle: 'OXIDISED — SALVAGE HULK',
@@ -275,6 +278,7 @@ const CORE_LEVELS = [
     turretHp: 11, turretCooldown: 1.10, turretRange: 380,
     interceptorSpeed: 236, interceptorSpawn: 0.90, interceptorHp: 4,
     foes: ['mine', 'lancer', 'orbiter', 'weaver'],
+    enemyDmg: 1.16,
     towers: ['gun', 'flak', 'lance', 'rocket'], lasers: 2, laserHp: 3, tune: 2 },
 
   { name: 'PYRITE', subtitle: 'RUNNING HOT — FOUNDRY HULL',
@@ -283,6 +287,7 @@ const CORE_LEVELS = [
     turretHp: 13, turretCooldown: 1.00, turretRange: 400,
     interceptorSpeed: 252, interceptorSpawn: 0.82, interceptorHp: 4,
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter'],
+    enemyDmg: 1.22,
     towers: ['gun', 'flak', 'lance', 'mortar', 'rocket'], lasers: 2, laserHp: 4, tune: 5 },
 
   { name: 'WOLFRAM', subtitle: 'LIGHT SWALLOWING — SIEGE HULL',
@@ -291,6 +296,7 @@ const CORE_LEVELS = [
     turretHp: 15, turretCooldown: 0.92, turretRange: 420,
     interceptorSpeed: 266, interceptorSpawn: 0.75, interceptorHp: 5,
     foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech'],
+    enemyDmg: 1.28,
     towers: ['gun', 'lance', 'mortar', 'warden', 'rocket'], lasers: 3, laserHp: 5, tune: 3 },
 
   { name: 'FERRUM', subtitle: 'EATEN THROUGH — DERELICT HULL',
@@ -299,6 +305,7 @@ const CORE_LEVELS = [
     turretHp: 16, turretCooldown: 0.86, turretRange: 440,
     interceptorSpeed: 280, interceptorSpawn: 0.70, interceptorHp: 5,
     foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech'],
+    enemyDmg: 1.34,
     towers: ['gun', 'flak', 'mortar', 'warden', 'rocket'], lasers: 3, laserHp: 6, tune: 6 },
 
   { name: 'AURUM', subtitle: 'THE PRIZE — ADMIRALTY HULL',
@@ -307,6 +314,7 @@ const CORE_LEVELS = [
     turretHp: 18, turretCooldown: 0.80, turretRange: 460,
     interceptorSpeed: 294, interceptorSpawn: 0.64, interceptorHp: 6,
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech'],
+    enemyDmg: 1.40,
     towers: ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket'], lasers: 4, laserHp: 7, tune: 7 },
 ];
 
@@ -327,6 +335,7 @@ const ALL_TOWERS = ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket'];
 // bug in the game rather than in the arithmetic. Rounded at the source, so
 // anything generated from these is clean too.
 const r3 = (x) => Math.round(x * 1000) / 1000;
+const r2 = (x) => Math.round(x * 100) / 100;
 
 const DEEP_LEVELS = DEEP_HULLS.map(([name, subtitle], i) => {
   const n = CORE_LEVELS.length + i;        // campaign index, 8..24
@@ -349,6 +358,13 @@ const DEEP_LEVELS = DEEP_HULLS.map(([name, subtitle], i) => {
     interceptorSpeed: Math.min(400, 294 + k * 6),
     interceptorSpawn: r3(Math.max(0.34, 0.64 - k * 0.018)),
     interceptorHp: 6 + Math.floor(k / 3),
+    // What a hit costs on this hull. Everything else about an enemy
+    // scaled with depth — health 8.7x, spawn rate 4.4x — but the damage
+    // it did was flat, 9 for a turret bullet on the first hull and 9 on
+    // the last. Against a shield that grew the ship got steadily harder
+    // to kill while the enemies only got harder to kill back, which is
+    // why the deep hulls read as long rather than dangerous.
+    enemyDmg: r2(1.40 + k * 0.05),
     foes: ALL_FOES,
     towers: ALL_TOWERS,
     lasers: Math.min(8, 4 + Math.floor(k / 3)),
@@ -385,7 +401,11 @@ export const HULL_BONUS = {
 };
 
 export const LEVEL_UP = {
-  shieldMax: 45,
+  // Smaller per hull than it was, and now bounded by SHIP.shieldCap: +45
+  // reached the old unbounded ceiling in four hulls and kept going. At +15
+  // the hull is still visibly tougher every time, and the cap arrives at
+  // hull twenty-one rather than never.
+  shieldMax: 15,
   accelMul: 1.09,
   maxVXAdd: 24,
   maxVYAdd: 18,
@@ -427,6 +447,16 @@ export const SHIP = {
   fireRate: 0.115,
   bulletSpeed: 545,
   shieldMax: 100,
+  // The ceiling on what the *refit* builds into the hull. Upgrades add on
+  // top of it; see PICKUP.shieldBonusMax.
+  //
+  // There was no ceiling, and the refit's +45 a hull took the ship to 1180
+  // by the end of the campaign. Enemy damage is flat — a turret bullet is
+  // 9 on the first hull and 9 on the last — so the ship got twelve times
+  // harder to kill while the enemies only got harder to kill back. That is
+  // the wrong way round, and it is what made the deep hulls long rather
+  // than dangerous.
+  shieldCap: 400,
   lives: 3,
   invuln: 1.7,
   scrapeCd: 0.28,

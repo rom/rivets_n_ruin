@@ -32,6 +32,36 @@ function text(ctx, str, x, y, color = COL.hudText, font = FONT, align = 'left') 
   ctx.fillText(str, x, y);
 }
 
+// Where each readout starts, and how wide it is allowed to be.
+//
+// One place for the column positions, so adding a readout is a question
+// of changing numbers here rather than discovering a collision in a
+// screenshot — which is what happened: the armory's three slots were 28px
+// wide, holding a three-character label at +2 and a right-aligned count
+// ending at +26. One digit just fits. Grenades cap at twelve, and at two
+// digits the count was drawn through the last letter of the label, so the
+// HUD read "GR12". Reported from play, and invisible to every test here
+// because nothing measured it.
+//
+// `w` is what the block may occupy before it runs into the next one, and
+// screens.test.mjs checks the widest thing each one can hold against it.
+export const HUD_X = {
+  shield: 8, ships: 94, vel: 142, guns: 202,
+  armory: 234, score: 362, prog: 420,
+};
+
+// The armory slots, sized from their own contents rather than guessed:
+// the label, a gap, and room for the largest count any of them can hold.
+export const HUD_ARMORY = {
+  pad: 2,
+  labelChars: 3,
+  countChars: 2,
+  gap: 4,
+};
+HUD_ARMORY.slotW = HUD_ARMORY.pad * 2 + (HUD_ARMORY.labelChars + HUD_ARMORY.countChars) * 6
+  + HUD_ARMORY.gap;
+HUD_ARMORY.pitch = HUD_ARMORY.slotW + 3;
+
 export function drawHud(ctx, game, audio = {}) {
   const p = game.player;
   const y0 = HUD_Y;
@@ -41,13 +71,7 @@ export function drawHud(ctx, game, audio = {}) {
   ctx.fillStyle = COL.hudLine;
   ctx.fillRect(0, y0, VIEW_W, 1);
 
-  // One place for the column positions, so adding a readout is a question of
-  // changing numbers here rather than discovering a collision in a
-  // screenshot. Every block is laid out as label on row 1, value on row 2.
-  const X = {
-    shield: 8, ships: 86, vel: 130, guns: 190,
-    armory: 222, score: 320, prog: 392,
-  };
+  const X = HUD_X;
   const L = y0 + 6;      // label row
   const V = y0 + 18;     // value row
 
@@ -96,16 +120,18 @@ export function drawHud(ctx, game, audio = {}) {
 
   // --- armory: three slots, the selected one lit
   text(ctx, 'ARMORY', X.armory, L);   // key hints live on the title screen
+  const A = HUD_ARMORY;
   ARMORY.order.forEach((kind, i) => {
     const spec = ARMORY[kind];
     const n = p.ammo ? (p.ammo[kind] || 0) : 0;
     const sel = p.secondary === kind;
-    const ax = X.armory + i * 31;
+    const ax = X.armory + i * A.pitch;
     ctx.fillStyle = sel ? '#1e2630' : '#13191f';
-    ctx.fillRect(ax, V, 28, 12);
-    if (sel) { ctx.fillStyle = spec.colour; ctx.fillRect(ax, V, 28, 1); }
-    text(ctx, spec.short, ax + 2, V + 2, n ? spec.colour : '#2b3440', FONT);
-    text(ctx, String(n), ax + 26, V + 2, n ? COL.hudBright : '#2b3440', FONT, 'right');
+    ctx.fillRect(ax, V, A.slotW, 12);
+    if (sel) { ctx.fillStyle = spec.colour; ctx.fillRect(ax, V, A.slotW, 1); }
+    text(ctx, spec.short, ax + A.pad, V + 2, n ? spec.colour : '#2b3440', FONT);
+    text(ctx, String(n), ax + A.slotW - A.pad, V + 2,
+      n ? COL.hudBright : '#2b3440', FONT, 'right');
   });
 
   // --- score

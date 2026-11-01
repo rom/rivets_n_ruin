@@ -8,7 +8,7 @@ import {
   FIELD_TOP, FIELD_BOT, VIEW_W, APRON, clamp, CULL_MARGIN,
 } from './config.js';
 import { makePool } from './pool.js';
-import { award } from './score.js';
+import { award, hurt } from './score.js';
 import { enemyShots, fire } from './projectiles.js';
 import { explode, sparks } from './particles.js';
 import { sfxTurretShot, sfxEnemyHit, sfxExplode } from './sfx.js';
@@ -33,7 +33,10 @@ export const SPEC = {
   // Seeds mines along its path, so ignoring it costs you the lane.
   bomber:  { hp: 5, speed: 108, score: 340, r: 14, dropEvery: 1.15 },
   // Latches on and drains the shield until it is shot off.
-  leech:   { hp: 3, speed: 210, score: 260, r: 10, drain: 11, grabR: 15 },
+  // holdTime: how long it can stay attached before it has had enough.
+  // Unbounded, a grab in a corridor with nothing to scrape against was
+  // a drain with no answer.
+  leech:   { hp: 3, speed: 210, score: 260, r: 10, drain: 11, grabR: 15, holdTime: 4.5 },
 };
 
 // A deflector bubble, fitted to some attackers on later hulls. Unlike a
@@ -58,10 +61,16 @@ export function shieldChanceFor(levelIndex) {
   return Math.min(0.75, SHIELD.chance + SHIELD.perLevel * (levelIndex - SHIELD.fromLevel));
 }
 
+// Flying into an attacker. Named rather than written into the collision
+// check, where it was the only damage figure in the game that was not in
+// config and not scaled by anything.
+const RAM_DAMAGE = 18;
+
 export const foes = makePool(26, () => ({
   kind: 'mine', x: 0, y: 0, baseY: 0, vx: 0, vy: 0,
   hp: 0, t: 0, cd: 0, state: 0, dead: false, flash: 0, facing: -1,
   shield: 0, shieldMax: 0, shieldFlash: 0,
+  held: 0, fed: false,     // leech: how long attached, and whether it has
 }));
 
 export function resetFoes() { foes.clear(); }
@@ -102,6 +111,10 @@ export function spawnFoe(game, kind) {
   f.cd = 0.4 + Math.random() * 0.8;
   f.state = 0;
   f.flash = 0;
+  // Pooled: a slot that last held a fed leech must not hand a new one a
+  // full stomach, or the next leech to spawn never attaches at all.
+  f.held = 0;
+  f.fed = false;
 
   // Deflector, on the kinds that can carry one, from the middle of the
   // campaign onward.
@@ -229,15 +242,43 @@ export function updateFoes(game, dt) {
           // during respawn grace would start draining the instant it ran
           // out, which is indistinguishable from a respawn that does not
           // work.
-          if (p.alive && p.invuln <= 0 && d < spec.grabR) { f.state = 1; }
+          // A leech that has already fed does not come back for seconds:
+          // it keeps its distance and is shot off at leisure or left
+          // behind. Otherwise the hold timer buys nothing — it would
+          // re-attach on the next frame.
+          if (f.fed) {
+            f.x -= (dx / d) * spec.speed * 1.6 * dt;
+            f.baseY -= (dy / d) * spec.speed * 1.6 * dt;
+            f.y = f.baseY;
+          } else if (p.alive && p.invuln <= 0 && d < spec.grabR) {
+            f.state = 1;
+            f.held = 0;
+          }
         } else {
-          // attached: rides along, draining, until shot off
+          // Attached: rides along, draining, until shot off — or until it
+          // has had its fill.
+          //
+          // It used to hold on forever. A leech that grabs while you are
+          // in a corridor with nothing to shoot it off against is then a
+          // drain you cannot answer, and the only move left is to fly
+          // into the hull and hope. A grab should be a problem with a
+          // shape, not a sentence; it lets go on its own and leaves.
+          f.held = (f.held || 0) + dt;
           f.x = p.x - p.facing * 14;
           f.y = p.y;
           f.baseY = p.y;
           if (p.alive && p.invuln <= 0) {
-            p.shield -= spec.drain * dt;
+            hurt(game, spec.drain * dt);
             if (Math.random() < dt * 8) sparks(f.x, f.y, 0, -1, 2, '#9ad94e');
+          }
+          if (f.held >= spec.holdTime) {
+            // Full. Detaches and runs for the open hull rather than
+            // vanishing, so the moment reads as the leech leaving.
+            f.state = 0;
+            f.held = 0;
+            f.fed = true;
+            f.baseY = p.y - 30;
+            sparks(f.x, f.y, 0, -1, 8, '#9ad94e');
           }
           if (!p.alive) foes.kill(i);
         }
@@ -275,11 +316,19 @@ export function updateFoes(game, dt) {
     // second, about five times the drain it is specified to do, and the
     // invulnerability that ram sets then suppressed the drain entirely. It
     // has its own damage model; this one does not apply to it.
-    const clamped = f.state === 1 && spec.grabR;
-    if (!clamped && p.alive && p.invuln <= 0
+    // Anything that grabs is excluded outright, attached or not. It was
+    // excluded only while attached, which was right until a leech could
+    // let go: on the frame it released it was still sitting at the ship's
+    // position, no longer clamped, and took the ram path for a free 18 —
+    // a parting shot for letting go.
+    const grabber = !!spec.grabR;
+    if (!grabber && p.alive && p.invuln <= 0
       && Math.abs(f.x - p.x) < spec.r + 9 && Math.abs(f.y - p.y) < spec.r + 5) {
       if (f.kind === 'mine') { detonate(game, f, i); continue; }
-      p.shield -= 18;
+      // Through hurt(), so a collision costs what the hull and the
+      // difficulty say it costs. This was a bare subtraction and was the
+      // one source of damage to the player that ignored both.
+      hurt(game, RAM_DAMAGE);
       game.flash = Math.max(game.flash, 0.35);
       kick(game.cam, 5);
       p.invuln = 0.35;

@@ -2,7 +2,7 @@ import {
   SHIP, INTERCEPTOR, LEVELS, LEVEL_UP, PICKUP, BOSS, HULL_BONUS, APRON, VIEW_W,
   FIELD_TOP, FIELD_BOT, clamp,
 } from './config.js';
-import { diff, award } from './score.js';
+import { diff, award, hurt } from './score.js';
 import { get as setting, set as setSetting, onChange as onSetting } from './settings.js';
 import { buildLevel, obstaclesNear } from './level.js';
 import { updateGates, hitGate, gateHit, liveGates } from './gates.js';
@@ -224,7 +224,12 @@ function applyRefit(game) {
   p.refits = (p.refits || 0) + 1;
   const every = (n) => n > 0 && p.refits % n === 0;
 
-  p.shieldMax += LEVEL_UP.shieldMax;
+  // Bounded: see SHIP.shieldCap. The bonus the upgrades have added rides
+  // on top of the cap rather than being squeezed out by it, or a healthbar
+  // collected before the cap would silently stop counting after it.
+  const refitFloor = Math.min(SHIP.shieldCap, p.shieldMax - (p.shieldBonus || 0)
+    + LEVEL_UP.shieldMax);
+  p.shieldMax = refitFloor + (p.shieldBonus || 0);
   p.shield = p.shieldMax;
   p.accelMul *= LEVEL_UP.accelMul;
   p.maxVXBonus += LEVEL_UP.maxVXAdd;
@@ -854,7 +859,7 @@ function collide(game) {
     if (Math.abs(s.x - p.x) < hw + s.r && Math.abs(s.y - p.y) < hh + s.r) {
       enemyShots.kill(i);
       if (p.invuln <= 0) {
-        p.shield -= s.dmg * diff().enemyDmg;
+        hurt(game, s.dmg);
         game.flash = Math.max(game.flash, 0.3);
         kick(game.cam, 3.5);
         sparks(s.x, s.y, -Math.sign(s.vx), 0, 6, '#e8434f');
@@ -878,7 +883,7 @@ function collide(game) {
     if (Math.abs(e.x - p.x) < hw + 9 && Math.abs(e.y - p.y) < hh + 6) {
       hitInterceptor(game, j, 99);
       if (p.invuln <= 0) {
-        p.shield -= INTERCEPTOR.ramDamage;
+        hurt(game, INTERCEPTOR.ramDamage);
         game.flash = Math.max(game.flash, 0.45);
         kick(game.cam, 7);
         sfxPlayerHit();
