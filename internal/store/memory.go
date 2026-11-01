@@ -30,6 +30,7 @@ type Memory struct {
 	byName   map[string]string // lowercased name -> playerID
 	scores   []*model.Score
 	mods     map[string]*model.Mod
+	hangars  map[string]*model.Hangar // playerID -> what they own between runs
 	presence map[string]model.Presence
 	now      func() time.Time
 }
@@ -37,6 +38,7 @@ type Memory struct {
 func NewMemory() *Memory {
 	return &Memory{
 		players:  map[string]*model.Player{},
+		hangars:  map[string]*model.Hangar{},
 		byToken:  map[string]string{},
 		byName:   map[string]string{},
 		mods:     map[string]*model.Mod{},
@@ -424,11 +426,12 @@ func (m *Memory) Stats() Stats {
 // has on disk, and omitempty means a file written by either half parses
 // as the other with nothing in it.
 type snapshot struct {
-	Players []*model.Player   `json:"players,omitempty"`
-	Pass    map[string]string `json:"pass,omitempty"`
-	Tokens  map[string]string `json:"tokens,omitempty"`
-	Scores  []*model.Score    `json:"scores,omitempty"`
-	Mods    []*model.Mod      `json:"mods,omitempty"`
+	Players []*model.Player          `json:"players,omitempty"`
+	Pass    map[string]string        `json:"pass,omitempty"`
+	Tokens  map[string]string        `json:"tokens,omitempty"`
+	Hangars map[string]*model.Hangar `json:"hangars,omitempty"`
+	Scores  []*model.Score           `json:"scores,omitempty"`
+	Mods    []*model.Mod             `json:"mods,omitempty"`
 }
 
 // What a snapshot file is for. Accounts holds what can log you in;
@@ -454,6 +457,13 @@ func (m *Memory) SnapshotPart(path string, part Part) error {
 	if part == Accounts || part == Everything {
 		snap.Tokens = map[string]string{}
 		snap.Pass = map[string]string{}
+		// With the players, not with the scores: a hangar is per-pilot
+		// data, it has to follow the account's backup policy, and
+		// deleting a pilot has to be able to take it with them.
+		snap.Hangars = map[string]*model.Hangar{}
+		for id, h := range m.hangars {
+			snap.Hangars[id] = h
+		}
 		for _, p := range m.players {
 			snap.Players = append(snap.Players, p)
 			snap.Tokens[p.TokenHash] = p.ID
@@ -534,11 +544,88 @@ func (m *Memory) Load(path string) error {
 			p.TokenHash = hash
 		}
 	}
+	for id, h := range snap.Hangars {
+		if h != nil {
+			m.hangars[id] = h
+		}
+	}
 	m.scores = append(m.scores, snap.Scores...)
 	for _, mod := range snap.Mods {
 		m.mods[mod.ID] = mod
 	}
 	return nil
+}
+
+// --- hangars
+
+// Caps on what can be read back in or written. Not game rules — there is
+// no coin cap in play — but a hand-edited or corrupted value must not be
+// able to put the HUD into a state it cannot render or the shop into one
+// where everything is free. The same numbers as src/hangar.js, and
+// parity.test.mjs checks they stay the same.
+const (
+	MaxCoins    = 1_000_000_000
+	MaxModLevel = 99
+	MaxMods     = 64
+)
+
+// Hangar returns what a pilot owns. Always a usable value, never nil, so
+// a pilot who has never banked anything reads as empty rather than
+// missing.
+func (m *Memory) Hangar(playerID string) *model.Hangar {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	h, ok := m.hangars[playerID]
+	if !ok {
+		return &model.Hangar{Mods: map[string]int{}}
+	}
+	c := *h
+	c.Mods = map[string]int{}
+	for k, v := range h.Mods {
+		c.Mods[k] = v
+	}
+	return &c
+}
+
+// SetHangar clamps and stores. Everything here arrives from a client and
+// nothing from a client is trusted: a negative balance, a level that is
+// not a number, a thousand invented mod ids and a coin count of 1e308
+// are all things an HTTP body can hold and the game cannot.
+func (m *Memory) SetHangar(playerID string, in *model.Hangar) *model.Hangar {
+	clean := &model.Hangar{Mods: map[string]int{}, Updated: m.now()}
+	if in != nil {
+		clean.Coins = clampInt(in.Coins, 0, MaxCoins)
+		clean.Bars = clampInt(in.Bars, 0, MaxCoins)
+		n := 0
+		for id, lvl := range in.Mods {
+			if n >= MaxMods || id == "" || len(id) > 64 || lvl < 1 {
+				continue
+			}
+			clean.Mods[id] = clampInt(lvl, 1, MaxModLevel)
+			n++
+		}
+	}
+	m.mu.Lock()
+	m.hangars[playerID] = clean
+	m.mu.Unlock()
+	return m.Hangar(playerID)
+}
+
+// DeleteHangar drops a pilot's belongings. Called when the pilot goes.
+func (m *Memory) DeleteHangar(playerID string) {
+	m.mu.Lock()
+	delete(m.hangars, playerID)
+	m.mu.Unlock()
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 func clonePlayer(p *model.Player) *model.Player { c := *p; return &c }

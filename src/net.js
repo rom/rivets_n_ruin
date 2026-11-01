@@ -138,6 +138,25 @@ export async function signIn(name, password) {
   return S.player;
 }
 
+// --- the hangar, as the server holds it
+//
+// Coins, bars and bought mods are the one piece of progress that is
+// supposed to outlive a ship. They lived only in localStorage, so they
+// did not outlive a new browser, a cleared cache or a second machine —
+// which is most of what signing in is for.
+
+export async function fetchHangar() {
+  return call('/api/me/hangar', { auth: true });
+}
+
+export async function pushHangar(h) {
+  return call('/api/me/hangar', {
+    method: 'PUT',
+    auth: true,
+    body: { coins: h.coins | 0, bars: h.bars | 0, mods: h.mods || {} },
+  });
+}
+
 export async function register(name) {
   const data = await call('/api/players', { method: 'POST', body: { name } });
   if (!data) return null;

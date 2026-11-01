@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   loadHangar, saveHangar, clearHangar, sanitise, freshHangar,
-  MAX_COINS, MAX_MOD_LEVEL,
+  MAX_COINS, MAX_MOD_LEVEL, mergeHangars, applyHangar, setHangarSync,
 } from '../src/hangar.js';
 import { MODS, resetShop, applyMods, modLevel } from '../src/shop.js';
 
@@ -164,4 +164,73 @@ test('a banked mod is in force again after a relaunch, not merely remembered', (
   assert.equal(modLevel(next, 'scavenger'), 3);
   assert.deepEqual(next.bought, {}, 'the previous run\'s loadout came back with it');
   assert.ok(next.player.coinMul > 1, 'the mod is remembered but not doing anything');
+});
+
+// --- the account copy
+//
+// Coins, bars and bought mods are the one piece of progress the game
+// promises survives a lost ship, and they lived only in localStorage —
+// so they did not survive a new browser, a cleared cache or a second
+// machine, which is most of what an account is for.
+
+test('merging never takes anything away from either copy', () => {
+  const local = { coins: 500, bars: 2, mods: { reclaimer: 3, ablative: 1 } };
+  const remote = { coins: 120, bars: 9, mods: { reclaimer: 1, spinal: 2 } };
+  const m = mergeHangars(local, remote);
+  assert.equal(m.coins, 500, 'the richer purse lost');
+  assert.equal(m.bars, 9, 'the fuller vault lost');
+  assert.deepEqual(m.mods, { reclaimer: 3, ablative: 1, spinal: 2 },
+    'a mod bought on one machine went missing');
+});
+
+test('merging an empty side keeps the other side whole', () => {
+  // The case that matters most: a fresh browser signing in to an
+  // account that has things in it, and the reverse. Either direction
+  // getting this wrong wipes a pilot's purchases.
+  const full = { coins: 900, bars: 4, mods: { reclaimer: 2 } };
+  assert.deepEqual(mergeHangars({}, full), { coins: 900, bars: 4, mods: { reclaimer: 2 } });
+  assert.deepEqual(mergeHangars(full, {}), { coins: 900, bars: 4, mods: { reclaimer: 2 } });
+  assert.deepEqual(mergeHangars(null, undefined), { coins: 0, bars: 0, mods: {} });
+});
+
+test('merging sanitises what it is handed', () => {
+  // The remote side is a parsed HTTP body and the local side is
+  // localStorage. Neither is trusted; both go through sanitise.
+  const m = mergeHangars(
+    { coins: -5, bars: 'nine', mods: { ok: 2, bad: -1, worse: 'x' } },
+    { coins: 1e300, bars: 3, mods: { ok: 1e9 } },
+  );
+  assert.equal(m.coins, MAX_COINS, 'an absurd balance was not capped');
+  assert.equal(m.bars, 3);
+  assert.equal(m.mods.ok, MAX_MOD_LEVEL, 'an absurd mod level was not capped');
+  assert.equal(m.mods.bad, undefined, 'a negative level was kept');
+  assert.equal(m.mods.worse, undefined, 'a non-numeric level was kept');
+});
+
+test('applying a hangar puts it into the live game', () => {
+  // Writing storage alone leaves the shop and the HUD reading the old
+  // values until a reload, which is how a signed-in pilot sees their
+  // own purchases appear one game later.
+  const game = { coins: 1, bars: 1, mods: { old: 1 } };
+  applyHangar(game, { coins: 300, bars: 7, mods: { reclaimer: 2 } });
+  assert.equal(game.coins, 300);
+  assert.equal(game.bars, 7);
+  assert.deepEqual(game.mods, { reclaimer: 2 }, 'the stale mods survived');
+});
+
+test('the upload hook is called with what was saved, and cannot break a save', () => {
+  const seen = [];
+  setHangarSync((h) => { seen.push(h); return Promise.resolve(); });
+  const game = { coins: 42, bars: 1, mods: { reclaimer: 1 } };
+  saveHangar(game);
+  assert.equal(seen.length, 1, 'the hangar was not uploaded');
+  assert.equal(seen[0].coins, 42);
+
+  // A shop purchase must not fail because the network did. Both the
+  // throwing and the rejecting case, because they take different paths.
+  setHangarSync(() => { throw new Error('offline'); });
+  assert.doesNotThrow(() => saveHangar(game), 'a failed upload broke the save');
+  setHangarSync(() => Promise.reject(new Error('offline')));
+  assert.doesNotThrow(() => saveHangar(game), 'a rejected upload broke the save');
+  setHangarSync(null);
 });
