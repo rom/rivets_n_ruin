@@ -33,7 +33,14 @@ type Server struct {
 	runs        *runStore
 	errs        *errorRing
 	requireRuns bool
+	// What the OS agreed to take away, for /api/stats. A hardening layer
+	// nobody can see the state of gets quietly broken and stays broken.
+	hardening any
 }
+
+// SetHardening records what internal/hardening managed to apply, so the
+// running server can be asked rather than assumed about.
+func (s *Server) SetHardening(v any) { s.hardening = v }
 
 func New(s store.Store, log *slog.Logger, cfg Config) *Server {
 	return &Server{
@@ -143,5 +150,6 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, struct {
 		store.Stats
 		ClientErrors map[string]any `json:"clientErrors"`
-	}{st, s.errs.summary()})
+		Hardening    any            `json:"hardening,omitempty"`
+	}{st, s.errs.summary(), s.hardening})
 }

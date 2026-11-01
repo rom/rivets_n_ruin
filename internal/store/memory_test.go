@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/rom/rivets_n_ruin/internal/model"
+	"os"
+	"strings"
 )
 
 func mustPlayer(t *testing.T, m *Memory, name string) *model.Player {
@@ -339,5 +341,48 @@ func TestTopRunsRespectsWindowAndLimit(t *testing.T) {
 	}
 	if runs[0].Score.Points == 99999 {
 		t.Fatal("a run outside the window was included")
+	}
+}
+
+// The snapshot holds every pilot's token hash and password hash. It was
+// written with os.Create, which is 0666 before umask and 0644 after, so
+// on a shared machine the whole credential table was world-readable —
+// while the run file written beside it was already 0600.
+func TestSnapshotIsNotWorldReadable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "rnr.json")
+	m := NewMemory()
+	p := mustPlayer(t, m, "rom")
+	if err := m.SetPassword(p.ID, "pbkdf2-sha256$1$aa$bb"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Snapshot(path); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := fi.Mode().Perm(); mode&0o077 != 0 {
+		t.Errorf("the snapshot is mode %04o; it holds token and password hashes", mode)
+	}
+
+	di, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := di.Mode().Perm(); mode&0o077 != 0 {
+		t.Errorf("the data directory is mode %04o", mode)
+	}
+
+	// And it really does contain the thing worth protecting, or this
+	// test is guarding an empty file.
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "pbkdf2") {
+		t.Fatal("the snapshot holds no password hash, so this proves nothing")
 	}
 }

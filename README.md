@@ -36,7 +36,7 @@ backend API, so there is one thing to run and no CORS to think about.
 | `make icons` | Regenerate the favicon |
 
 Server flags: `-addr`, `-dir`, `-data`, `-save-interval`, `-rate-limit`,
-`-rate-burst`, `-require-runs`, `-v`.
+`-rate-burst`, `-require-runs`, `-harden`, `-allow-root`, `-v`.
 
 > **A note on `node --check`.** It reports success on a `.js` file containing ES
 > module syntax even when the file is genuinely unparseable — it only diagnoses
@@ -1513,6 +1513,92 @@ input trace and re-simulating it server-side against the same seed — the game 
 deterministic from each hull's `seed` and a fixed timestep, so that is achievable, but
 it is a separate piece of work and it is not done here.
 
+### Hardening the process
+
+The server is small and stdlib-only, which is a good start and is not the
+same as being hard to misuse. If a bug in it ever does let someone read a
+path or run something, what decides how bad that is, is what the kernel
+will still let the process do. `internal/hardening` narrows that, from
+the inside, after the snapshot is loaded and the port is bound and before
+the first request is answered.
+
+| | Linux | macOS | elsewhere |
+| --- | --- | --- | --- |
+| Refuse/announce uid 0 | yes | yes | yes |
+| `no_new_privs` | yes | — | — |
+| Non-dumpable (no core files holding tokens) | yes | `RLIMIT_CORE=0` | — |
+| Filesystem sandbox | **Landlock**, ABI 1–7 | — | — |
+
+On Linux the process ends up able to read the web root and read/write the
+data directory, **and nothing else on the filesystem**, whatever bug it
+has. Everything is raw syscalls rather than `golang.org/x/sys`, because
+having no dependencies at all is worth more here than the convenience.
+
+Three rules make this safe to have on by default:
+
+- **Degrade, do not fail.** An old kernel, a container without the
+  syscall, a platform with none of it — the server starts and says what
+  it could not apply. `-harden=require` inverts that. `-harden=off` turns
+  it off, which is what you want under `strace`.
+- **Apply late.** Landlock is irreversible, so it goes on after
+  everything that needs a wide view of the filesystem has finished.
+- **Say what happened.** `/api/stats` carries the report and the startup
+  log prints it. A hardening layer whose state nobody can see gets
+  quietly broken and stays broken.
+
+**`CGO_ENABLED=0` is not optional here**, and the Makefile sets it.
+`no_new_privs` and `landlock_restrict_self` are *per-thread* flags in the
+kernel, and the Go runtime spreads goroutines over however many OS
+threads it likes; the stdlib's `syscall.AllThreadsSyscall` exists for
+exactly this and is refused outright in any binary that links cgo — which
+a default `go build` on Linux does, through `net`'s resolver. A cgo build
+therefore reports the sandbox as unavailable rather than pretending.
+
+This was not reasoned out in advance. The first version used plain
+`syscall.Syscall`, reported success every time, and failed its own check
+against `/proc/self/status` about one run in four, because whichever
+thread the check landed on was usually not the one that had been
+hardened. A sandbox that reports success and protects an eighth of the
+process is worse than none, because nobody goes looking.
+
+The tests are the point of the whole section: `Apply()` returning
+`landlock ABI 7 (2 paths)` proves three syscalls returned zero, not that
+anything is denied. Landlock is irreversible, so the real check runs in a
+subprocess and tries to open a file on each side of the boundary — one
+test that the outside is denied, and one that the server can still reach
+its own directories, because a sandbox that breaks the server is not a
+hardened server.
+
+**macOS** has a sandbox and this binary cannot reach it: it is a C API,
+the public entry point is long deprecated, and getting at it means cgo.
+Rather than pretend, the macOS build does what it can and says the rest
+is unavailable — the answer there is a launchd job with its own user and
+a `sandbox-exec` profile.
+
+**systemd** users get `deploy/rivets-n-ruin.service`, which does the
+things a process cannot do to itself: an empty `CapabilityBoundingSet`,
+`ProtectSystem=strict` with one `ReadWritePaths`, `PrivateUsers`,
+`MemoryDenyWriteExecute`, `RestrictAddressFamilies=AF_INET AF_INET6`, and
+`SystemCallFilter=@system-service` minus the dangerous sets. It uses
+systemd's own named syscall sets deliberately: a hand-written allowlist
+against a moving Go runtime is how people end up with a filter they
+switch off the first time it breaks.
+
+**SELinux and AppArmor** need no special support — the process writes one
+directory and reads one, which is exactly the shape a confinement policy
+wants. Point the policy at `-data`'s directory and the static root.
+
+### HTTP headers
+
+Every response carries a content security policy with no exceptions in
+it, because the game has no third-party anything: no fonts, no analytics,
+no CDN. `default-src 'self'`, no inline script, `object-src 'none'`,
+`base-uri 'none'`, `form-action 'none'`, `frame-ancestors 'none'`, plus
+`X-Content-Type-Options`, `Referrer-Policy: no-referrer`, both
+`Cross-Origin-*-Policy` headers, and a `Permissions-Policy` that turns
+off the camera, microphone, geolocation and payment handlers nothing here
+will ever want.
+
 ### Storage
 
 An in-process store behind a `Store` interface, snapshotted to JSON (written to
@@ -1590,11 +1676,13 @@ tools/make_gallery.cjs  regenerates the README images from the live game
 tools/make_icons.py     regenerates favicon.ico
 test/             the client tests; see below
 .github/workflows/ci.yml
+deploy/rivets-n-ruin.service  a hardened systemd unit
 cmd/server/       the binary: static files + API
 internal/model/   shared types
 internal/store/   Store interface, in-memory implementation, snapshots
 internal/api/     routing, handlers, auth, rate limiting
 internal/validate/ score plausibility, derived from the game's physics
+internal/hardening/ asks the OS to take privileges away at startup
 ```
 
 `make smoke` flies the game in a headless browser and reads pixels, asserting
