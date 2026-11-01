@@ -386,3 +386,289 @@ func TestSnapshotIsNotWorldReadable(t *testing.T) {
 		t.Fatal("the snapshot holds no password hash, so this proves nothing")
 	}
 }
+
+// --- hangars
+
+func TestHangarIsNeverNil(t *testing.T) {
+	m := NewMemory()
+	h := m.Hangar("nobody")
+	if h == nil || h.Mods == nil {
+		t.Fatalf("a pilot who has banked nothing must read as empty, not missing: %#v", h)
+	}
+	if h.Coins != 0 || h.Bars != 0 || len(h.Mods) != 0 {
+		t.Fatalf("an empty hangar is not empty: %#v", h)
+	}
+}
+
+func TestSetHangarClamps(t *testing.T) {
+	m := NewMemory()
+	mods := map[string]int{}
+	for i := 0; i < MaxMods*3; i++ {
+		mods[fmt.Sprintf("mod%03d", i)] = 5
+	}
+	mods["negative"] = -4
+	mods[""] = 2
+	mods[strings.Repeat("x", 200)] = 2
+
+	got := m.SetHangar("p1", &model.Hangar{
+		Coins: MaxCoins * 10, Bars: -99, Mods: mods,
+	})
+	if got.Coins != MaxCoins {
+		t.Errorf("coins = %d, want the cap %d", got.Coins, MaxCoins)
+	}
+	if got.Bars != 0 {
+		t.Errorf("a negative balance became %d, want 0", got.Bars)
+	}
+	if len(got.Mods) > MaxMods {
+		t.Errorf("%d mods kept, want at most %d", len(got.Mods), MaxMods)
+	}
+	for id, lvl := range got.Mods {
+		if id == "" || len(id) > 64 {
+			t.Errorf("a junk mod id survived: %q", id)
+		}
+		if lvl < 1 || lvl > MaxModLevel {
+			t.Errorf("%s came back at level %d", id, lvl)
+		}
+	}
+}
+
+func TestSetHangarHandsBackACopy(t *testing.T) {
+	// The caller gets a value it can scribble on. Returning the stored
+	// map would let an HTTP handler mutate the store after the fact,
+	// outside the lock.
+	m := NewMemory()
+	m.SetHangar("p1", &model.Hangar{Coins: 10, Mods: map[string]int{"a": 1}})
+	got := m.Hangar("p1")
+	got.Coins = 99999
+	got.Mods["a"] = 99
+	got.Mods["b"] = 1
+
+	again := m.Hangar("p1")
+	if again.Coins != 10 || again.Mods["a"] != 1 || len(again.Mods) != 1 {
+		t.Fatalf("the stored hangar was changed from outside: %#v", again)
+	}
+}
+
+func TestSetHangarTakesNil(t *testing.T) {
+	m := NewMemory()
+	got := m.SetHangar("p1", nil)
+	if got == nil || got.Coins != 0 || got.Mods == nil {
+		t.Fatalf("a nil body should store an empty hangar, got %#v", got)
+	}
+}
+
+func TestDeleteHangar(t *testing.T) {
+	m := NewMemory()
+	m.SetHangar("p1", &model.Hangar{Coins: 500})
+	m.DeleteHangar("p1")
+	if h := m.Hangar("p1"); h.Coins != 0 {
+		t.Fatalf("a deleted hangar still has %d coins", h.Coins)
+	}
+}
+
+func TestHangarsSurviveASnapshot(t *testing.T) {
+	// It lives in the account half, because deleting a pilot has to take
+	// their belongings with them and because it is per-pilot data rather
+	// than the published leaderboard.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "accounts.json")
+
+	m := NewMemory()
+	m.SetHangar("p1", &model.Hangar{Coins: 1234, Bars: 7, Mods: map[string]int{"reclaimer": 3}})
+	if err := m.SnapshotPart(path, Accounts); err != nil {
+		t.Fatal(err)
+	}
+
+	back := NewMemory()
+	if err := back.Load(path); err != nil {
+		t.Fatal(err)
+	}
+	h := back.Hangar("p1")
+	if h.Coins != 1234 || h.Bars != 7 || h.Mods["reclaimer"] != 3 {
+		t.Fatalf("the hangar did not survive the round trip: %#v", h)
+	}
+
+	// ...and not in the published half, which is handed out freely.
+	pub := filepath.Join(dir, "scores.json")
+	if err := m.SnapshotPart(pub, Public); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "reclaimer") {
+		t.Error("a pilot's belongings were written into the public snapshot")
+	}
+}
+
+func TestClampInt(t *testing.T) {
+	for _, c := range []struct{ v, lo, hi, want int }{
+		{5, 0, 10, 5}, {-1, 0, 10, 0}, {99, 0, 10, 10}, {0, 0, 0, 0},
+	} {
+		if got := clampInt(c.v, c.lo, c.hi); got != c.want {
+			t.Errorf("clampInt(%d,%d,%d) = %d, want %d", c.v, c.lo, c.hi, got, c.want)
+		}
+	}
+}
+
+// --- administration
+
+func seedPilotWithScores(t *testing.T, m *Memory, name string, n int) *model.Player {
+	t.Helper()
+	p := mustPlayer(t, m, name)
+	for i := 0; i < n; i++ {
+		if err := m.AddScore(&model.Score{
+			ID: fmt.Sprintf("%s-%d", p.ID, i), PlayerID: p.ID, Name: p.Name,
+			Points: 100 * (i + 1), Levels: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.SetHangar(p.ID, &model.Hangar{Coins: 250})
+	return p
+}
+
+func TestListPlayersFiltersAndCaps(t *testing.T) {
+	m := NewMemory()
+	for _, n := range []string{"ALPHA", "ALPACA", "BRAVO"} {
+		mustPlayer(t, m, n)
+	}
+	if got := len(m.ListPlayers("", 0)); got != 3 {
+		t.Errorf("listed %d of 3", got)
+	}
+	if got := len(m.ListPlayers("alp", 0)); got != 2 {
+		t.Errorf("case-insensitive search returned %d, want 2", got)
+	}
+	if got := len(m.ListPlayers("", 1)); got != 1 {
+		t.Errorf("limit ignored: %d", got)
+	}
+	if got := len(m.ListPlayers("nothing matches this", 0)); got != 0 {
+		t.Errorf("a miss returned %d", got)
+	}
+}
+
+func TestDeletePlayerTakesEverything(t *testing.T) {
+	// A delete that leaves the scores behind leaves the pilot's name on
+	// the leaderboard — the one page that is published — so the only
+	// part anybody could see would not have been deleted.
+	m := NewMemory()
+	gone := seedPilotWithScores(t, m, "DELETEME", 3)
+	stays := seedPilotWithScores(t, m, "KEEPME", 2)
+
+	if err := m.DeletePlayer(gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.PlayerByID(gone.ID); err == nil {
+		t.Error("the player record survived")
+	}
+	if _, err := m.PlayerByName("DELETEME"); err == nil {
+		t.Error("the name is still taken, so it cannot be reused")
+	}
+	if _, err := m.PlayerByTokenHash(gone.TokenHash); err == nil {
+		t.Error("the old token still resolves")
+	}
+	if h := m.Hangar(gone.ID); h.Coins != 0 {
+		t.Error("their belongings survived")
+	}
+	if got, _ := m.PlayerScores(gone.ID, 50); len(got) != 0 {
+		t.Errorf("%d scores survived the delete", len(got))
+	}
+	// ...and the pilot standing next to them is untouched.
+	if got, _ := m.PlayerScores(stays.ID, 50); len(got) != 2 {
+		t.Errorf("deleting one pilot took %d of another's scores", 2-len(got))
+	}
+	if h := m.Hangar(stays.ID); h.Coins != 250 {
+		t.Error("deleting one pilot emptied another's hangar")
+	}
+	if err := m.DeletePlayer("no-such-id"); err == nil {
+		t.Error("deleting a missing pilot should report not found")
+	}
+}
+
+func TestResetPlayerKeepsTheAccount(t *testing.T) {
+	m := NewMemory()
+	p := seedPilotWithScores(t, m, "RESETME", 3)
+	before := p.TokenHash
+
+	if err := m.ResetPlayer(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	after, err := m.PlayerByID(p.ID)
+	if err != nil {
+		t.Fatal("reset deleted the account; it should only clear it")
+	}
+	if after.TokenHash != before {
+		t.Error("reset changed the credential; that is what the password route is for")
+	}
+	if after.Runs != 0 || after.Best != 0 {
+		t.Errorf("the counters survived: runs=%d best=%d", after.Runs, after.Best)
+	}
+	if got, _ := m.PlayerScores(p.ID, 50); len(got) != 0 {
+		t.Errorf("%d scores survived the reset", len(got))
+	}
+	if h := m.Hangar(p.ID); h.Coins != 0 {
+		t.Error("their belongings survived the reset")
+	}
+	if err := m.ResetPlayer("no-such-id"); err == nil {
+		t.Error("resetting a missing pilot should report not found")
+	}
+}
+
+func TestDroppedScoresDoNotLeak(t *testing.T) {
+	// dropScoresLocked compacts in place. The tail of the backing array
+	// still points at the removed entries, and leaving it that way keeps
+	// them alive for as long as the process runs.
+	m := NewMemory()
+	p := seedPilotWithScores(t, m, "LEAKCHECK", 5)
+	m.DeletePlayer(p.ID)
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	tail := m.scores[len(m.scores):cap(m.scores)]
+	for i, s := range tail {
+		if s != nil {
+			t.Fatalf("slot %d past the end still references a score", i)
+		}
+	}
+}
+
+func TestSnapshotDoesNotRaceWithWrites(t *testing.T) {
+	// SnapshotPart used to hand the JSON encoder the live *model.Player
+	// pointers and then release the lock before encoding, so any
+	// request arriving mid-snapshot wrote the fields the encoder was
+	// reading. Run under -race this failed; it is the reason the
+	// players are cloned under the lock now.
+	m := NewMemory()
+	var players []*model.Player
+	for i := 0; i < 20; i++ {
+		players = append(players, mustPlayer(t, m, fmt.Sprintf("RACER%02d", i)))
+	}
+	dir := t.TempDir()
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			p := players[i%len(players)]
+			_ = m.TouchPlayer(p.ID)
+			_ = m.AddScore(&model.Score{
+				ID: fmt.Sprintf("r%d", i), PlayerID: p.ID, Name: p.Name, Points: i, Levels: 1,
+			})
+		}
+	}()
+	for i := 0; i < 25; i++ {
+		if err := m.SnapshotPart(filepath.Join(dir, "a.json"), Accounts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(stop)
+	wg.Wait()
+}

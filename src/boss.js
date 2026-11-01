@@ -26,12 +26,29 @@ export function arenaLeft(game) {
   return game.level.length - VIEW_W;
 }
 
+// How many bosses of this shape came before it.
+//
+// Twenty-five bosses are built from eight ships, so every silhouette is
+// reused three or four times — and through the first sixteen hulls each
+// one appears exactly twice. Drawn identically, that reads as the same
+// boss turning up again under a new name, which is how it was reported
+// from play: "all bosses occur twice". The tier is what tells the art
+// which appearance this is, so a later one can be visibly a different
+// ship of the same class rather than a copy.
+export function bossTier(index) {
+  const kind = (BOSSES[index] || BOSSES[BOSSES.length - 1]).kind;
+  let n = 0;
+  for (let i = 0; i < index && i < BOSSES.length; i++) if (BOSSES[i].kind === kind) n++;
+  return n;
+}
+
 export function makeBoss(game) {
   const spec = BOSSES[game.levelIndex] || BOSSES[BOSSES.length - 1];
   const left = arenaLeft(game);
   const b = {
     spec,
     kind: spec.kind,
+    tier: bossTier(game.levelIndex),
     name: spec.name,
     x: left + 470,
     y: (FIELD_TOP + FIELD_BOT) / 2,

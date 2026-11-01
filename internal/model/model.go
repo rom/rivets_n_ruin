@@ -22,6 +22,29 @@ type Player struct {
 	HasPass   bool      `json:"hasPassword"`
 }
 
+// Hangar is what a pilot owns between runs: banked currency and the
+// permanent systems they have bought. It is the one piece of progress
+// the game describes as surviving a lost ship, and until now it lived
+// only in the browser's localStorage — so it did not survive a new
+// browser, a cleared cache or a second machine, which is most of what
+// an account is for.
+//
+// Stored with the account rather than with the leaderboards: it is
+// per-pilot data, it follows the account's backup policy, and deleting
+// a pilot has to take it with them.
+//
+// Client-authoritative, like the localStorage copy it replaces. A pilot
+// who edits it gives themselves a better ship, which affects their own
+// run and nothing else; submitted scores go through the run validator
+// either way. The caps exist so a corrupt or hand-edited value cannot
+// put the HUD or the shop into a state it cannot render.
+type Hangar struct {
+	Coins   int            `json:"coins"`
+	Bars    int            `json:"bars"`
+	Mods    map[string]int `json:"mods"`
+	Updated time.Time      `json:"updated"`
+}
+
 // Score is one completed or failed run.
 type Score struct {
 	ID        string    `json:"id"`

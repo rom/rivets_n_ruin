@@ -1,7 +1,8 @@
 import './_setup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeBoss, hitBoss, livingParts, shellUp } from '../src/boss.js';
+import { makeBoss, hitBoss, livingParts, shellUp, bossTier } from '../src/boss.js';
+import { drawBossBody, tierOf } from '../src/bossart.js';
 import { BOSSES, FIELD_TOP, FIELD_BOT, VIEW_W } from '../src/config.js';
 
 function fakeGame(levelIndex) {
@@ -85,6 +86,141 @@ for (const [i, spec] of BOSSES.entries()) {
       hitBoss(game, b, b.x, b.y, 50);
     }
     assert.ok(b.dead, 'the core survived');
+  });
+}
+
+// --- no two bosses look the same
+//
+// Twenty-five bosses are built from eight ships, and through the first
+// sixteen hulls every silhouette comes round exactly twice. Drawn
+// identically, the second one reads as the first turning up again under
+// a new name. Reported from play as "all bosses occur twice" — and once
+// the arena duplicate below was fixed and reported still happening, this
+// was what was left.
+
+test('a boss tier counts the ships of its class that came before it', () => {
+  const firstOfEachKind = new Map();
+  for (const [i, spec] of BOSSES.entries()) {
+    if (!firstOfEachKind.has(spec.kind)) firstOfEachKind.set(spec.kind, i);
+  }
+  for (const [kind, i] of firstOfEachKind) {
+    assert.equal(bossTier(i), 0, `the first ${kind} is not tier 0`);
+  }
+  // ...and each reuse is one higher than the last.
+  const seen = new Map();
+  for (const [i, spec] of BOSSES.entries()) {
+    const want = seen.get(spec.kind) ?? 0;
+    assert.equal(bossTier(i), want, `${spec.name} (hull ${i + 1}) is tier ${bossTier(i)}, not ${want}`);
+    seen.set(spec.kind, want + 1);
+  }
+});
+
+test('every boss in the campaign is visually distinct', () => {
+  // The invariant the complaint is really about: no two hulls may end in
+  // a boss that draws the same. Shape alone does not give that — tier is
+  // what makes the ninth hull's warden a different ship from the first.
+  const seen = new Map();
+  for (const [i, spec] of BOSSES.entries()) {
+    const look = `${spec.kind}/${tierOf({ tier: bossTier(i) }) ? bossTier(i) : 0}`;
+    const clash = seen.get(look);
+    assert.equal(clash, undefined,
+      `${spec.name} (hull ${i + 1}) looks exactly like ${clash} — same ship, same refit`);
+    seen.set(look, `${spec.name} (hull ${i + 1})`);
+  }
+});
+
+test('the tier table is deep enough for the most reused ship', () => {
+  // tierOf clamps, so a ninth warden would silently come out looking
+  // like the eighth. The table has to grow with the campaign, and this
+  // is the test that notices when it has not.
+  const counts = new Map();
+  for (const spec of BOSSES) counts.set(spec.kind, (counts.get(spec.kind) || 0) + 1);
+  const worst = Math.max(...counts.values());
+  const deepest = BOSSES.reduce((m, _, i) => Math.max(m, bossTier(i)), 0);
+  assert.equal(deepest, worst - 1, 'bossTier does not reach the last reuse');
+  // One distinct look per reuse, tier 0 being the bare ship.
+  const looks = new Set();
+  for (let t = 0; t < worst; t++) looks.add(JSON.stringify(tierOf({ tier: t }) || 'bare'));
+  assert.equal(looks.size, worst,
+    `${worst} ships of the most reused class, but only ${looks.size} distinct refits — `
+    + 'the deepest ones clamp to the same look');
+});
+
+test('every tier of every ship draws without throwing', () => {
+  const ctx = stubCtx();
+  const counts = new Map();
+  for (const spec of BOSSES) counts.set(spec.kind, (counts.get(spec.kind) || 0) + 1);
+  for (const [i, spec] of BOSSES.entries()) {
+    const b = {
+      kind: spec.kind, tier: bossTier(i), t: 1.2, flash: 0, dead: false,
+      hp: 10, maxHp: 10, parts: [], spec, phase: 0,
+    };
+    assert.doesNotThrow(() => drawBossBody(ctx, b), `${spec.name} threw`);
+    b.flash = 1;   // the hit frame takes a different path
+    assert.doesNotThrow(() => drawBossBody(ctx, b), `${spec.name} threw on a hit frame`);
+  }
+});
+
+// The livery is drawn, never composited. The obvious implementation
+// washes it over the hull with source-atop, which clips to pixels
+// already on the canvas — and the world canvas is opaque, so that tints
+// a 300x300 block of dreadnought instead of the boss. Caught by looking
+// at the compositing before it was ever rendered.
+test('drawing a boss gives back the context it was handed', () => {
+  // The alpha half of this used to assert === 1 with the context
+  // starting at 1, which the bug it was meant to catch satisfies
+  // exactly: tierBands assigned 1 rather than restoring. Starting from
+  // a dimmed context is what makes the assertion mean anything —
+  // drawBoss dims the whole boss while it comes apart, and that is the
+  // state in which the plating stopped fading.
+  for (let t = 0; t < 4; t++) {
+    for (const alpha of [1, 0.5]) {
+      const ctx = stubCtx();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = alpha;
+      ctx.lineCap = 'square';
+      drawBossBody(ctx, { kind: 'warden', tier: t, t: 1, flash: 0, dead: false,
+        hp: 1, maxHp: 1, parts: [], spec: {}, phase: 0 });
+      assert.equal(ctx.globalCompositeOperation, 'source-over',
+        `tier ${t} left the context in ${ctx.globalCompositeOperation} mode`);
+      assert.equal(ctx.globalAlpha, alpha,
+        `tier ${t} left globalAlpha at ${ctx.globalAlpha}, not the ${alpha} it was given`);
+      assert.equal(ctx.lineCap, 'square',
+        `tier ${t} left lineCap at ${ctx.lineCap}`);
+      // Nothing may paint brighter than the alpha it was handed. The
+      // refit lamp pulses, and multiplying the pulse in is the only
+      // way it can pulse without escaping a dimmed boss.
+      const tooBright = ctx.drawn.filter((a) => a > alpha + 1e-9);
+      assert.equal(tooBright.length, 0,
+        `tier ${t} painted ${tooBright.length} time(s) at up to alpha `
+        + `${Math.max(0, ...tooBright)} inside a context dimmed to ${alpha}`);
+    }
+  }
+});
+
+// Records what it was told, so the assertions above can look at it.
+function stubCtx() {
+  const noop = () => {};
+  const st = { globalCompositeOperation: 'source-over', globalAlpha: 1, fillStyle: '',
+    strokeStyle: '', lineWidth: 1, lineCap: 'butt', font: '', textAlign: '',
+    // The alpha in force at each paint, so a test can check what was
+    // actually drawn and not merely what was left behind.
+    drawn: [] };
+  const stack = [];
+  return new Proxy(st, {
+    get(t, k) {
+      if (k in t) return t[k];
+      if (k === 'fillRect') return () => { t.drawn.push(t.globalAlpha); };
+      if (k === 'stroke') return () => { t.drawn.push(t.globalAlpha); };
+      if (k === 'save') return () => stack.push({ ...t });
+      if (k === 'restore') return () => Object.assign(t, stack.pop() || {});
+      if (k === 'createLinearGradient' || k === 'createRadialGradient') {
+        return () => ({ addColorStop: noop });
+      }
+      if (k === 'measureText') return () => ({ width: 0 });
+      return noop;
+    },
+    set(t, k, v) { t[k] = v; return true; },
   });
 }
 

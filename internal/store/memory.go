@@ -30,6 +30,7 @@ type Memory struct {
 	byName   map[string]string // lowercased name -> playerID
 	scores   []*model.Score
 	mods     map[string]*model.Mod
+	hangars  map[string]*model.Hangar // playerID -> what they own between runs
 	presence map[string]model.Presence
 	now      func() time.Time
 }
@@ -37,6 +38,7 @@ type Memory struct {
 func NewMemory() *Memory {
 	return &Memory{
 		players:  map[string]*model.Player{},
+		hangars:  map[string]*model.Hangar{},
 		byToken:  map[string]string{},
 		byName:   map[string]string{},
 		mods:     map[string]*model.Mod{},
@@ -414,29 +416,74 @@ func (m *Memory) Stats() Stats {
 
 // -------------------------------------------------------------- persistence
 
+// One struct, two files.
+//
+// The credential half — players, password hashes, token hashes — and the
+// published half — scores and mods — are written separately so they can
+// live on different disks with different permissions and different
+// backups. They share a shape because a single-file snapshot is still a
+// valid thing to read: that is what every deployment before the split
+// has on disk, and omitempty means a file written by either half parses
+// as the other with nothing in it.
 type snapshot struct {
-	Players []*model.Player   `json:"players"`
-	Pass    map[string]string `json:"pass"`
-	Tokens  map[string]string `json:"tokens"`
-	Scores  []*model.Score    `json:"scores"`
-	Mods    []*model.Mod      `json:"mods"`
+	Players []*model.Player          `json:"players,omitempty"`
+	Pass    map[string]string        `json:"pass,omitempty"`
+	Tokens  map[string]string        `json:"tokens,omitempty"`
+	Hangars map[string]*model.Hangar `json:"hangars,omitempty"`
+	Scores  []*model.Score           `json:"scores,omitempty"`
+	Mods    []*model.Mod             `json:"mods,omitempty"`
 }
 
-// Snapshot writes the dataset via a temp file and rename, so a crash midway
-// through cannot leave a half-written file where the data used to be.
-func (m *Memory) Snapshot(path string) error {
+// What a snapshot file is for. Accounts holds what can log you in;
+// Public holds what the API already serves to anybody.
+type Part int
+
+const (
+	Accounts Part = iota
+	Public
+	Everything
+)
+
+// Snapshot writes the whole dataset to one file. Kept for the single-file
+// layout that predates the account/state split.
+func (m *Memory) Snapshot(path string) error { return m.SnapshotPart(path, Everything) }
+
+// SnapshotPart writes the dataset via a temp file and rename, so a crash
+// midway through cannot leave a half-written file where the data used to
+// be. part says which half goes in.
+func (m *Memory) SnapshotPart(path string, part Part) error {
 	m.mu.RLock()
-	snap := snapshot{Tokens: map[string]string{}, Pass: map[string]string{}}
-	for _, p := range m.players {
-		snap.Players = append(snap.Players, p)
-		snap.Tokens[p.TokenHash] = p.ID
-		if p.PassHash != "" {
-			snap.Pass[p.ID] = p.PassHash
+	snap := snapshot{}
+	if part == Accounts || part == Everything {
+		snap.Tokens = map[string]string{}
+		snap.Pass = map[string]string{}
+		// With the players, not with the scores: a hangar is per-pilot
+		// data, it has to follow the account's backup policy, and
+		// deleting a pilot has to be able to take it with them.
+		snap.Hangars = map[string]*model.Hangar{}
+		for id, h := range m.hangars {
+			snap.Hangars[id] = h
+		}
+		// Copies, not the live pointers. The encode below happens after
+		// the lock is released, and a player record is mutated in place
+		// by AddScore (Runs, Best) and TouchPlayer (LastSeen) — so
+		// handing the encoder the originals is a data race against any
+		// request arriving while a snapshot is being written.
+		for _, p := range m.players {
+			snap.Players = append(snap.Players, clonePlayer(p))
+			snap.Tokens[p.TokenHash] = p.ID
+			if p.PassHash != "" {
+				snap.Pass[p.ID] = p.PassHash
+			}
 		}
 	}
-	snap.Scores = append(snap.Scores, m.scores...)
-	for _, mod := range m.mods {
-		snap.Mods = append(snap.Mods, mod)
+	if part == Public || part == Everything {
+		// Scores are never mutated after AddScore, so the pointers are
+		// safe to share; the slice header is not, hence the copy.
+		snap.Scores = append(snap.Scores, m.scores...)
+		for _, mod := range m.mods {
+			snap.Mods = append(snap.Mods, mod)
+		}
 	}
 	m.mu.RUnlock()
 
@@ -504,6 +551,11 @@ func (m *Memory) Load(path string) error {
 			p.TokenHash = hash
 		}
 	}
+	for id, h := range snap.Hangars {
+		if h != nil {
+			m.hangars[id] = h
+		}
+	}
 	m.scores = append(m.scores, snap.Scores...)
 	for _, mod := range snap.Mods {
 		m.mods[mod.ID] = mod
@@ -511,5 +563,164 @@ func (m *Memory) Load(path string) error {
 	return nil
 }
 
+// --- hangars
+
+// Caps on what can be read back in or written. Not game rules — there is
+// no coin cap in play — but a hand-edited or corrupted value must not be
+// able to put the HUD into a state it cannot render or the shop into one
+// where everything is free. The same numbers as src/hangar.js, which
+// parity.test.mjs now actually checks — the comment claimed that long
+// before the test existed.
+const (
+	MaxCoins    = 1_000_000_000
+	MaxModLevel = 99
+	MaxMods     = 64
+)
+
+// Hangar returns what a pilot owns. Always a usable value, never nil, so
+// a pilot who has never banked anything reads as empty rather than
+// missing.
+func (m *Memory) Hangar(playerID string) *model.Hangar {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	h, ok := m.hangars[playerID]
+	if !ok {
+		return &model.Hangar{Mods: map[string]int{}}
+	}
+	c := *h
+	c.Mods = map[string]int{}
+	for k, v := range h.Mods {
+		c.Mods[k] = v
+	}
+	return &c
+}
+
+// SetHangar clamps and stores. Everything here arrives from a client and
+// nothing from a client is trusted: a negative balance, a level that is
+// not a number, a thousand invented mod ids and a coin count of 1e308
+// are all things an HTTP body can hold and the game cannot.
+func (m *Memory) SetHangar(playerID string, in *model.Hangar) *model.Hangar {
+	clean := &model.Hangar{Mods: map[string]int{}, Updated: m.now()}
+	if in != nil {
+		clean.Coins = clampInt(in.Coins, 0, MaxCoins)
+		clean.Bars = clampInt(in.Bars, 0, MaxCoins)
+		n := 0
+		for id, lvl := range in.Mods {
+			if n >= MaxMods || id == "" || len(id) > 64 || lvl < 1 {
+				continue
+			}
+			clean.Mods[id] = clampInt(lvl, 1, MaxModLevel)
+			n++
+		}
+	}
+	m.mu.Lock()
+	m.hangars[playerID] = clean
+	m.mu.Unlock()
+	return m.Hangar(playerID)
+}
+
+// DeleteHangar drops a pilot's belongings. Called when the pilot goes.
+func (m *Memory) DeleteHangar(playerID string) {
+	m.mu.Lock()
+	delete(m.hangars, playerID)
+	m.mu.Unlock()
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
 func clonePlayer(p *model.Player) *model.Player { c := *p; return &c }
 func cloneScore(s *model.Score) *model.Score    { c := *s; return &c }
+
+// --- administration
+
+// ListPlayers returns pilots, newest first, optionally filtered by a
+// case-insensitive substring of the name.
+//
+// This is enumeration, and that is the point: it exists for an operator
+// holding the admin credential and is deliberately unreachable from
+// anything a pilot can call. The public API has no route that lists
+// players, and must not grow one.
+func (m *Memory) ListPlayers(query string, limit int) []model.Player {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	q := strings.ToLower(strings.TrimSpace(query))
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]model.Player, 0, len(m.players))
+	for _, p := range m.players {
+		if q != "" && !strings.Contains(strings.ToLower(p.Name), q) {
+			continue
+		}
+		out = append(out, *p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Created.After(out[j].Created) })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+// DeletePlayer removes a pilot and everything of theirs.
+//
+// Scores go with the account. A delete that left them behind would
+// leave the pilot's name behind with them, on the leaderboard, which is
+// the one page that is published — so "delete this user" would not have
+// deleted the only part anybody could see.
+func (m *Memory) DeletePlayer(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.players[id]
+	if !ok {
+		return ErrNotFound
+	}
+	delete(m.players, id)
+	delete(m.byName, strings.ToLower(p.Name))
+	delete(m.byToken, p.TokenHash)
+	delete(m.hangars, id)
+	m.dropScoresLocked(id)
+	return nil
+}
+
+// ResetPlayer clears a pilot's history and belongings and keeps the
+// account, for the case where someone wants a clean slate rather than
+// to be gone. The credential is untouched: they can still log in.
+func (m *Memory) ResetPlayer(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.players[id]
+	if !ok {
+		return ErrNotFound
+	}
+	m.dropScoresLocked(id)
+	delete(m.hangars, id)
+	p.Runs = 0
+	p.Best = 0
+	return nil
+}
+
+// Caller holds the write lock.
+func (m *Memory) dropScoresLocked(playerID string) {
+	kept := m.scores[:0]
+	for _, s := range m.scores {
+		if s.PlayerID != playerID {
+			kept = append(kept, s)
+		}
+	}
+	// The tail still points at the removed entries; clearing it lets
+	// them be collected instead of being kept alive by the backing
+	// array for as long as the process runs.
+	for i := len(kept); i < len(m.scores); i++ {
+		m.scores[i] = nil
+	}
+	m.scores = kept
+}

@@ -1,0 +1,53 @@
+/* Page chrome for the canvas. Lives in a file rather than a <style>
+   block so the content security policy can say style-src 'self' and
+   mean it: an inline block forces 'unsafe-inline', which re-opens the
+   whole class of injected-style attacks the policy exists to close.
+
+   These two things were changed by two different branches at the same
+   time — one moved this file out of index.html, the other rewrote the
+   canvas rules for the two-layer renderer — and the merge kept the
+   inline <style> and the strict policy together. The browser then
+   dropped every rule on the page: the layers stopped overlapping, the
+   UI canvas rendered below the world instead of on top of it, and the
+   HUD, the splash and the title screen all went off-screen. It looked
+   like the game had booted straight into a run with no HUD. */
+
+:root { color-scheme: dark; }
+html, body { margin: 0; height: 100%; background: #05070a; overflow: hidden; }
+body {
+  display: grid; place-items: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Two layers, deliberately.
+   The world is rendered at whatever scale the machine can sustain and
+   stretched by the compositor, which is free. The UI sits on top at the
+   window's own resolution, so the HUD text is never upscaled. Doing it
+   with one canvas means upscaling the world in software every frame,
+   which halved the frame rate when it was tried.
+
+   #stack must stay positioned and #ui must stay absolute: without them
+   the two canvases lay out one above the other and everything drawn on
+   the UI layer leaves the screen. */
+#stack {
+  position: relative;
+  background: #05070a;
+  box-shadow: 0 0 0 1px #1b212b, 0 24px 80px -20px #000;
+}
+#stack canvas {
+  display: block;
+  image-rendering: auto;
+  background: transparent;
+}
+#ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+#game { background: #05070a; }
+
+#hint {
+  position: fixed; bottom: 10px; left: 0; right: 0;
+  text-align: center; color: #39424e; font-size: 11px; letter-spacing: .09em;
+  pointer-events: none; user-select: none;
+}
