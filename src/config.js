@@ -1,8 +1,10 @@
 // Every tunable in one place. Change a number, reload, re-fly.
 
-// Bumped by hand. Shown on the splash and in the backend's health response,
-// so a player reporting a bug and the server they hit can be lined up.
-export const VERSION = '0.9.0';
+// Bumped by hand, and shown on the splash. The backend does not report it:
+// /api/health answers {"ok":true} and nothing else, so a player reporting a
+// bug and the server they hit cannot yet be lined up. This comment used to
+// claim otherwise.
+export const VERSION = '1.0.0';
 export const BUILD = 'RIVETS';
 
 export const VIEW_W = 640;
