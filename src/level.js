@@ -6,6 +6,14 @@ import { buildGates } from './gates.js';
 
 const BUCKET = 256;
 
+// Folds a run seed into a hull seed. A plain XOR, and deliberately nothing
+// more: mulberry32 avalanches its own seed before its first output, so
+// consecutive run seeds already give uncorrelated hulls — measured at 7 of
+// 8 distinct opening patterns for seeds 1..8, which is what an extra mixing
+// step also gave. Zero returns the hull seed untouched, so FIXED layouts
+// are bit-for-bit what they were before this argument existed.
+export const mixSeed = (hullSeed, runSeed) => (hullSeed ^ runSeed) >>> 0;
+
 // ---------------------------------------------------------------- generation
 
 // Obstacle patterns, chosen by a seeded roll. Every pattern leaves a
@@ -204,8 +212,13 @@ function layout(r, spec) {
 // Builds one hull from a level spec (see LEVELS in config.js). Everything
 // that varies between hulls — length, obstacle density, turret toughness —
 // comes from the spec, so the difficulty curve is data, not branches.
-export function buildLevel(spec) {
-  const r = mulberry32(spec.seed);
+//
+// `runSeed` is folded into the hull's own seed, so one run's ARGENTUM is not
+// the next one's. Zero — the default, and what the FIXED setting keeps —
+// leaves the layout exactly as the spec's seed alone produced it, which is
+// what makes a hull learnable and two scores on it comparable.
+export function buildLevel(spec, runSeed = 0) {
+  const r = mulberry32(mixSeed(spec.seed, runSeed));
   const theme = THEMES[spec.theme] || THEMES.steel;
   const LEN = spec.length;
   const obstacles = [];

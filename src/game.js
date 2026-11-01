@@ -39,15 +39,37 @@ import { activeModId } from './mods.js';
 
 export { diff } from './score.js';
 
+// The seed a run folds into every hull it builds. Zero when the pilot wants
+// fixed layouts, which is what makes buildLevel ignore it entirely.
+//
+// Not Date.now(): two tabs opened together, or a restart inside the same
+// millisecond, would fly the same "random" campaign. crypto.getRandomValues
+// is in every browser the game already requires, and the fallback is only
+// for a test environment that has no crypto at all.
+function freshRunSeed() {
+  if (!Number(setting('shuffle'))) return 0;
+  try {
+    const buf = new Uint32Array(1);
+    globalThis.crypto.getRandomValues(buf);
+    return buf[0] >>> 0;
+  } catch {
+    return (Math.random() * 0x100000000) >>> 0;
+  }
+}
+
 export function makeGame(modSpec = null) {
   // A mod overrides the first hull's seed; the rest of the campaign is
   // unchanged, so a mod is a variant opening rather than a whole new game.
   const specs = modSpec
     ? [{ ...LEVELS[0], ...modSpec }, ...LEVELS.slice(1)]
     : LEVELS;
-  const level = buildLevel(specs[0]);
+  // Drawn once here so the title screen's hull has one, and redrawn by
+  // reset() for every run after.
+  const runSeed = freshRunSeed();
+  const level = buildLevel(specs[0], runSeed);
   const game = {
     level,
+    runSeed,
     cam: makeCamera(),
     player: makePlayer(),
     state: 'splash',       // splash | title | launching | play | dying
@@ -151,23 +173,20 @@ function reset(game) {
   // the leaderboard and to the validator: the first is how far you got,
   // the second is how long it could possibly have taken.
   game.startAt = at;
-  if (game.levelIndex !== at) {
-    game.levelIndex = at;
-    game.level = buildLevel(game.specs[at]);
-  }
+  // A fresh run gets a fresh seed, and the hull is rebuilt whether or not
+  // the index moved — otherwise a run started from the title after another
+  // run on the same hull would fly the previous run's layout with the new
+  // run's seed, which is neither setting's behaviour.
+  game.runSeed = freshRunSeed();
+  game.levelIndex = at;
+  game.level = buildLevel(game.specs[at], game.runSeed);
   setTune(game.specs[at].tune);
-  for (const g of game.level.gates || []) {
-    g.dead = false;
-    g.hp = g.maxHp;
-    g.flash = 0;
-  }
-  for (const t of game.level.turrets) {
-    t.dead = false;
-    t.hp = game.level.spec.turretHp;
-    t.cd = Math.random() * 0.8;
-    t.burstLeft = 0;
-    t.angle = t.dir * Math.PI / 2;
-  }
+  // The gates and turrets used to be walked here and put back by hand,
+  // because the hull was only rebuilt when the index moved. It always is
+  // now, so a fresh one arrives with fresh guns — and the walk was wrong
+  // anyway: it assigned the hull's base turretHp flat, dropping the per-
+  // tower hpMul, so a BASTION restarted on the hull it died on stood up
+  // with a GUN's health. See the reset test in level.test.mjs.
   game.player = makePlayer();
   // Open a run with the server. Fire-and-forget: a backend that is down
   // costs the leaderboard, never the run.
@@ -274,7 +293,7 @@ function loadNextHull(game) {
   // The hull's haul and its end-of-hull bonus are both in by now, and a
   // pilot who closes the tab between hulls should keep them.
   saveHangar(game);
-  game.level = buildLevel(game.specs[game.levelIndex]);
+  game.level = buildLevel(game.specs[game.levelIndex], game.runSeed);
   setTune(game.specs[game.levelIndex].tune);
 
   p.x = 180;
