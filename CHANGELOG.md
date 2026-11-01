@@ -12,7 +12,24 @@ worth learning from.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Six more things bolted to the hull.** POPGUN and BASTION are the
+  gun at 0.45× and 3.2× its weight, so a hull can vary its pressure
+  without varying what it asks of you. RADAR and ARRAY do not shoot:
+  they paint their neighbours, and every tower inside their reach wakes
+  earlier and comes round faster while they stand. POST keeps the
+  interceptor stream thick. SILO opens with long-range missiles from
+  the far side of the screen, slow enough to shoot down if you see them
+  leave.
+- **Spaceports.** A flat apron with the port's traffic control at one
+  end, fuel standing in the middle and whatever was parked when the
+  shooting started. The tanks chain — placed close enough that one
+  going up reaches the next — so a port can be taken apart with a
+  single shot, or taken apart around you if you came in close for the
+  lander.
+- Each installation now has its own silhouette (`src/towerart.js`)
+  rather than a tinted dot on a shared mounting.
 
 ## [1.1.0] — 2026-11-01
 

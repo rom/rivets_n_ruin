@@ -38,12 +38,62 @@ export function updateTurrets(game, dt) {
       if (gd !== t && Math.hypot(gd.x - t.x, gd.y - t.y) < gd.tower.aura) { t.shielded = true; break; }
     }
   }
+
+  // Radar paints its neighbours, the same shape of rule as the warden's
+  // aura and for the same reason: it changes the order you kill things
+  // in. A painted tower sees you further out and swings round faster,
+  // so a dish left standing makes every gun behind it worse to fly past.
+  //
+  // Recomputed each frame, like the aura, because killing the dish has
+  // to take the effect with it immediately — a buff that outlives its
+  // source by a frame reads as the game cheating.
+  const dishes = [];
+  for (const t of game.level.turrets) {
+    if (!t.dead && t.tower && t.tower.paint) dishes.push(t);
+  }
+  for (const t of game.level.turrets) {
+    t.painted = null;
+    // Only things that shoot can be painted. Painting a fuel tank
+    // changes nothing about it — it has no aim to sharpen and no wake
+    // to bring forward — so the ring the renderer draws would promise
+    // a buff that does not exist. Spotted on screen: a port's tanks
+    // sitting inside their own control tower's paint, haloed, doing
+    // exactly what they did before.
+    if (t.dead || !t.tower || t.tower.inert || !dishes.length) continue;
+    for (const d of dishes) {
+      if (d === t) continue;
+      if (Math.hypot(d.x - t.x, d.y - t.y) < d.tower.paint) { t.painted = d.tower; break; }
+    }
+  }
+
+  // Dishes turn whether or not anybody is watching, which is most of
+  // what makes them read as machinery rather than scenery. Everything
+  // gets a clock, because the beacons and the glazing blink on it and
+  // a structure with nothing moving on it reads as painted on.
+  for (const t of game.level.turrets) {
+    if (t.dead || !t.tower) continue;
+    t.t = (t.t || 0) + dt;
+    if (t.tower.spin) t.angle += t.tower.spin * dt;
+    else if (t.tower.sweep) {
+      // Back and forth across its own face rather than all the way
+      // round, so a sweep and a spin are different silhouettes in
+      // motion as well as at rest.
+      t.sweepT = (t.sweepT || 0) + t.tower.sweep * dt;
+      t.angle = -t.dir * Math.PI / 2 + Math.sin(t.sweepT) * 1.15;
+    }
+  }
+
   for (const t of game.level.turrets) {
     if (t.dead) continue;
-    const dx = p.x - t.x;
-    if (Math.abs(dx) > TURRET.wake) continue;
-    const spec = game.level.spec;
     const tw = t.tower || TOWERS.gun;
+    // The ones that never shoot have already had their turn above.
+    if (tw.inert) continue;
+    const dx = p.x - t.x;
+    // A silo opens from the far side of the screen; a painted tower
+    // wakes earlier than it otherwise would.
+    const wake = Math.max(tw.wake || TURRET.wake, (t.painted && t.painted.paintWake) || 0);
+    if (Math.abs(dx) > wake) continue;
+    const spec = game.level.spec;
 
     // A lance telegraphs before it fires. Without the tell it would be an
     // unavoidable hitscan; with it, it is a thing you learn to respect.
@@ -60,7 +110,9 @@ export function updateTurrets(game, dt) {
     const want = inArc
       ? Math.atan2(dy, dx)
       : t.dir * Math.PI / 2;   // nothing to shoot at: return to neutral
-    t.angle = angleTo(t.angle, want, TURRET.turnRate * dt);
+    const turn = TURRET.turnRate * (tw.turnMul || 1)
+      * ((t.painted && t.painted.paintTurn) || 1);
+    t.angle = angleTo(t.angle, want, turn * dt);
 
     if (t.burstLeft > 0) {
       t.burstTimer -= dt;
@@ -75,7 +127,9 @@ export function updateTurrets(game, dt) {
 
     t.cd -= dt;
     const aligned = Math.abs(((Math.atan2(dy, dx) - t.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < TURRET.aimTol;
-    if (t.cd <= 0 && inArc && dist < spec.turretRange && aligned && game.state === 'play' && p.alive) {
+    // A silo states its own reach; everything else uses the hull's.
+    const reach = tw.range || spec.turretRange;
+    if (t.cd <= 0 && inArc && dist < reach && aligned && game.state === 'play' && p.alive) {
       if (tw.charge) { t.charge = tw.charge; continue; }
       t.burstLeft = tw.burst;
       t.burstTimer = 0;
@@ -205,8 +259,22 @@ export function hitTurret(game, t, dmg) {
     return false;
   }
   t.dead = true;
-  explode(t.x, t.y - t.dir * 5, 1.5);
-  sfxExplode(1.5);
+  const vol = t.tower && t.tower.volatile;
+  explode(t.x, t.y - t.dir * 5, vol ? 3.4 : 1.5);
+  sfxExplode(vol ? 2.6 : 1.5);
+  // A fuel tank takes its neighbours with it. Queued as an ordinary
+  // blast rather than applied here, so it goes through the same code
+  // every other explosion does — which is also what makes the chain
+  // work: the blast kills the next tank, which queues its own.
+  //
+  // Queued, not recursive. A tank igniting a tank that ignites the
+  // first one back is a stack overflow dressed as a feature; the queue
+  // is drained once per frame and a dead tank cannot re-enter it.
+  if (vol) {
+    (game.pendingBlast ||= []).push({
+      x: t.x, y: t.y - t.dir * 6, r: vol.r, dmg: vol.dmg,
+    });
+  }
   spoils(game, t.x, t.y - t.dir * 14, 'turret');
   award(game, (t.tower && t.tower.score) || TURRET.score);
   game.turretsKilled++;

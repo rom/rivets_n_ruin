@@ -263,7 +263,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 196, interceptorSpawn: 1.20, interceptorHp: 3,
     foes: ['mine'],
     enemyDmg: 1.05,
-    towers: ['gun'], lasers: 0, laserHp: 1, tune: 1 },
+    towers: ['gun', 'pop'], lasers: 0, laserHp: 1, tune: 1 },
 
   { name: 'TANTALUM', subtitle: 'CORROSION PROOF — FLAGSHIP HULL',
     theme: 'glacier', seed: 0x7a07a1, length: 17000,
@@ -272,7 +272,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 220, interceptorSpawn: 0.98, interceptorHp: 3,
     foes: ['mine', 'lancer', 'weaver'],
     enemyDmg: 1.10,
-    towers: ['gun', 'flak'], lasers: 1, laserHp: 2, tune: 4 },
+    towers: ['gun', 'pop', 'flak', 'post'], lasers: 1, laserHp: 2, tune: 4 },
 
   { name: 'CUPRUM', subtitle: 'OXIDISED — SALVAGE HULK',
     theme: 'desert', seed: 0xc0ffee, length: 18500,
@@ -281,7 +281,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 236, interceptorSpawn: 0.90, interceptorHp: 4,
     foes: ['mine', 'lancer', 'orbiter', 'weaver'],
     enemyDmg: 1.16,
-    towers: ['gun', 'flak', 'lance', 'rocket'], lasers: 2, laserHp: 3, tune: 2 },
+    towers: ['gun', 'pop', 'flak', 'lance', 'rocket', 'radar'], lasers: 2, laserHp: 3, tune: 2 },
 
   { name: 'PYRITE', subtitle: 'RUNNING HOT — FOUNDRY HULL',
     theme: 'foundry', seed: 0xf00dface, length: 20000,
@@ -290,7 +290,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 252, interceptorSpawn: 0.82, interceptorHp: 4,
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter'],
     enemyDmg: 1.22,
-    towers: ['gun', 'flak', 'lance', 'mortar', 'rocket'], lasers: 2, laserHp: 4, tune: 5 },
+    towers: ['gun', 'flak', 'lance', 'mortar', 'rocket', 'radar', 'bastion'], lasers: 2, laserHp: 4, tune: 5 },
 
   { name: 'WOLFRAM', subtitle: 'LIGHT SWALLOWING — SIEGE HULL',
     theme: 'void', seed: 0x0b51d1a, length: 21500,
@@ -299,7 +299,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 266, interceptorSpawn: 0.75, interceptorHp: 5,
     foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech', 'mirror'],
     enemyDmg: 1.28,
-    towers: ['gun', 'lance', 'mortar', 'warden', 'rocket'], lasers: 3, laserHp: 5, tune: 3 },
+    towers: ['gun', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array'], lasers: 3, laserHp: 5, tune: 3 },
 
   { name: 'FERRUM', subtitle: 'EATEN THROUGH — DERELICT HULL',
     theme: 'derelict', seed: 0xfe2211, length: 23000,
@@ -308,7 +308,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 280, interceptorSpawn: 0.70, interceptorHp: 5,
     foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech', 'chainer'],
     enemyDmg: 1.34,
-    towers: ['gun', 'flak', 'mortar', 'warden', 'rocket'], lasers: 3, laserHp: 6, tune: 6 },
+    towers: ['gun', 'flak', 'mortar', 'warden', 'rocket', 'array', 'silo'], lasers: 3, laserHp: 6, tune: 6 },
 
   { name: 'AURUM', subtitle: 'THE PRIZE — ADMIRALTY HULL',
     theme: 'admiralty', seed: 0xa17aa17a, length: 25000,
@@ -317,7 +317,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 294, interceptorSpawn: 0.64, interceptorHp: 6,
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech', 'carrier'],
     enemyDmg: 1.40,
-    towers: ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket'], lasers: 4, laserHp: 7, tune: 7 },
+    towers: ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array', 'silo'], lasers: 4, laserHp: 7, tune: 7 },
 ];
 
 // The campaign past the admiralty hull.
@@ -331,7 +331,8 @@ const CORE_LEVELS = [
 const THEME_CYCLE = Object.keys(THEMES);
 const ALL_FOES = ['mine', 'lancer', 'orbiter', 'warder', 'weaver', 'splitter',
   'bomber', 'leech', 'mirror', 'carrier', 'chainer'];
-const ALL_TOWERS = ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket'];
+const ALL_TOWERS = ['gun', 'pop', 'bastion', 'flak', 'lance', 'mortar', 'warden', 'rocket',
+  'radar', 'array', 'post', 'silo'];
 
 // Binary floating point gives 0.64 - 3 * 0.018 as 0.5860000000000001, and
 // those digits escaped into the README's hull table, where they read as a
@@ -504,6 +505,96 @@ export const TOWERS = {
     burst: 2, burstGap: 0.18, cooldownMul: 1.4, bulletSpeed: 180, spread: 0.12,
     aura: 150, colour: '#b45ce0',
   },
+  // --- sizes
+  //
+  // The same gun at three weights, so a hull can vary its pressure
+  // without varying what it asks of you. A popgun is a speed bump; a
+  // bastion is a wall you plan around. `r` drives the art, the hitbox
+  // and nothing else: the behaviour differences are the numbers above
+  // it, so a size is not a different tower pretending.
+  pop: {
+    name: 'POPGUN', hpMul: 0.45, score: 70, r: 6,
+    burst: 2, burstGap: 0.1, cooldownMul: 0.65, bulletSpeed: 210, spread: 0.05,
+    turnMul: 1.5,
+    colour: '#e8746f',
+  },
+  bastion: {
+    // Slow to come round, so it can be beaten by crossing its face
+    // quickly — and punishing if you loiter in front of it.
+    name: 'BASTION', hpMul: 3.2, score: 520, r: 15,
+    burst: 4, burstGap: 0.16, cooldownMul: 1.5, bulletSpeed: 230, spread: 0.07,
+    turnMul: 0.45, dmgMul: 1.6,
+    colour: '#c0392b',
+  },
+
+  // --- the ones that do not shoot at you
+  //
+  // Every tower before these answered the same question: how do I not be
+  // in front of it. These ask a different one — whether it is worth
+  // spending time on something that is not shooting at you. Each makes
+  // the things that ARE shooting better, so the answer is usually yes
+  // and never obvious.
+  radar: {
+    // A spinning dish. While it lives, every tower near it wakes early
+    // and comes round faster: you are seen before you arrive.
+    name: 'RADAR', hpMul: 0.9, score: 240, r: 11,
+    inert: true, spin: 2.2, paint: 230, paintWake: 190, paintTurn: 1.5,
+    colour: '#67d9b8',
+  },
+  array: {
+    // The same job at longer reach, and it sweeps rather than spins, so
+    // the two read apart at a glance even in silhouette.
+    name: 'ARRAY', hpMul: 1.2, score: 330, r: 13,
+    inert: true, sweep: 1.1, paint: 360, paintWake: 300, paintTurn: 1.25,
+    colour: '#7fb2ff',
+  },
+  post: {
+    // An observation post calls the interceptors in. Cheap to kill and
+    // easy to ignore, which is the trap: leave it and the stream never
+    // thins.
+    name: 'POST', hpMul: 0.7, score: 210, r: 9,
+    inert: true, watch: 0.55,
+    colour: '#c9e86b',
+  },
+
+  // --- the spaceport
+  //
+  // A place rather than a gun. The control tower directs, the tanks are
+  // the reason to be careful, and the landed craft are parked targets
+  // that pay. Together they are the one installation where the right
+  // move is sometimes a single shot in the right place.
+  control: {
+    name: 'CONTROL', hpMul: 1.8, score: 400, r: 14,
+    inert: true, watch: 0.4, paint: 200, paintWake: 150, paintTurn: 1.2,
+    colour: '#ffd24a',
+  },
+  tank: {
+    // Does nothing until it is hit, and then does a great deal. The
+    // blast reaches other tanks, so a port can be taken apart with one
+    // well-placed shot — or taken apart around you if you are close.
+    name: 'FUEL', hpMul: 0.8, score: 180, r: 13,
+    inert: true, volatile: { r: 96, dmg: 40 },
+    colour: '#ff7a2f',
+  },
+  lander: {
+    // Parked, unarmed, and worth more than it looks. Something to shoot
+    // while the tanks are deciding whether to kill you.
+    name: 'LANDER', hpMul: 1.4, score: 290, r: 16,
+    inert: true,
+    colour: '#8e9aa9',
+  },
+
+  silo: {
+    // Long-range missiles. Everything else has to let you come to it;
+    // this one opens from the far side of the screen, and the shots are
+    // slow enough to shoot down if you see them leave.
+    name: 'SILO', hpMul: 1.7, score: 560, r: 14,
+    burst: 1, burstGap: 0.5, cooldownMul: 3.2, bulletSpeed: 96, spread: 0.1,
+    seek: 0.95, seekLife: 7.5, seekHp: 3,
+    range: 760, wake: 900,      // opens long before anything else does
+    colour: '#d94f8c',
+  },
+
   rocket: {
     // Launches slow homing missiles. Every other tower is beaten by not
     // being on its line; this one follows, so it has to be out-turned or
