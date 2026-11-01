@@ -111,14 +111,15 @@ test('every boss kind has a body drawn for it', async () => {
   }
 });
 
-// Gun levels index straight into these arrays. The cap can rise by one per
-// hull cleared, so the tables have to be long enough for a full campaign.
+// Gun levels index straight into these arrays. The cap rises every so many
+// hulls cleared, so the tables have to be long enough for a full campaign.
 test('gun tables cover every reachable upgrade level', () => {
-  // The reachable ceiling is the explicit cap, not the per-hull sum, which
-  // would be far higher. Both are checked: the cap must be honoured, and the
-  // tables must cover it.
-  const perHull = PICKUP.gunLevels + LEVEL_UP.gunCap * (LEVELS.length - 1);
-  assert.ok(PICKUP.gunCapMax <= perHull, 'gunCapMax should be the binding limit');
+  // The reachable ceiling is the explicit cap, not the number of rises a
+  // campaign contains. Both are checked: the cap must be the binding
+  // limit, and the tables must cover it.
+  const rises = Math.floor((LEVELS.length - 1) / LEVEL_UP.gunCapEvery);
+  assert.ok(PICKUP.gunCapMax <= PICKUP.gunLevels + rises,
+    'gunCapMax should be the binding limit, not the number of hulls');
   const maxLevel = PICKUP.gunCapMax;
   assert.ok(PICKUP.speedScale.length > maxLevel,
     `speedScale has ${PICKUP.speedScale.length} entries but level ${maxLevel} is reachable`);

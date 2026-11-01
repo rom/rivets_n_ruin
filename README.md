@@ -4,8 +4,9 @@ A side-scrolling shoot 'em up in the lineage of **Uridium** (skim the surface of
 capital ship, two-way scrolling, momentum-heavy handling) and **Jets'n'Guns**
 (mercenary swagger, things exploding at a generous rate).
 
-You fly the dorsal hull of a dreadnought end to end — then you have to fly it
-back. The hull is solid. Hitting it costs you.
+You fly the dorsal hull of a dreadnought end to end, break whatever is
+guarding the far end, and the way out opens. Then the next hull. The hull is
+solid; hitting it costs you.
 
 ![Rivets 'n Ruin](docs/scene-boss.png)
 
@@ -25,7 +26,8 @@ backend API, so there is one thing to run and no CORS to think about.
 | Target | Does |
 | --- | --- |
 | `make run` | Game + backend. `ADDR=0.0.0.0:8000 make run` to expose it |
-| `make check` | Everything CI would: gofmt, vet, race tests, JS syntax |
+| `make check` | gofmt, vet, race tests, the JS syntax gate, the client tests and the smoke test |
+| `make coverage-gate` | Coverage with the floor enforced, as CI runs it |
 | `make test` / `test-race` | Go tests |
 | `make test-js` | Client tests |
 | `make coverage` | Coverage, both sides |
@@ -34,7 +36,7 @@ backend API, so there is one thing to run and no CORS to think about.
 | `make icons` | Regenerate the favicon |
 
 Server flags: `-addr`, `-dir`, `-data`, `-save-interval`, `-rate-limit`,
-`-rate-burst`, `-v`.
+`-rate-burst`, `-require-runs`, `-v`.
 
 > **A note on `node --check`.** It reports success on a `.js` file containing ES
 > module syntax even when the file is genuinely unparseable — it only diagnoses
@@ -52,19 +54,21 @@ backend down**; you lose the leaderboard, not the game.
 | --- | --- |
 | `←` `→` / `A` `D` | Horizontal thrust. Thrusting against your heading brakes, then flips the ship |
 | `↑` `↓` / `W` `S` | Vertical thrust |
-| `Z` / `Space` | Fire |
+| `Z` / `Space` / `J` | Fire |
 | `Enter` | Launch / restart |
 | `P` / `Esc` | Pause |
 | `M` | Mute / unmute |
-| `T` | Next tune |
+| `T` / `]` | Next tune |
 | `O` | Settings |
+| `H` / `/` | Help pages |
 | `B` | Switch leaderboard: top pilots / high scores |
-| `X` | Fire selected ordnance |
+| `X` / `Shift` | Fire selected ordnance |
 | `C` / `1`–`3` | Cycle / select ordnance |
 | `E` | Armourer (between hulls) |
 | `N` | Rename your pilot (title screen) |
 | `Q` | Quit the run (asks first; `Y` confirms, `N` cancels) |
-| `R` | Restart mid-run |
+| `R` | Restart mid-run; reset settings to defaults on the settings screen |
+| `K` | Clear the hangar — settings screen only, and it asks twice |
 
 ## Screenshots
 
@@ -85,7 +89,7 @@ backend down**; you lose the leaderboard, not the game.
 | ![Laser gate](docs/laser.png) | ![Deflector shields](docs/shields.png) |
 | A laser gate: shoot the emitter or go no further | Deflectors, from whole to nearly gone |
 | ![Mark I](docs/ship-1.png) | ![Mark VIII](docs/ship-8.png) |
-| The ship as issued | The same ship eight hulls and six mods later |
+| The ship as issued | The same ship eight hulls and several mods later — it keeps growing for another seventeen |
 
 ## The hulls
 
@@ -138,20 +142,20 @@ still written down, because a hull called LEVEL 19 is not a place.
 | **AURUM** — admiralty hull | 25,000px | 18 | 294px/s, every 0.64s | HAMMERFALL |
 | **PLUMBUM** — ballast hull | 25,950px | 20 | 300px/s, every 0.622s | DROSS |
 | **STANNUM** — tender hull | 26,900px | 22 | 306px/s, every 0.604s | QUENCH |
-| **ZINCUM** — anode hull | 27,850px | 24 | 312px/s, every 0.5860000000000001s | OVERDRIVE |
-| **NICCOLUM** — survey hull | 28,800px | 26 | 318px/s, every 0.5680000000000001s | VACUUM |
+| **ZINCUM** — anode hull | 27,850px | 24 | 312px/s, every 0.586s | OVERDRIVE |
+| **NICCOLUM** — survey hull | 28,800px | 26 | 318px/s, every 0.568s | VACUUM |
 | **COBALTUM** — picket hull | 29,750px | 28 | 324px/s, every 0.55s | GANTRY |
 | **CHROMIUM** — parade hull | 30,700px | 30 | 330px/s, every 0.532s | CORSAIR |
 | **VANADIUM** — armour hull | 31,650px | 32 | 336px/s, every 0.514s | BLACKSTAR |
 | **TITANIUM** — assault hull | 32,600px | 34 | 342px/s, every 0.496s | HAMMERFALL |
-| **IRIDIUM** — relic hull | 33,550px | 36 | 348px/s, every 0.47800000000000004s | DROSS |
+| **IRIDIUM** — relic hull | 33,550px | 36 | 348px/s, every 0.478s | DROSS |
 | **PLATINUM** — treasury hull | 34,500px | 38 | 354px/s, every 0.46s | QUENCH |
-| **RHODIUM** — courier hull | 35,450px | 40 | 360px/s, every 0.44200000000000006s | OVERDRIVE |
-| **PALLADIUM** — guardian hull | 36,400px | 42 | 366px/s, every 0.42400000000000004s | VACUUM |
+| **RHODIUM** — courier hull | 35,450px | 40 | 360px/s, every 0.442s | OVERDRIVE |
+| **PALLADIUM** — guardian hull | 36,400px | 42 | 366px/s, every 0.424s | VACUUM |
 | **OSMIRIDIUM** — anvil hull | 37,350px | 44 | 372px/s, every 0.406s | GANTRY |
 | **THORIUM** — reactor hull | 38,300px | 46 | 378px/s, every 0.388s | CORSAIR |
-| **URANIUM** — warhead hull | 39,250px | 48 | 384px/s, every 0.37000000000000005s | BLACKSTAR |
-| **ADAMAS** — siege carrier | 40,200px | 50 | 390px/s, every 0.35200000000000004s | HAMMERFALL |
+| **URANIUM** — warhead hull | 39,250px | 48 | 384px/s, every 0.37s | BLACKSTAR |
+| **ADAMAS** — siege carrier | 40,200px | 50 | 390px/s, every 0.352s | HAMMERFALL |
 | **ORICHALCUM** — flagship of the line | 41,150px | 52 | 396px/s, every 0.34s | DROSS |
 
 One hull, one direction: fly to the far end, **kill what is guarding it**,
@@ -171,11 +175,11 @@ roster, tower roster and laser gates.
 ## Your ship
 
 ![Mark I](docs/ship-1.png)
-![Mark IV](docs/ship-4.png)
 ![Mark VIII](docs/ship-8.png)
+![Mark XXV](docs/ship-25.png)
 
-It used to be one sprite for the whole campaign. Eight refits, six mods,
-three kinds of ordnance and two gun lines all happened entirely in the
+It used to be one sprite for the whole campaign. Twenty-five refits, eleven
+mods, three kinds of ordnance and two gun lines all happened entirely in the
 numbers: the thing on screen at the end of AURUM was the thing that
 launched off ARGENTUM. The one object you look at for the entire run never
 changed.
@@ -204,10 +208,19 @@ Everything is now read off the ship's actual state, every frame:
 | ![V](docs/ship-5.png) | ![VI](docs/ship-6.png) | ![VII](docs/ship-7.png) | ![VIII](docs/ship-8.png) |
 | **MARK V** — three engines, plating | **MARK VI** — autoloader | **MARK VII** — afterburner, scoop | **MARK VIII** — gilded, everything fitted |
 
+Those eight cover the hand-authored hulls. Seventeen more marks follow them
+and keep growing — a longer nose, a wider wing, up to six engine bells and a
+third tier of gilding:
+
+| | |
+| --- | --- |
+| ![Mark XXV](docs/ship-25.png) | |
+| **MARK XXV** — the last airframe, with every mod the armourer sells | |
+
 The drawn ship stays honest about the box it collides with: `SHIP.hitW` is
-19 by `hitH` 9, and Mark VIII is 33×18 of airframe against Mark I's 26×14 —
-visibly a bigger machine without the sprite claiming space the hitbox does
-not occupy. Wings and fins reach past that, which is what wings do, and
+19 by `hitH` 9, and the airframe grows from Mark I's 26×14 through Mark
+VIII's 33×18 to Mark XXV's 38×21 — visibly a bigger machine at every stage,
+without the sprite ever claiming space the hitbox does not occupy. Wings and fins reach past that, which is what wings do, and
 they are not what you collide with either.
 
 The airframe is named on the overview between hulls, so the change is
@@ -272,7 +285,7 @@ and checks exactly that.
 
 ## Attackers
 
-Interceptors teach dodging and turrets teach prioritising. Four more types
+Interceptors teach dodging and turrets teach prioritising. Eight more types
 arrive hull by hull, each asking a different question:
 
 ![The attacker roster](docs/attackers.png)
@@ -372,10 +385,12 @@ difficulty, like everything else.
 
 ## Bosses
 
-Eight of them, one per hull, and eight distinct ships — not one disc with
-different numbers. They belong to factions you can read at a glance:
-an emplacement, pirates, assault craft, two kinds of alien, and one thing
-that is plainly alive.
+Twenty-five of them, one per hull, built from eight distinct ships — not
+one disc with different numbers. They belong to factions you can read at a
+glance: an emplacement, pirates, assault craft, two kinds of alien, and one
+thing that is plainly alive.
+
+The first eight are the eight shapes, one per hand-authored hull:
 
 | | |
 | --- | --- |
@@ -396,14 +411,26 @@ worse boss than a known one at a harder tempo — but each has its own
 name, its own numbers and its own place on the curve, ending at roughly
 four times GILTHAMMER's health and five times its payout.
 
-| | | |
-| --- | --- | --- |
-| **THE BALLASTER** (9) | **COLDSHORT** (10) | **ANODE** (11) |
-| **KOBOLD** (12) | **PICKETMASTER** (13) | **THE MIRROR** (14) |
-| **TOLDHAMMER** (15) | **UNBOWED** (16) | **SKYFALL** (17) |
-| **LITTLE SILVER** (18) | **ROSE ASH** (19) | **THE WARD** (20) |
-| **ANVILHEAD** (21) | **SLOWFIRE** (22) | **THE LONG HALF** (23) |
-| **ADAMANT** (24) | **THE LAST NAME** (25) |
+| | |
+| --- | --- |
+| ![THE BALLASTER](docs/boss-09-theballaster.png) | ![COLDSHORT](docs/boss-10-coldshort.png) |
+| **9 · THE BALLASTER** — DEAD WEIGHT — PLUMBUM | **10 · COLDSHORT** — TENDER GUN — STANNUM |
+| ![ANODE](docs/boss-11-anode.png) | ![KOBOLD](docs/boss-12-kobold.png) |
+| **11 · ANODE** — SACRIFICIAL FRAME — ZINCUM | **12 · KOBOLD** — SURVEY PREDATOR — NICCOLUM |
+| ![PICKETMASTER](docs/boss-13-picketmaster.png) | ![THE MIRROR](docs/boss-14-themirror.png) |
+| **13 · PICKETMASTER** — LINE WARDEN — COBALTUM | **14 · THE MIRROR** — PARADE GUARD — CHROMIUM |
+| ![TOLDHAMMER](docs/boss-15-toldhammer.png) | ![UNBOWED](docs/boss-16-unbowed.png) |
+| **15 · TOLDHAMMER** — ARMOUR TEST RIG — VANADIUM | **16 · UNBOWED** — ASSAULT PRIME — TITANIUM |
+| ![SKYFALL](docs/boss-17-skyfall.png) | ![LITTLE SILVER](docs/boss-18-littlesilver.png) |
+| **17 · SKYFALL** — RELIC ENGINE — IRIDIUM | **18 · LITTLE SILVER** — TREASURY LOCK — PLATINUM |
+| ![ROSE ASH](docs/boss-19-roseash.png) | ![THE WARD](docs/boss-20-theward.png) |
+| **19 · ROSE ASH** — COURIER ESCORT — RHODIUM | **20 · THE WARD** — GUARDIAN ABSOLUTE — PALLADIUM |
+| ![ANVILHEAD](docs/boss-21-anvilhead.png) | ![SLOWFIRE](docs/boss-22-slowfire.png) |
+| **21 · ANVILHEAD** — HEAVIEST THING AFLOAT — OSMIRIDIUM | **22 · SLOWFIRE** — REACTOR CORE — THORIUM |
+| ![THE LONG HALF](docs/boss-23-thelonghalf.png) | ![ADAMANT](docs/boss-24-adamant.png) |
+| **23 · THE LONG HALF** — WARHEAD MIND — URANIUM | **24 · ADAMANT** — SIEGE CARRIER PRIME — ADAMAS |
+| ![THE LAST NAME](docs/boss-25-thelastname.png) |  |
+| **25 · THE LAST NAME** — FLAGSHIP OF THE LINE — ORICHALCUM |  |
 
 ### How they are built
 
@@ -413,8 +440,8 @@ mount. Drawing all of them as the same grey square threw away the only
 chance to say which faction you are shooting at. The bodies live in
 `src/bossart.js`, one function each.
 
-Each hull is guarded at its far end, and the boss is what opens the way home —
-so a run reads as approach, fight, escape rather than a lap with a waypoint.
+Each hull is guarded at its far end, and the boss is what opens the way out —
+so a hull reads as approach, fight, escape rather than a lap with a waypoint.
 The fight happens in a locked arena: the camera pins, the ship is walled in,
 and there is nowhere to retreat to.
 
@@ -462,40 +489,58 @@ nothing" needs an answer on screen.
 Clearing a hull permanently upgrades the ship for the rest of the run, so the
 difficulty curve is met with a power curve rather than just better flying:
 
-| | Per hull cleared |
+| | When |
 | --- | --- |
-| Shield maximum | +45 |
-| Acceleration | ×1.09 |
-| Top speed | +24 horizontal, +18 vertical |
-| Muzzle velocity | +50 |
-| Gun mounts | +1 to the **cap** on both gunspeed and gunblaze |
-| Guns | +1 free level of each |
-| Hangar | +1 ship |
+| Shield maximum +45 | every hull |
+| Acceleration ×1.09 | every hull |
+| Top speed +24 horizontal, +18 vertical | every hull |
+| Muzzle velocity +50 | every hull |
+| +1 ship in the hangar | every hull |
+| +1 free level of **gunspeed** | every 5th hull |
+| +1 free level of **gunblaze** | every 6th hull |
+| +1 to the **cap** on both | every 7th hull |
 
 By TANTALUM you are flying a markedly different craft from the one that
-launched: 190 shield, 19% more thrust, five gun mounts. Everything is held on
-the player object rather than mutating shared config, so a restart genuinely
-gives you a stock ship.
+launched: 190 shield, 19% more thrust. Everything is held on the player
+object rather than mutating shared config, so a restart genuinely gives you
+a stock ship.
 
-## What's in this slice
+The guns are deliberately the slow part. They used to be +1 of each and +1
+to the cap every single hull, and combined with the crate table that put
+both guns at their hard ceiling by the third hull of twenty-five — with
+twenty-two hulls left and nothing to reach for. Making the crates stingier
+on its own would only have moved the point at which the free grants took
+over, so both were spaced out together. The cap opens all the way up by
+hull fifteen; getting the levels to meet it is what the crates and the
+armourer are for, and **GUN MOUNTS** from the armourer is the way to buy
+past a plateau rather than wait it out.
+
+## Flying it
 
 - **Momentum handling.** Low horizontal drag so you coast; high vertical drag so
   you can place the ship precisely. Reverse thrust brakes hard, then flips the
   ship through a scale-through-zero animation — the Uridium move.
 - **Bidirectional scrolling** with facing-based camera lead, so reversing slides
-  the whole world across and you always see where you're going.
-- **12,000px of procedurally generated hull**, deterministic from `LEVEL_SEED`.
-  Six obstacle patterns — towers, pincers, free-standing pillars, stepped stacks
-  — each guaranteed to leave a navigable corridor.
-- **Two attack patterns.** Hull turrets (static, 3 HP, arc-limited tracking,
-  lead-aimed 3-round bursts) and interceptors (spawn ahead of your heading, close
-  on a homing sine weave, fire aimed shots).
+  the whole world across and you always see where you're going. You are not
+  made to fly left — the hull runs one way — but you can, and backing up for
+  a coffin is a real decision.
+- **12,000 to 41,150px of procedurally generated hull**, deterministic from
+  each hull's own `seed` in `LEVELS`. Six obstacle patterns — a clear run,
+  a tower hanging from either surface, a pincer, a free-standing pillar and a
+  stepped stack — each guaranteed to leave a navigable corridor.
 - **Hull collision** with per-axis resolution and speed-proportional shield
   damage. A full-speed slam costs ~16 of 100; brushing it costs ~3.
 - Pre-rendered riveted plating, cast shadows, hazard chevrons on every surface
   that points into the playfield, particle explosions, screen shake, CRT
   scanlines and vignette.
 - **Fully procedural audio** — see below.
+
+What shoots back is its own subject, and has grown well past the two kinds
+this list used to describe: six tower types, eight attacker types, four
+minibosses and twenty-five bosses, each covered in its own section above.
+Turret health rises with the hull too — 6 on ARGENTUM, 52 on ORICHALCUM —
+because a gun that dies to a sneeze makes breaking them a formality rather
+than the thing the end-of-hull bonus is paid on.
 
 ## The armory
 
@@ -771,7 +816,7 @@ height is used to say what a thing *is* instead.
 
 ![The title screen](docs/scene-title.png)
 
-It used to carry the name, the tagline, the names of all eight hulls, two
+It used to carry the name, the tagline, the name of every hull, two
 lines of key bindings, the pilot, the tune, the best score, the hull
 selector, two lines explaining the hull selector, the launch prompt, a
 settings prompt and a ten-row board — over a dimmed frame of whatever the
@@ -813,12 +858,15 @@ cannot sit on the hull-clear screen forever.
 
 ## Help
 
-![Controls](docs/help-1.png)
+`H` or `/` from anywhere that is not flight. Three pages, and all three are
+here because a page you cannot see is a page nobody checks:
 
-`H` from anywhere that is not flight. Three pages: **CONTROLS**, **THE
-RUN** — what a hull asks of you, what pays and what costs — and **READING
-THE SCREEN**, which is the radar legend, the loot legend and the tells
-that say what is about to shoot you.
+| | |
+| --- | --- |
+| ![Controls](docs/help-1.png) | ![The run](docs/help-2.png) |
+| **CONTROLS** | **THE RUN** — what a hull asks of you, what pays and what costs |
+| ![Reading the screen](docs/help-3.png) | |
+| **READING THE SCREEN** — the radar legend, the loot legend, and the tells that say what is about to shoot you | |
 
 A test measures each page against the layout and fails if one runs past
 its own footer, checks every row fits its column, and asserts that every
@@ -1061,7 +1109,7 @@ actually happening:
 | 0 — pad and sparse arp | title and end screens |
 | 1 — drums and bass enter | reserved for calm stretches |
 | 2 — full kit, arpeggio lead | in flight |
-| 3 — doubled lead, 16th hats | return run, or shield below 30 |
+| 3 — doubled lead, 16th hats | the boss fight, or shield below 30 |
 
 Intensity changes land on a bar line, so layers never pop in mid-phrase.
 
@@ -1155,18 +1203,23 @@ reports each pilot's progress along the hull.
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/api/health` | — | liveness |
-| `GET` | `/api/stats` | — | players, runs, mods, who is flying |
-| `POST` | `/api/players` | — | register; returns a bearer token **once** |
+| `GET` | `/api/stats` | — | players, runs, mods, who is flying, client-error counts |
+| `POST` | `/api/players` | — | register anonymously; returns a bearer token **once** |
+| `POST` | `/api/auth/register` | optional | register with a password, or adopt one for a pilot you already hold |
+| `POST` | `/api/auth/login` | — | log in with name and password; rotates the token |
 | `GET` | `/api/players/{id}` | — | profile and recent runs |
 | `GET` | `/api/me` | yes | your own profile |
 | `POST` | `/api/scores` | yes | submit a run; returns your new rank |
-| `GET` | `/api/scores/top` | — | leaderboard — `?mod=`, `?window=day\|week\|all`, `?limit=` |
+| `POST` | `/api/runs/start` | yes | open a run; returns the id and the secret that signs its submission |
+| `GET` | `/api/scores/top` | — | top pilots — `?mod=`, `?window=day\|week\|all`, `?limit=` |
+| `GET` | `/api/scores/runs` | — | best individual runs, not folded to one per pilot |
 | `GET` | `/api/mods` | — | list mods — `?sort=plays\|name\|new` |
 | `POST` | `/api/mods` | yes | publish a mod |
 | `GET` | `/api/mods/{id}` | — | one mod, with its config |
 | `GET` | `/api/mods/{id}/top` | — | that mod's leaderboard |
 | `POST` | `/api/presence` | yes | heartbeat while flying |
 | `GET` | `/api/presence` | — | who is flying right now |
+| `POST` | `/api/errors` | — | client error reports; see below |
 
 ### High scores persist against your pilot, not your browser
 
@@ -1301,7 +1354,7 @@ All three are now bounded by tests built from that exact submission
 score of 10⁹ onto the board. They do not stop anyone who reads the rules and
 submits a number just under the ceiling. Real anti-cheat means submitting an
 input trace and re-simulating it server-side against the same seed — the game is
-deterministic from `LEVEL_SEED` and a fixed timestep, so that is achievable, but
+deterministic from each hull's `seed` and a fixed timestep, so that is achievable, but
 it is a separate piece of work and it is not done here.
 
 ### Storage
@@ -1337,32 +1390,49 @@ process.
 ## Layout
 
 ```
-index.html        host page, canvas, integer upscaling
 src/config.js     every tunable: physics, enemies, camera, palette
 src/loop.js       fixed 120Hz timestep, free-running render
 src/level.js      hull generation, collision buckets, pre-rendered plating
 src/player.js     ship physics, flip, firing, hull collision response
 src/enemies.js    turret and interceptor behaviour
 src/miniboss.js   the four mid-hull minibosses
-src/bossart.js    eight boss bodies and their destructible sections
+src/boss.js       boss arenas, phases, weak points and the wreck window
+src/bossart.js    the eight boss shapes and their destructible sections
 src/gates.js      laser gates: the wall, the emitter, and what breaks it
-src/foeart.js     the ten attacker bodies
+src/foeart.js     the nine attacker bodies
 src/shipart.js    the player's ship, as its marks, guns, load and mods make it
 src/demo.js       the attract-mode pilot
 src/score.js      difficulty multipliers, and the one way points are awarded
-src/game.js       state machine, collision pairs, run objective
 src/render.js     world drawing
 src/hud.js        HUD and the title / game-over / complete screens
 src/pool.js       fixed-capacity object pools (no allocation during play)
 src/audio.js      Web Audio graph, buses, voice limiting, synthesis primitives
-src/sfx.js        the 14 sound effects
+src/sfx.js        the 19 sound effects
 src/music.js      adaptive sequencer and its instrument voices
 src/net.js        backend client; degrades to offline play
 src/mods.js       mod loading and config overrides
+src/main.js       the one entry point: wiring, input routing, the frame
+src/game.js       state machine, collision pairs, run objective
+src/foes.js       the attacker pool and every attacker's behaviour
+src/pickups.js    the crate table, loot, magnetism, the haul
+src/shop.js       the armourer: items, mods, and what fitting one does
+src/armory.js     bombs, grenades and missiles
+src/hangar.js     what survives a closed tab: coins banked and mods owned
+src/settings.js   settings as data, validated on the way back in
+src/sequences.js  the splash, the launch, the landing, the title backdrop
+src/display.js    adaptive render scale, static mode for menus
+src/errors.js     client error reporting; see below
 src/projectiles.js src/particles.js src/camera.js src/rng.js src/input.js
 
+index.html        host page, canvas, integer upscaling
+package.json      test tooling only — the game has no dependencies
 Makefile          make, for the list of targets
-tools/make_icons.py  regenerates favicon.ico
+tools/smoke.cjs   the browser smoke test: flies the game and reads pixels
+tools/coverage.sh the coverage gate, so CI and your machine agree
+tools/make_gallery.cjs  regenerates the README images from the live game
+tools/make_icons.py     regenerates favicon.ico
+test/             the client tests; see below
+.github/workflows/ci.yml
 cmd/server/       the binary: static files + API
 internal/model/   shared types
 internal/store/   Store interface, in-memory implementation, snapshots
@@ -1555,15 +1625,30 @@ that no longer exists — an absent shop, an absent landing, three hulls — and
 a stale gap list is worse than none, so this is current as of the version in
 `src/config.js`.
 
-**Nothing in this game has been judged for feel by a human.** Everything
-below follows from that one fact.
+**It has now been played, once, by one person.** That run reported it as
+fun and unbalanced, and two specific things came out of it — the gun
+progression was far too fast, and a legitimate 4.65-million score was being
+refused by the server. Both are fixed. Everything below is what one
+playthrough does not settle.
 
-- **Balance is all first guesses, and there is now a great deal of it.**
-  Twenty-five hulls, twenty-five bosses, four minibosses, eight attacker
-  types, six tower types, laser gates, deflector shields, four treasure
-  tiers, eleven mods, the coin economy, the refit curve, the end-of-hull
-  bonus and the four difficulty settings were all picked by reasoning
-  about them, not by playing them.
+- **Balance is mostly still first guesses, and there is a great deal of
+  it.** Twenty-five hulls, twenty-five bosses, four minibosses, eight
+  attacker types, six tower types, laser gates, deflector shields, four
+  treasure tiers, eleven mods, the coin economy, the refit curve, the
+  end-of-hull bonus and the four difficulty settings were picked by
+  reasoning about them. Only the opening hulls have actually been flown.
+- **The two things that were just retuned are retuned by simulation, not
+  by playing.** Gun upgrades now decay in the crate table and the free
+  per-hull grants are spaced out; the curve was checked by running the
+  drop table several hundred campaigns deep, which says the guns reach
+  their ceiling around hull eighteen instead of hull three. Whether
+  eighteen *feels* right, and whether the plateau between cap rises is
+  anticipation or boredom, a simulation cannot say.
+- **Coins and mods now persist between sessions, which is a balance change
+  and not only a convenience.** Banking a haul means a later run can start
+  rich. In-run upgrades are deliberately kept out of it, but nobody has
+  played enough runs in a row to find out whether the hangar makes the
+  early hulls trivial.
 - **The deep campaign is a curve, not a design.** Hulls nine to
   twenty-five are generated: the numbers escalate correctly and nothing is
   left out of a hull by accident, but no one of them is *about* anything
@@ -1584,15 +1669,17 @@ below follows from that one fact.
   deaf is eight chances to be wrong.
 - **The graphics are unjudged.** Bloom strength, foreground density and the
   surface shading are tuned by eye against screenshots, not by playing.
-  Bloom in particular is easy to overdo. The eight boss bodies, the ten
-  attackers, the eight ship marks and the radar strip were all drawn
+  Bloom in particular is easy to overdo. The eight boss shapes, the nine
+  attackers, the twenty-five ship marks and the radar strip were all drawn
   against still frames; whether any of it reads at speed with forty bullets
   on screen is a different question, and a fully fitted Mark VIII is
   certainly busy.
-- **Coverage is partial and the report says so.** Rendering, audio and HUD
-  modules are exercised only by the browser smoke test, so they contribute
-  no line coverage. The smoke test asserts pixels, not that anything looks
-  right.
+- **Coverage counts execution, not judgement.** Both sides clear 85%, and a
+  good part of that comes from a soak test that plays the game and a draw
+  test that executes every render path. Those prove nothing throws and no
+  value goes to `NaN`; they do not prove anything looks right. The browser
+  smoke test asserts pixels were drawn, not that they were the right ones.
+  Audio is the thinnest of all — nothing anywhere checks what is heard.
 - **HUD text uses the system monospace font**, not a bitmap font, so it does
   not scale as crisply as the rest of the art.
 - **Anti-cheat is defence in depth, not proof.** See the backend section for

@@ -2,8 +2,15 @@ import './_setup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { LEVELS, BOSSES, SHIP, LEVEL_UP, PICKUP, HULL_BONUS, DIFFICULTY } from '../src/config.js';
+import {
+  LEVELS, BOSSES, SHIP, LEVEL_UP, PICKUP, HULL_BONUS, DIFFICULTY,
+} from '../src/config.js';
 import { MODS } from '../src/shop.js';
+import { BODY_KINDS } from '../src/foeart.js';
+import { KINDS as MINI_KINDS } from '../src/miniboss.js';
+import { MARKS } from '../src/shipart.js';
+import { MAP as KEYS } from '../src/input.js';
+import { readdirSync } from 'node:fs';
 
 // The Go score validator mirrors a handful of client constants in order to
 // decide what is physically possible. When they drift, the server starts
@@ -172,4 +179,195 @@ test('the README names every boss', () => {
   for (const b of BOSSES) {
     assert.ok(readme.includes(b.name), `the README never mentions ${b.name}`);
   }
+});
+
+
+// --- the rest of the README, which drifts hardest of all
+//
+// The hull table below was already checked, and that was the only table
+// that was. Everything else went stale quietly: the attacker table said
+// four types when there were eight, the layout block was missing ten
+// modules and named the wrong counts for three more, the refit table
+// described a per-hull gun grant that no longer exists, the controls
+// table had never heard of two keys, and seven rows of the hull table
+// carried raw float artefacts like `every 0.42400000000000004s`.
+//
+// Prose cannot be checked. Tables can.
+
+const firstHullFielding = (key) => {
+  const out = {};
+  for (const L of LEVELS) for (const v of L[key] || []) if (!(v in out)) out[v] = L.name;
+  return out;
+};
+
+test('the README tower table lists every tower, from the right hull', () => {
+  const rows = [...readme.matchAll(/\|\s*\*\*([A-Z]+)\*\*\s*\|\s*([A-Z]+)\s*\|[^|]*\|/g)]
+    .map((m) => ({ name: m[1].toLowerCase(), from: m[2] }));
+  const real = firstHullFielding('towers');
+  for (const [kind, from] of Object.entries(real)) {
+    const row = rows.find((r) => r.name === kind);
+    assert.ok(row, `the README never lists the ${kind.toUpperCase()} tower`);
+    assert.equal(row.from, from,
+      `README says ${kind.toUpperCase()} arrives on ${row.from}, config says ${from}`);
+  }
+});
+
+test('the README attacker table lists every attacker, from the right hull', () => {
+  const real = firstHullFielding('foes');
+  for (const [kind, from] of Object.entries(real)) {
+    const re = new RegExp(`\\|\\s*\\*\\*${kind}\\*\\*\\s*\\|\\s*([A-Z]+)\\s*\\|`, 'i');
+    const m = readme.match(re);
+    assert.ok(m, `the README never lists the ${kind} attacker`);
+    assert.equal(m[1], from,
+      `README says the ${kind} arrives on ${m[1]}, config says ${from}`);
+  }
+  // ...and claims the right number of them.
+  const count = Object.keys(real).length;
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
+    'eight', 'nine', 'ten', 'eleven', 'twelve'];
+  assert.ok(new RegExp(`${words[count]} more types`, 'i').test(readme),
+    `the README does not say "${words[count]} more types" for ${count} attackers`);
+});
+
+test('the README refit table matches the grant schedule', () => {
+  const pairs = [
+    [/\+1 free level of \*\*gunspeed\*\* \| every (\w+) hull/, LEVEL_UP.gunSpeedEvery, 'gunspeed'],
+    [/\+1 free level of \*\*gunblaze\*\* \| every (\w+) hull/, LEVEL_UP.gunBlazeEvery, 'gunblaze'],
+    [/\+1 to the \*\*cap\*\* on both \| every (\w+) hull/, LEVEL_UP.gunCapEvery, 'the cap'],
+  ];
+  const ordinal = (n) => `${n}${{ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th'}`;
+  for (const [re, want, what] of pairs) {
+    const m = readme.match(re);
+    assert.ok(m, `the README does not say how often ${what} is granted`);
+    assert.equal(m[1], ordinal(want),
+      `README grants ${what} every ${m[1]} hull, config says every ${ordinal(want)}`);
+  }
+  for (const [label, value] of [
+    ['Shield maximum', LEVEL_UP.shieldMax], ['Muzzle velocity', LEVEL_UP.bulletSpeedAdd],
+  ]) {
+    assert.ok(readme.includes(`${label} +${value}`),
+      `the README does not say "${label} +${value}"`);
+  }
+});
+
+test('the README crate table matches the drop weights', () => {
+  for (const [kind, weight] of Object.entries(PICKUP.dropWeights)) {
+    const re = new RegExp(`\\|\\s*\\*?\\*?${kind}s?\\*?\\*?[^|]*\\|\\s*${weight}\\s*\\|`, 'i');
+    assert.ok(re.test(readme),
+      `the README does not give ${kind} a weight of ${weight}`);
+  }
+  assert.ok(readme.includes(`× ${PICKUP.gunDropFalloff} per level already held`),
+    `the README does not state the ${PICKUP.gunDropFalloff} falloff`);
+});
+
+test('the README controls table lists every key the game binds', () => {
+  // Keys that are deliberately undocumented would be a decision; there
+  // are none, so every binding must appear.
+  const label = (code) => code
+    .replace(/^Key/, '').replace(/^Digit/, '').replace(/^Arrow(\w+)/, '$1')
+    .replace('Slash', '/').replace('BracketRight', ']').replace('Escape', 'Esc')
+    .replace('ShiftLeft', 'Shift').replace('NumpadEnter', 'Enter');
+  const missing = [];
+  for (const code of Object.keys(KEYS)) {
+    const k = label(code);
+    if (/^[0-9]$/.test(k) && /`1`–`3`/.test(readme)) continue;   // given as a range
+    if (['Left', 'Right', 'Up', 'Down'].includes(k)) continue;   // given as arrows
+    if (!new RegExp(`\`${k.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&')}\``).test(readme)) {
+      missing.push(`${code} (${k})`);
+    }
+  }
+  assert.deepEqual(missing, [], `keys bound but not in the controls table: ${missing.join(', ')}`);
+});
+
+test('the README endpoint table lists every route', () => {
+  const go = readFileSync(new URL('../internal/api/api.go', import.meta.url), 'utf8');
+  const routes = [...go.matchAll(/mux\.HandleFunc\("([A-Z]+) ([^"]+)"/g)]
+    .map((m) => ({ method: m[1], path: m[2] }));
+  assert.ok(routes.length > 10, `only found ${routes.length} routes in api.go`);
+  for (const r of routes) {
+    const re = new RegExp(`\\|\\s*\`${r.method}\`\\s*\\|\\s*\`${
+      r.path.replace(/[{}]/g, '\\$&')}\`\\s*\\|`);
+    assert.ok(re.test(readme), `the README does not document ${r.method} ${r.path}`);
+  }
+});
+
+test('the README layout block names every client module', () => {
+  const listed = readme.slice(readme.indexOf('## Layout'));
+  const missing = readdirSync(new URL('../src', import.meta.url))
+    .filter((f) => f.endsWith('.js') && !listed.includes(`src/${f}`));
+  assert.deepEqual(missing, [],
+    `modules missing from the layout block: ${missing.join(', ')}`);
+});
+
+test('the README counts the art it claims to count', () => {
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
+    'eight', 'nine', 'ten'];
+  assert.ok(readme.includes(`the ${words[BODY_KINDS.length]} attacker bodies`),
+    `the layout block miscounts the ${BODY_KINDS.length} attacker bodies`);
+  const minis = Object.keys(MINI_KINDS).length;
+  assert.ok(readme.includes(`the ${words[minis]} mid-hull minibosses`),
+    `the layout block miscounts the ${minis} minibosses`);
+  const shapes = new Set(BOSSES.map((b) => b.kind)).size;
+  assert.ok(readme.includes(`the ${words[shapes]} boss shapes`),
+    `the layout block miscounts the ${shapes} boss shapes`);
+  assert.ok(readme.includes(`${MARKS.length} ship marks`)
+    || readme.includes('twenty-five ship marks'),
+    `the README miscounts the ${MARKS.length} ship marks`);
+});
+
+// A generated table that dumps raw floats reads as a bug in the game
+// rather than a bug in the generator, which is worse than it sounds.
+test('no number in the README is a float artefact', () => {
+  // No trailing \b: these numbers are followed by a unit ("0.424...s"),
+  // and a word boundary cannot occur between a digit and a letter — which
+  // is why the first version of this test passed over every one of them.
+  const bad = [...readme.matchAll(/\b\d+\.\d{6,}/g)].map((m) => m[0]);
+  assert.deepEqual(bad, [], `unrounded floats in the README: ${bad.join(', ')}`);
+});
+
+// The return leg was removed from the game a long time ago. The README
+// described it for most of that time, and so did two source comments.
+//
+// Scanned by paragraph rather than by line, because prose is written in
+// paragraphs: "It used to send you back down the same hull the other way"
+// and the three lines explaining why are one thought, and a line-by-line
+// scan flags the explanation while letting the claim through.
+test('nothing still describes the return leg as current', () => {
+  // `(\w+ ){0,2}` because the first version missed the single most
+  // prominent instance in the whole document — the opening paragraph's
+  // "then you have to fly it back" — on the word "it".
+  const live = /\b(fly|flies|flying|flown)(?: (?!back\b)\w+){0,2} back\b(?! to back)|\breturn run\b|\breturn leg\b|\bback down the (same )?hull\b|\bthe way back\b(?! in\b)|\bthe way home\b|\bopens the (turnaround|return)\b/i;
+  const past = /used to|no longer|any ?more|was a commute|outlived|removed|it once|once modelled/i;
+
+  const check = (what, text, sep) => {
+    for (const [i, para] of text.split(sep).entries()) {
+      if (!live.test(para) || past.test(para)) continue;
+      assert.fail(`${what}: paragraph ${i + 1} describes the return leg as current:\n${para.trim()}`);
+    }
+  };
+  check('README.md', readme, /\n\s*\n/);
+  for (const f of readdirSync(new URL('../src', import.meta.url)).filter((x) => x.endsWith('.js'))) {
+    // Source splits on a blank line too; a comment block and the code it
+    // introduces are one paragraph, which is the unit that gets stale.
+    check(`src/${f}`, readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8'), /\n\s*\n/);
+  }
+});
+
+// Every image the README points at must exist, and every image generated
+// for it should be pointed at. A broken image reads as a broken project,
+// and an orphan is a file nobody will ever delete because nobody knows it
+// is unused.
+test('every README image resolves, and none is orphaned', () => {
+  const referenced = [...readme.matchAll(/!\[[^\]]*\]\((docs\/[^)]+)\)/g)].map((m) => m[1]);
+  assert.ok(referenced.length > 20, `only ${referenced.length} images referenced`);
+
+  const onDisk = new Set(readdirSync(new URL('../docs', import.meta.url)));
+  const missing = [...new Set(referenced)].filter((p) => !onDisk.has(p.replace('docs/', '')));
+  assert.deepEqual(missing, [], `README points at images that do not exist: ${missing.join(', ')}`);
+
+  // Icons are referenced from index.html, not here.
+  const used = new Set(referenced.map((p) => p.replace('docs/', '')));
+  const orphans = [...onDisk].filter((f) => f.endsWith('.png')
+    && !used.has(f) && !/icon|apple-touch/.test(f));
+  assert.deepEqual(orphans, [], `images nobody references: ${orphans.join(', ')}`);
 });

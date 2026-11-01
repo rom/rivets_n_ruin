@@ -280,7 +280,7 @@ const M = {
   step: 0,
   nextTime: 0,
   timer: null,
-  intensity: 0,     // 0 title · 1 cruise · 2 combat · 3 return run
+  intensity: 0,     // 0 title · 1 cruise · 2 combat · 3 boss or failing shield
   target: 0,
   running: false,
   tune: Number(localStorage.getItem('rnr.tune') || 0) % TUNES.length,
