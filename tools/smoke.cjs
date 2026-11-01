@@ -35,8 +35,17 @@ function check(name, ok, detail) {
 
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+  // A content security policy refusal arrives as a console message, not
+  // as a page error, and the page keeps running without the thing it
+  // refused. That is how a policy that forbade the page's own inline
+  // <style> shipped: every rule was dropped, the two canvases stopped
+  // overlapping, the whole UI layer rendered below the fold, and this
+  // test still passed because the world was drawing fine.
+  const blocked = [];
   page.on('console', (m) => {
-    if (m.type() === 'error' && !m.text().includes('ERR_CONNECTION')) {
+    const t = m.text();
+    if (/Content Security Policy|Refused to/i.test(t)) blocked.push(t);
+    else if (m.type() === 'error' && !t.includes('ERR_CONNECTION')) {
       errors.push('console: ' + m.text());
     }
   });
@@ -79,6 +88,33 @@ function check(name, ok, detail) {
     return Math.round((lit / (d.length / 4)) * 100);
   });
 
+  // The UI layer has to sit exactly on top of the world layer. If the
+  // stylesheet does not load, or #stack stops being positioned, the two
+  // canvases lay out one above the other and everything drawn on the UI
+  // — the HUD, the splash, the title, every menu — leaves the screen
+  // while the game underneath carries on perfectly.
+  const layers = await page.evaluate(() => {
+    const g = document.getElementById('game');
+    const u = document.getElementById('ui');
+    if (!u) return { single: true };
+    const a = g.getBoundingClientRect();
+    const b = u.getBoundingClientRect();
+    const near = (x, y) => Math.abs(x - y) <= 1;
+    const c = u.getContext('2d');
+    const sy = u.height / 384;
+    const d = c.getImageData(0, Math.round((384 - 36) * sy), u.width,
+      Math.max(1, Math.round(36 * sy))).data;
+    let lit = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 8) lit++;
+    return {
+      single: false,
+      aligned: near(a.x, b.x) && near(a.y, b.y) && near(a.width, b.width) && near(a.height, b.height),
+      where: `world ${Math.round(a.x)},${Math.round(a.y)} ${Math.round(a.width)}x${Math.round(a.height)}`
+        + ` / ui ${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.width)}x${Math.round(b.height)}`,
+      hudInk: Math.round((lit / (d.length / 4)) * 100),
+    };
+  });
+
   const fps = await page.evaluate(() => new Promise((res) => {
     let n = 0; const t0 = performance.now();
     const tick = () => {
@@ -97,6 +133,12 @@ function check(name, ok, detail) {
   check('hull chunks cached', after.hullChunks > 0, `${after.hullChunks} chunk(s)`);
   check('still playing', after.state === 'play', after.state);
   check('holds frame rate', fps >= 30, `${fps} fps`);
+  check('ui layer sits on the world layer', layers.single || layers.aligned,
+    layers.single ? 'single canvas' : layers.where);
+  check('HUD is actually on screen', layers.single || layers.hudInk >= 5,
+    layers.single ? 'single canvas' : `${layers.hudInk}% of the HUD band inked`);
+  check('nothing blocked by the content security policy', blocked.length === 0,
+    blocked.join(' | ').slice(0, 160) || 'none');
   check('no console errors', errors.length === 0, errors.join(' | ') || 'none');
   check('no 404s', notFound.length === 0, notFound.join(' ') || 'none');
 
