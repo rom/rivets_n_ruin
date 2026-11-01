@@ -172,11 +172,25 @@ fi
 cd "$ORIGIN"
 
 say "tagging and publishing"
-git tag -a "v$VERSION" "$COMMIT" -F - <<TAG
+# A tag may already be here from a run whose push failed. Reuse it if
+# it names the right commit and refuse if it does not, rather than
+# dying with "already exists" and leaving the operator to work out
+# which of the two it is. Hit twice while publishing 1.1.0: the push
+# is the step most likely to fail, and it is the step after this one.
+if existing=$(git rev-parse -q --verify "refs/tags/v$VERSION^{commit}"); then
+  if [ "$existing" != "$COMMIT" ]; then
+    echo "a local tag v$VERSION already points at $existing, not $COMMIT." >&2
+    echo "delete it (git tag -d v$VERSION) if it is a leftover, or publish that commit." >&2
+    exit 1
+  fi
+  say "reusing the existing v$VERSION tag"
+else
+  git tag -a "v$VERSION" "$COMMIT" -F - <<TAG
 Rivets 'n Ruin $VERSION
 
 $(head -1 "$NOTES")
 TAG
+fi
 git push origin "v$VERSION"
 gh release create "v$VERSION" --repo "$REPO" --target "$COMMIT" \
   --title "Rivets 'n Ruin $VERSION" \
