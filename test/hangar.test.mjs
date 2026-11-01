@@ -5,6 +5,8 @@ import {
   loadHangar, saveHangar, clearHangar, sanitise, freshHangar,
   MAX_COINS, MAX_MOD_LEVEL, mergeHangars, applyHangar, setHangarSync,
 } from '../src/hangar.js';
+import { wipeProgress } from '../src/game.js';
+import { forgetPlayer, netState } from '../src/net.js';
 import { MODS, resetShop, applyMods, modLevel } from '../src/shop.js';
 
 const KEY = 'rnr.hangar';
@@ -233,4 +235,72 @@ test('the upload hook is called with what was saved, and cannot break a save', (
   setHangarSync(() => Promise.reject(new Error('offline')));
   assert.doesNotThrow(() => saveHangar(game), 'a rejected upload broke the save');
   setHangarSync(null);
+});
+
+// --- starting over
+//
+// The hangar wipe clears what you own. The full reset clears what you
+// have achieved as well, and the pilot with it — because the account
+// holds both the hangar and the best score, and syncBest only ever
+// raises the local figure from the server's. A reset that kept the
+// identity would watch the best score it had just cleared come back on
+// the next sync.
+
+test('wiping progress clears the records and nothing else', () => {
+  localStorage.setItem('rnr.best', '123456');
+  localStorage.setItem('rnr.unlocked', '7');
+  localStorage.setItem('rnr.settings', '{"autofire":true}');
+  localStorage.setItem('rnr.muted', '1');
+
+  let startHull = 7;
+  const game = { best: 123456, unlocked: 7, setStartHull: (n) => { startHull = n; } };
+  wipeProgress(game);
+
+  assert.equal(game.best, 0, 'the best score survived');
+  assert.equal(game.unlocked, 0, 'the furthest hull survived');
+  assert.equal(startHull, 0, 'the title screen still starts deep in the campaign');
+  assert.equal(localStorage.getItem('rnr.best'), null);
+  assert.equal(localStorage.getItem('rnr.unlocked'), null);
+
+  // Preferences are not achievements. Wiping an accessibility setting
+  // because somebody wanted a clean campaign would be its own bug.
+  assert.equal(localStorage.getItem('rnr.settings'), '{"autofire":true}',
+    'the reset took the settings with it');
+  assert.equal(localStorage.getItem('rnr.muted'), '1', 'the reset took the mute flag');
+});
+
+test('forgetting the pilot leaves nothing to sync back', () => {
+  localStorage.setItem('rnr.player', JSON.stringify({ id: 'p1', name: 'OLD', token: 't' }));
+  // The account's best has to be put in hand first, or asserting it is
+  // zero afterwards asserts nothing: it starts at zero. syncBest reads
+  // exactly this field and only ever raises the local score from it,
+  // so leaving it set is how a cleared best comes back.
+  const S = netState();
+  S.player = { id: 'p1', name: 'OLD', token: 't' };
+  S.best = 4650367;
+  forgetPlayer();
+  assert.equal(localStorage.getItem('rnr.player'), null, 'the account is still stored');
+  assert.equal(netState().player, null, 'the live state still holds the pilot');
+  assert.equal(netState().best, 0, "the account's best score is still in hand");
+});
+
+test('a reset survives the save that follows it', () => {
+  // clearHangar zeroes the live copies precisely so the pagehide save
+  // cannot write them straight back. The same has to hold for the rest
+  // of a reset, because every one of these is followed by a save.
+  localStorage.setItem('rnr.best', '999');
+  localStorage.setItem('rnr.unlocked', '5');
+  const game = {
+    coins: 900, bars: 4, mods: { reclaimer: 2 },
+    best: 999, unlocked: 5, setStartHull: () => {},
+  };
+  clearHangar(game);
+  wipeProgress(game);
+  saveHangar(game);
+
+  const back = loadHangar();
+  assert.equal(back.coins, 0, 'the coins came back');
+  assert.equal(back.bars, 0, 'the bars came back');
+  assert.deepEqual(back.mods, {}, 'the mods came back');
+  assert.equal(localStorage.getItem('rnr.best'), null, 'the best score came back');
 });

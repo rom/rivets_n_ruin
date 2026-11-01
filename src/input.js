@@ -22,6 +22,7 @@ export const MAP = {
   KeyH: 'help', Slash: 'help',
   KeyB: 'board',
   KeyK: 'wipe',        // clear the hangar, from the settings screen only
+  KeyF: 'wipeall',     // clear everything earned, likewise
   KeyE: 'shop',
   KeyX: 'secondary', ShiftLeft: 'secondary',
   KeyC: 'cycle',
