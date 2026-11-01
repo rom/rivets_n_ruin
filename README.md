@@ -1384,6 +1384,7 @@ reports each pilot's progress along the hull.
 | `POST` | `/api/auth/login` | — | log in with name and password; rotates the token |
 | `GET` | `/api/players/{id}` | — | profile and recent runs |
 | `GET` | `/api/me` | yes | your own profile |
+| `POST` | `/api/auth/available` | — | is one pilot name free? one bit, tightly limited |
 | `GET` | `/api/me/hangar` | yes | coins, bars and bought mods |
 | `PUT` | `/api/me/hangar` | yes | bank them against the account |
 | `POST` | `/api/scores` | yes | submit a run; returns your new rank |
@@ -1396,6 +1397,105 @@ reports each pilot's progress along the hull.
 | `GET` | `/api/mods/{id}/top` | — | that mod's leaderboard |
 | `POST` | `/api/presence` | yes | heartbeat while flying |
 | `GET` | `/api/presence` | — | who is flying right now |
+
+### The operator's door
+
+Registered only when a credential is configured. With none, the routes
+do not exist — there is no default password, nothing to find and nothing
+to brute-force. Everything behind it answers `404` when it refuses,
+including a wrong token and a request from the wrong address: a surface
+that announces itself is a surface worth attacking.
+
+| | | |
+| --- | --- | --- |
+| `POST` | `/api/admin/login` | password in, short-lived token out |
+| `POST` | `/api/admin/logout` | end the session now |
+| `GET` | `/api/admin/stats` | store counters, live sessions, what the OS granted |
+| `GET` | `/api/admin/players` | list and search pilots |
+| `POST` | `/api/admin/players` | add one, with or without a password |
+| `GET` | `/api/admin/players/{id}` | everything about one pilot, with statistics |
+| `DELETE` | `/api/admin/players/{id}` | remove the pilot and all of their data |
+| `POST` | `/api/admin/players/{id}/reset` | clear their history, keep the account |
+| `POST` | `/api/admin/players/{id}/password` | set a new password |
+
+**Loopback only**, unless you pass `-admin-anywhere`. Most of what these
+do cannot be undone, and anyone who wants them reachable from elsewhere
+should have to say so and put TLS and an allowlist in front. A token
+minted locally does not work from off-machine either, so a leaked one
+does not travel.
+
+**Changing a password kills the pilot's session token.** Otherwise
+resetting the credential of a compromised account would change nothing
+for whoever was already inside it.
+
+**Deleting takes the scores with it.** A delete that left them behind
+would leave the pilot's name on the leaderboard — the one page that is
+published — so the only part anybody could see would not have been
+deleted. `reset` is there for when you want a clean slate instead.
+
+Sessions last 30 minutes and live in memory, so a restart logs you out.
+Every action is written to the log with the caller's address, *before*
+it happens: an audit line written afterwards is missing exactly the
+operations that failed halfway through.
+
+#### Giving it a password
+
+Three ways, in descending order of how much they leak:
+
+```bash
+# best: the plaintext never reaches the server
+printf '%s' 'the password' | rnr-server -hash-password > /etc/rivets/admin.hash
+rnr-server -admin-password-hash-file /etc/rivets/admin.hash
+
+# fine: not in ps, not in the environment
+rnr-server -admin-password-file /etc/rivets/admin.pw
+
+# convenient, and it stays in /proc/PID/environ
+RNR_ADMIN_PASSWORD='the password' rnr-server
+```
+
+Never as a flag value: a flag is visible in `ps` to every user on the
+machine.
+
+The environment variable is unset at startup, which stops anything the
+server execs inheriting it — but it does **not** scrub
+`/proc/PID/environ`. That is a snapshot of the initial stack taken at
+exec time and the kernel keeps serving it whatever the process does to
+its own copy. Verified by reading it back after unsetting, because the
+first version of the comment above it claimed otherwise.
+
+What bounds it is `PR_SET_DUMPABLE(0)`, which the hardening layer
+applies on Linux and which hands `/proc/PID/*` to root — so another user
+on the box cannot read it, and root could read anything anyway. With
+`-harden off`, or on a platform without it, assume the password is
+visible to anything running as the same user.
+
+### Is this name taken?
+
+A sign-up form has to be able to ask, and any endpoint that answers is
+an oracle for "does this account exist". The honest position is that
+pilot names are already public — they are printed on the leaderboard —
+so existence is not the secret. What is worth protecting is everything
+*else* about an account, and the cheapness of harvesting names in bulk.
+
+`POST /api/auth/available` therefore:
+
+- takes **one name, in full**. No prefixes, no patterns, no listing,
+  nothing that can return more than one bit.
+- answers with that one bit and nothing beside it. No id, no creation
+  date, no "has a password", no rank. Those are what an enumeration is
+  *for*, and a test fails if the response ever grows a second field.
+- has **its own rate limit**, an order of magnitude tighter than the
+  rest of the API — a burst of 10, then one a second. A hundred
+  thousand candidate names is a day and a half from one address.
+- validates the name before looking anything up, so the validator
+  cannot be used to tell the two answers apart, and floors the response
+  time so the handler cannot become a timing oracle.
+
+Listing pilots exists, and lives behind the admin credential, where
+enumeration is the point rather than a leak. A test asserts no
+pilot-facing route returns a list of players.
+
 | `POST` | `/api/errors` | — | client error reports; see below |
 
 ### High scores persist against your pilot, not your browser

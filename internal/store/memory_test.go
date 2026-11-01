@@ -511,3 +511,124 @@ func TestClampInt(t *testing.T) {
 		}
 	}
 }
+
+// --- administration
+
+func seedPilotWithScores(t *testing.T, m *Memory, name string, n int) *model.Player {
+	t.Helper()
+	p := mustPlayer(t, m, name)
+	for i := 0; i < n; i++ {
+		if err := m.AddScore(&model.Score{
+			ID: fmt.Sprintf("%s-%d", p.ID, i), PlayerID: p.ID, Name: p.Name,
+			Points: 100 * (i + 1), Levels: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.SetHangar(p.ID, &model.Hangar{Coins: 250})
+	return p
+}
+
+func TestListPlayersFiltersAndCaps(t *testing.T) {
+	m := NewMemory()
+	for _, n := range []string{"ALPHA", "ALPACA", "BRAVO"} {
+		mustPlayer(t, m, n)
+	}
+	if got := len(m.ListPlayers("", 0)); got != 3 {
+		t.Errorf("listed %d of 3", got)
+	}
+	if got := len(m.ListPlayers("alp", 0)); got != 2 {
+		t.Errorf("case-insensitive search returned %d, want 2", got)
+	}
+	if got := len(m.ListPlayers("", 1)); got != 1 {
+		t.Errorf("limit ignored: %d", got)
+	}
+	if got := len(m.ListPlayers("nothing matches this", 0)); got != 0 {
+		t.Errorf("a miss returned %d", got)
+	}
+}
+
+func TestDeletePlayerTakesEverything(t *testing.T) {
+	// A delete that leaves the scores behind leaves the pilot's name on
+	// the leaderboard — the one page that is published — so the only
+	// part anybody could see would not have been deleted.
+	m := NewMemory()
+	gone := seedPilotWithScores(t, m, "DELETEME", 3)
+	stays := seedPilotWithScores(t, m, "KEEPME", 2)
+
+	if err := m.DeletePlayer(gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.PlayerByID(gone.ID); err == nil {
+		t.Error("the player record survived")
+	}
+	if _, err := m.PlayerByName("DELETEME"); err == nil {
+		t.Error("the name is still taken, so it cannot be reused")
+	}
+	if _, err := m.PlayerByTokenHash(gone.TokenHash); err == nil {
+		t.Error("the old token still resolves")
+	}
+	if h := m.Hangar(gone.ID); h.Coins != 0 {
+		t.Error("their belongings survived")
+	}
+	if got, _ := m.PlayerScores(gone.ID, 50); len(got) != 0 {
+		t.Errorf("%d scores survived the delete", len(got))
+	}
+	// ...and the pilot standing next to them is untouched.
+	if got, _ := m.PlayerScores(stays.ID, 50); len(got) != 2 {
+		t.Errorf("deleting one pilot took %d of another's scores", 2-len(got))
+	}
+	if h := m.Hangar(stays.ID); h.Coins != 250 {
+		t.Error("deleting one pilot emptied another's hangar")
+	}
+	if err := m.DeletePlayer("no-such-id"); err == nil {
+		t.Error("deleting a missing pilot should report not found")
+	}
+}
+
+func TestResetPlayerKeepsTheAccount(t *testing.T) {
+	m := NewMemory()
+	p := seedPilotWithScores(t, m, "RESETME", 3)
+	before := p.TokenHash
+
+	if err := m.ResetPlayer(p.ID); err != nil {
+		t.Fatal(err)
+	}
+	after, err := m.PlayerByID(p.ID)
+	if err != nil {
+		t.Fatal("reset deleted the account; it should only clear it")
+	}
+	if after.TokenHash != before {
+		t.Error("reset changed the credential; that is what the password route is for")
+	}
+	if after.Runs != 0 || after.Best != 0 {
+		t.Errorf("the counters survived: runs=%d best=%d", after.Runs, after.Best)
+	}
+	if got, _ := m.PlayerScores(p.ID, 50); len(got) != 0 {
+		t.Errorf("%d scores survived the reset", len(got))
+	}
+	if h := m.Hangar(p.ID); h.Coins != 0 {
+		t.Error("their belongings survived the reset")
+	}
+	if err := m.ResetPlayer("no-such-id"); err == nil {
+		t.Error("resetting a missing pilot should report not found")
+	}
+}
+
+func TestDroppedScoresDoNotLeak(t *testing.T) {
+	// dropScoresLocked compacts in place. The tail of the backing array
+	// still points at the removed entries, and leaving it that way keeps
+	// them alive for as long as the process runs.
+	m := NewMemory()
+	p := seedPilotWithScores(t, m, "LEAKCHECK", 5)
+	m.DeletePlayer(p.ID)
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	tail := m.scores[len(m.scores):cap(m.scores)]
+	for i, s := range tail {
+		if s != nil {
+			t.Fatalf("slot %d past the end still references a score", i)
+		}
+	}
+}

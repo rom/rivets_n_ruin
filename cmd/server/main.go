@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime"
@@ -37,7 +38,15 @@ func main() {
 			"directory for the account database, which holds password and token hashes (default \"accounts\")")
 		data = flag.String("data", "",
 			"DEPRECATED single-file snapshot; use -state and -accounts")
-		logFile    = flag.Bool("log-file", false, "also write the log to <state>/server.log")
+		logFile = flag.Bool("log-file", false, "also write the log to <state>/server.log")
+		hashPw  = flag.Bool("hash-password", false,
+			"read a password on stdin, print its hash, and exit; for -admin-password-hash-file")
+		adminHashFile = flag.String("admin-password-hash-file", "",
+			"file holding a pbkdf2 hash of the admin password; the plaintext never reaches this machine")
+		adminPwFile = flag.String("admin-password-file", "",
+			"file holding the admin password in plaintext; prefer -admin-password-hash-file")
+		adminAnywhere = flag.Bool("admin-anywhere", false,
+			"allow the admin routes from any address; they are loopback-only without it")
 		hsts       = flag.Bool("hsts", false, "send Strict-Transport-Security on HTTPS requests; only for a TLS deployment")
 		saveTick   = flag.Duration("save-interval", 30*time.Second, "how often to snapshot to disk")
 		verbose    = flag.Bool("v", false, "log every request, including static assets")
@@ -51,6 +60,33 @@ func main() {
 			"permit running as uid 0, which this does not need")
 	)
 	flag.Parse()
+
+	// Offering -admin-password-hash-file without a way to make one
+	// would be offering nothing: the whole point is that the plaintext
+	// never reaches the server, so the hash has to be computable
+	// somewhere else. Reads stdin rather than taking an argument,
+	// because an argument is visible in ps.
+	//
+	//	printf '%s' 'the password' | rnr-server -hash-password > admin.hash
+	if *hashPw {
+		pw, err := io.ReadAll(io.LimitReader(os.Stdin, 4096))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "reading the password from stdin:", err)
+			os.Exit(1)
+		}
+		trimmed := strings.TrimRight(string(pw), "\r\n")
+		if trimmed == "" {
+			fmt.Fprintln(os.Stderr, "no password on stdin")
+			os.Exit(1)
+		}
+		h, err := api.HashPassword(trimmed)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "hashing:", err)
+			os.Exit(1)
+		}
+		fmt.Println(h)
+		return
+	}
 
 	level := slog.LevelInfo
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
@@ -122,7 +158,70 @@ func main() {
 	log.Info("store loaded", "accounts", paths.AccountsFile, "scores", paths.Scores,
 		"stats", st.Stats())
 
-	apiSrv := api.New(st, log, api.Config{RateLimitPerSec: *rlRate, RateBurst: *rlBurst, RequireRuns: *strictRuns})
+	// The operator's door, if one was configured.
+	//
+	// Unset means the admin routes are not registered at all: no default
+	// credential, and nothing to find on a server whose owner never
+	// asked for one.
+	//
+	// Three ways in, in descending order of how much they leak:
+	//
+	//   -admin-password-hash-file  the hash only. The plaintext never
+	//                              exists on the server. Best.
+	//   -admin-password-file       the plaintext, in a file you can
+	//                              chmod 600. Not in ps, not in environ.
+	//   RNR_ADMIN_PASSWORD         convenient, and it stays in
+	//                              /proc/PID/environ for the life of the
+	//                              process. See below.
+	//
+	// Never a flag value: a flag is visible in ps to every user on the
+	// machine, which is strictly worse than all three.
+	adminHash, err := readAdminSecret(*adminHashFile, *adminPwFile)
+	if err != nil {
+		log.Error("reading the admin credential", "err", err)
+		os.Exit(1)
+	}
+	if adminHash == "" {
+		if pw := os.Getenv("RNR_ADMIN_PASSWORD"); pw != "" {
+			// Unsetenv stops anything this process execs from
+			// inheriting it, and stops later code reading it back. It
+			// does NOT scrub /proc/PID/environ: that is a snapshot of
+			// the initial stack taken at exec time and the kernel will
+			// keep serving it whatever the process does to its own copy.
+			// Verified by reading it back after unsetting.
+			//
+			// What does bound it is PR_SET_DUMPABLE(0), applied below,
+			// which hands /proc/PID/* to root — so on a hardened Linux
+			// box another user cannot read it and root could read
+			// anything anyway. On a platform without that, or with
+			// -harden off, assume the password is visible to the uid.
+			os.Unsetenv("RNR_ADMIN_PASSWORD")
+			h, err := api.HashPassword(pw)
+			if err != nil {
+				log.Error("hashing the admin password", "err", err)
+				os.Exit(1)
+			}
+			adminHash = h
+			log.Warn("the admin password came from the environment and stays in " +
+				"/proc/PID/environ for the life of this process; " +
+				"-admin-password-hash-file avoids that entirely")
+		}
+	}
+	if adminHash != "" {
+		log.Info("admin routes enabled", "loopbackOnly", !*adminAnywhere, "routes", "/api/admin/*")
+		if *adminAnywhere {
+			log.Warn("admin routes are reachable from any address; put TLS and an " +
+				"allowlist in front of this, or drop -admin-anywhere")
+		}
+	}
+
+	apiSrv := api.New(st, log, api.Config{
+		RateLimitPerSec:   *rlRate,
+		RateBurst:         *rlBurst,
+		RequireRuns:       *strictRuns,
+		AdminPasswordHash: adminHash,
+		AdminLocalOnly:    !*adminAnywhere,
+	})
 
 	// Open runs, restored alongside the store. A campaign takes longer
 	// than a deploy, so without this a restart voided every run in flight
@@ -353,3 +452,7 @@ func staticLog(log *slog.Logger, verbose bool, next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// Indirection so paths.go does not have to import the api package just
+// to hash one string.
+var hashAdminPassword = api.HashPassword
