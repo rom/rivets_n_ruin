@@ -70,9 +70,7 @@ Then open http://127.0.0.1:8000/. For anything real, put the state and the accou
 
 The server-only builds are static and `CGO_ENABLED=0`; point them at the game with `-dir`.
 
-Built in a pristine checkout with `-trimpath` and `CGO_ENABLED=0`. Verify the download with `sha256sum -c SHA256SUMS.txt`.
-
-Rebuilding these byte-for-byte needs the **same Go toolchain** as the release was built with — a different compiler version produces a different binary from identical source, which looks exactly like a tampered download if you are not expecting it. The toolchain, the commit, and whether the tree was clean are all recorded in the binary itself:
+Built in a pristine checkout with `-trimpath` and `CGO_ENABLED=0`. Verify the download with `sha256sum -c SHA256SUMS.txt`. Rebuilding byte-for-byte needs the same Go toolchain (go1.27. `go version -m` on the binary shows the toolchain, commit and clean-tree flag it was built with. 
 
 ```
 $ go version -m rnr-server-1.1.0-linux-amd64
