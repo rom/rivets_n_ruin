@@ -132,6 +132,16 @@ export function drawLaunchBanner(ctx, game, k) {
   ctx.fillStyle = COL.warmHi;
   ctx.fillText(['CLAMPS OFF', 'THRUSTERS LIT', 'RUN THE HULL'][Math.min(2, (k * 3) | 0)],
     VIEW_W / 2, 108);
+
+  // The hull's rule, if it has one. A modifier the pilot is not told about
+  // is not a modifier, it is the game behaving strangely — so it is named
+  // on the way in, and the line under it says what it actually does.
+  if (game.hullMod) {
+    ctx.fillStyle = COL.danger;
+    ctx.fillText(game.hullMod.name, VIEW_W / 2, 136);
+    ctx.fillStyle = COL.hudText;
+    ctx.fillText(game.hullMod.blurb.toUpperCase(), VIEW_W / 2, 150);
+  }
   ctx.globalAlpha = 1;
 }
 

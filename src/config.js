@@ -388,6 +388,87 @@ export const LEVELS = [...CORE_LEVELS, ...DEEP_LEVELS];
 // difficulty curve is met with a power curve, not just better flying.
 // Difficulty. One multiplier set, applied where the numbers are actually
 // used, so changing it takes effect without rebuilding anything.
+// --------------------------------------------------------------- modifiers
+//
+// Past AURUM the campaign is one formula with bigger numbers: every
+// generated hull fields the whole roster and the whole tower list, and
+// differs from its neighbour only in health, speed and spawn rate. That is
+// a curve, and a curve is not a reason to fly a hull.
+//
+// A modifier is one named rule that changes how a hull is flown rather
+// than how much of it there is. It is drawn per hull from the hull's own
+// seed, so with FIXED layouts a hull always has the same one and can be
+// learned, and with SHUFFLED the same hull is a different problem each run.
+//
+// `spec` multiplies fields of the level spec before the hull is built.
+// Everything else is a flag the relevant system reads. `from` is the
+// earliest hull a modifier can appear on.
+export const MODIFIERS = [
+  // gapScale is the run between one pattern and the next, not the
+  // clearance through either — the blurb said "the corridor is tighter",
+  // which is a thing this modifier cannot do.
+  { id: 'pressure', name: 'PRESSURE', from: 3,
+    blurb: 'Pattern on pattern, back to back, with almost no clear run between.',
+    spec: { gapScale: 0.82, clearChance: 0.45 } },
+
+  { id: 'flak', name: 'FLAK CURTAIN', from: 3,
+    blurb: 'The guns fire half again as often, and break half again as easily.',
+    spec: { turretCooldown: 0.62, turretHp: 0.6 } },
+
+  { id: 'overrun', name: 'OVERRUN', from: 4,
+    blurb: 'Squadrons come a third more often.',
+    spec: { foeRateMul: 1.35 } },
+
+  { id: 'gravity', name: 'GRAVITY WELL', from: 3,
+    blurb: 'Something under the hull pulls. Nose up or sink.' },
+
+  { id: 'blackout', name: 'BLACKOUT', from: 5,
+    blurb: 'The hull is unlit. Your guns and their explosions are the lamp.' },
+
+  { id: 'livehull', name: 'LIVE HULL', from: 6,
+    blurb: 'Broken guns are rebuilt behind you. Clearing it means clearing it fast.' },
+
+  { id: 'salvage', name: 'SALVAGE RUN', from: 4,
+    blurb: 'No crates. No shield, no gun levels — but the wreckage pays double.' },
+
+  { id: 'vacuum', name: 'HARD VACUUM', from: 5,
+    blurb: 'Scrapes cost double. Everything you pick up is worth double.' },
+];
+
+// Whether this hull is being flown under a named rule. Every system that
+// reads a modifier goes through here, so none of them has to know whether
+// game.hullMod is null.
+//
+// It lives in config because config is the one module everything already
+// imports and that imports nothing itself. In level.js — next to the rest
+// of the modifier code, where it started — pickups.js could not reach it:
+// level imports gates, gates imports pickups, and pickups importing level
+// back closes the ring.
+export const hullRule = (game, id) => !!(game.hullMod && game.hullMod.id === id);
+
+// The numbers behind the modifiers that are not simple spec multipliers.
+// Here rather than inline so the strength of a rule is a value somebody
+// can read and change, not a literal buried in the system it affects.
+export const MOD_FORCE = {
+  gravity: 0.34,        // of SHIP.accelY, downward and always on
+  vacuumScrape: 2,      // what a scrape costs under HARD VACUUM
+  vacuumLoot: 2,        // and what the loot on that hull is worth
+  blackout: 0.62,       // how much of the hull's own light is taken away
+  rebuildAfter: 9,      // seconds before a LIVE HULL gun stands back up
+  salvageCoins: 2,      // what a kill drops on a SALVAGE RUN, with no crates
+};
+
+// How likely a hull is to have one at all. None on the first three — they
+// are the tutorial, and a rule you have to learn on top of the controls is
+// two things at once — then rising, because the hulls that most need an
+// identity are the generated ones at the far end.
+export const MODIFIER_CHANCE = {
+  from: 3,
+  base: 0.45,
+  perHull: 0.02,
+  cap: 0.8,
+};
+
 // How often a squadron arrives.
 //
 // The gap after one is paced by what arrived, measured in what it was

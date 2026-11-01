@@ -6,6 +6,9 @@ import { makeGame, update } from '../src/game.js';
 import { setSynthetic } from '../src/input.js';
 import { foes } from '../src/foes.js';
 const poolOfFoes = () => foes;
+const pickupsModule = () => pickupsNS;
+import * as pickupsNS from '../src/pickups.js';
+import { hitTurret as hitTurretDirect } from '../src/enemies.js';
 import { interceptors } from '../src/enemies.js';
 import { enemyShots } from '../src/projectiles.js';
 import { LEVELS, TOWERS, FIELD_TOP, FIELD_BOT, DT } from '../src/config.js';
@@ -678,4 +681,344 @@ test('a squadron that cannot fit in the pool degrades instead of breaking', () =
     if (sq.squad.link) assert.equal(sq.members.length, 2, 'half a chainer pair survived');
   }
   assert.ok(pool.count <= full, 'the pool overflowed');
+});
+
+// ------------------------------------------------------------- modifiers
+//
+// Past AURUM the campaign was one formula with bigger numbers: seventeen
+// generated hulls that field the whole roster and the whole tower list and
+// differ only in health, speed and spawn rate. A modifier is one named
+// rule that changes how a hull is flown rather than how much of it there
+// is.
+
+import {
+  MODIFIERS, MODIFIER_CHANCE, MOD_FORCE, hullRule,
+} from '../src/config.js';
+import { modifierFor, specWithModifier } from '../src/level.js';
+
+test('every modifier is named, explained and reachable', () => {
+  const ids = new Set();
+  for (const m of MODIFIERS) {
+    assert.ok(!ids.has(m.id), `two modifiers share the id ${m.id}`);
+    ids.add(m.id);
+    assert.ok(m.name && m.name === m.name.toUpperCase(), `${m.id} has no display name`);
+    assert.ok(m.blurb && m.blurb.length > 20,
+      `${m.id} does not say what it does — a rule the pilot cannot read is`
+      + ' the game behaving strangely');
+    assert.ok(m.from >= MODIFIER_CHANCE.from,
+      `${m.id} can appear before modifiers do at all`);
+    assert.ok(m.from < LEVELS.length - 1, `${m.id} can never appear`);
+  }
+  assert.ok(MODIFIERS.length >= 6, 'too few rules to give the deep hulls identities');
+});
+
+test('the tutorial hulls are flown under no rule', () => {
+  for (let i = 0; i < MODIFIER_CHANCE.from; i++) {
+    for (let seed = 0; seed < 60; seed++) {
+      assert.equal(modifierFor(i, LEVELS[i], seed), null,
+        `${LEVELS[i].name} drew a modifier, and it is meant to be the tutorial`);
+    }
+  }
+});
+
+test('a modifier is stable for a hull and a seed, and moves with the seed', () => {
+  const spec = LEVELS[10];
+  const a = modifierFor(10, spec, 0);
+  assert.equal(modifierFor(10, spec, 0), a, 'FIXED gave a hull two different rules');
+
+  // ...and across run seeds it actually varies, or SHUFFLED buys nothing.
+  const drawn = new Set();
+  for (let seed = 1; seed <= 200; seed++) {
+    const m = modifierFor(10, spec, seed);
+    drawn.add(m ? m.id : null);
+  }
+  assert.ok(drawn.size >= 5,
+    `200 run seeds on one hull drew only ${drawn.size} different outcomes`);
+  assert.ok(drawn.has(null), 'a hull is never left clean');
+});
+
+test('a clean hull stays possible, and a ruled one stays common', () => {
+  // Both halves matter: every hull having a rule makes the rule the
+  // baseline, and the rate is meant to climb with depth.
+  const rate = (i) => {
+    let n = 0;
+    for (let seed = 1; seed <= 400; seed++) if (modifierFor(i, LEVELS[i], seed)) n++;
+    return n / 400;
+  };
+  const early = rate(MODIFIER_CHANCE.from);
+  const deep = rate(LEVELS.length - 1);
+  assert.ok(early > 0.3 && early < 0.6, `the first ruled hull draws one ${(early * 100) | 0}% of the time`);
+  assert.ok(deep > early, `deep hulls (${(deep * 100) | 0}%) should draw more than early ones (${(early * 100) | 0}%)`);
+  assert.ok(deep <= MODIFIER_CHANCE.cap + 0.05, 'the cap is not holding');
+});
+
+test('a modifier never offers a rule the hull is too early for', () => {
+  for (let i = 0; i < LEVELS.length; i++) {
+    for (let seed = 0; seed < 150; seed++) {
+      const m = modifierFor(i, LEVELS[i], seed);
+      if (m) assert.ok(i >= m.from, `${LEVELS[i].name} drew ${m.id}, which starts at hull ${m.from + 1}`);
+    }
+  }
+});
+
+test('a spec modifier multiplies, and leaves the original alone', () => {
+  const base = LEVELS[10];
+  const pressure = MODIFIERS.find((m) => m.id === 'pressure');
+  const out = specWithModifier(base, pressure);
+  assert.notEqual(out, base, 'the level spec was mutated in place');
+  assert.equal(base.gapScale, LEVELS[10].gapScale, 'the original spec changed');
+  assert.ok(out.gapScale < base.gapScale, 'PRESSURE did not tighten the corridor');
+  assert.equal(out.gapScale, base.gapScale * pressure.spec.gapScale);
+  // untouched fields carry over
+  assert.equal(out.name, base.name);
+  assert.equal(out.turretHp, base.turretHp);
+  assert.equal(specWithModifier(base, null), base, 'no modifier should mean no copy');
+});
+
+test('a hull built under PRESSURE is still flyable', () => {
+  // The one modifier that changes the geometry, so the one that can make
+  // a hull impossible. Checked the same way shuffling is.
+  const pressure = MODIFIERS.find((m) => m.id === 'pressure');
+  for (const hull of [4, 12, LEVELS.length - 1]) {
+    const spec = specWithModifier(LEVELS[hull], pressure);
+    for (const seed of [0, 7, 0xbeef, 4242]) {
+      const lv = build(spec, seed);
+      const bad = widestGapFailure(lv);
+      assert.equal(bad, null,
+        bad && `${LEVELS[hull].name} under PRESSURE, seed ${seed}, is impassable`
+          + ` at x=${bad.x} (widest gap ${bad.best}px)`);
+    }
+  }
+});
+
+test('hullRule reads the rule in force and nothing else', () => {
+  const none = {};
+  assert.equal(hullRule(none, 'gravity'), false, 'a hull with no rule reported one');
+  const g = { hullMod: MODIFIERS.find((m) => m.id === 'gravity') };
+  assert.equal(hullRule(g, 'gravity'), true);
+  assert.equal(hullRule(g, 'blackout'), false, 'one rule answered for another');
+  for (const m of MODIFIERS) {
+    const live = { hullMod: m };
+    const on = MODIFIERS.filter((x) => hullRule(live, x.id));
+    assert.equal(on.length, 1, `${m.id} switches on ${on.length} rules`);
+  }
+});
+
+test('GRAVITY WELL pulls without taking a direction away', () => {
+  // A rule that makes a hull unflyable is a broken hull, not a hard one:
+  // holding the stick up has to still climb.
+  assert.ok(MOD_FORCE.gravity > 0, 'gravity pulls nowhere');
+  assert.ok(MOD_FORCE.gravity < 1,
+    `gravity at ${MOD_FORCE.gravity} of the ship's own thrust cannot be climbed against`);
+});
+
+// The rules actually biting, driven through the real update loop. The
+// tests above prove the table is well-formed; these prove it is wired.
+
+function ruledHull(id, hull = LEVELS.length - 1) {
+  const game = launchAt(hull);
+  game.hullMod = MODIFIERS.find((m) => m.id === id);
+  assert.ok(game.hullMod, `no modifier called ${id}`);
+  for (const t of game.level.turrets) t.dead = true;
+  game.miniPlan = [];
+  return game;
+}
+
+test('GRAVITY WELL sinks a ship that is not flying, and nothing else does', () => {
+  // Measured as the difference between the two, not as an absolute drop:
+  // the control hull is real terrain, and a ship let go at an arbitrary x
+  // may be resting on something that nudges it. BLACKOUT is the control
+  // because it is the only other rule that touches nothing physical.
+  const fallUnder = (id) => {
+    const game = ruledHull(id);
+    const p = game.player;
+    p.x = 4000; p.y = 160; p.vx = 0; p.vy = 0; p.invuln = 1e9;
+    game.cam.x = p.x - 320;
+    const startY = p.y;
+    for (let f = 0; f < 60; f++) {
+      silence(game);
+      p.vx = 0;
+      update(game, DT);
+    }
+    return p.y - startY;
+  };
+  const pulled = fallUnder('gravity');
+  const control = fallUnder('blackout');
+  assert.ok(pulled - control > 8,
+    `GRAVITY WELL sank the ship ${pulled.toFixed(1)}px against the control's`
+    + ` ${control.toFixed(1)}px — the rule is not reaching the ship`);
+});
+
+test('GRAVITY WELL can be climbed against', () => {
+  const game = ruledHull('gravity');
+  const p = game.player;
+  p.x = 4000; p.y = 200; p.vx = 0; p.vy = 0; p.invuln = 1e9;
+  game.cam.x = p.x - 320;
+  const startY = p.y;
+  try {
+    for (let f = 0; f < 90; f++) {
+      silence(game);
+      setSynthetic(new Set(['up']));
+      p.vx = 0;
+      update(game, DT);
+    }
+  } finally { setSynthetic(null); }
+  assert.ok(p.y < startY - 10,
+    `holding up under GRAVITY WELL went from y=${startY} to y=${p.y.toFixed(1)}:`
+    + ' the rule takes a direction away rather than making one cost something');
+});
+
+test('SALVAGE RUN drops no crates, and pays more for the wreck', () => {
+  const plain = ruledHull('gravity');          // any rule that is not salvage
+  const salvage = ruledHull('salvage');
+  const { maybeDrop, spoils, pickups, resetPickups } = pickupsModule();
+
+  // Reset first. The pickup pool is module-global and shared across every
+  // test in this file; left full by an earlier one, spawnPickup returns
+  // null and maybeDrop reports no crate whatever the rule says — which is
+  // a test that passes with the rule deleted.
+  let crates = 0;
+  for (let i = 0; i < 400; i++) {
+    resetPickups();
+    if (maybeDrop(plain, 100, 100, 'turret')) crates++;
+  }
+  assert.ok(crates > 0, 'the control hull dropped no crates either');
+  for (let i = 0; i < 400; i++) {
+    resetPickups();
+    assert.equal(maybeDrop(salvage, 100, 100, 'turret'), null,
+      'a SALVAGE RUN dropped a crate');
+  }
+
+  // Averaged over many small batches. Sixty kills in one batch saturated
+  // the 160-slot pickup pool and measured a doubling as 155 against 136;
+  // eight kills left the pool alone but the per-kill roll is random, and
+  // a single batch of eight failed about one run in four on variance.
+  const coinsFrom = (game) => {
+    let total = 0;
+    for (let batch = 0; batch < 40; batch++) {
+      resetPickups();
+      for (let i = 0; i < 6; i++) spoils(game, 3000, 160, 'turret');
+      for (let i = 0; i < pickups.count; i++) if (pickups.items[i].kind === 'coin') total++;
+    }
+    return total / 40;
+  };
+  const a = coinsFrom(plain);
+  const b = coinsFrom(salvage);
+  assert.ok(b > a * 1.6,
+    `SALVAGE RUN scattered ${b.toFixed(1)} coins a batch against ${a.toFixed(1)}`
+    + ` — it only takes and never pays`);
+});
+
+test('HARD VACUUM doubles what a scrape costs', () => {
+  const cost = (id) => {
+    const game = ruledHull(id);
+    const p = game.player;
+    p.shield = p.shieldMax;
+    p.invuln = 0;
+    p.x = 4000; p.y = FIELD_TOP + 2; p.vy = 0; p.vx = 0;
+    game.cam.x = p.x - 320;
+    const was = p.shield;
+    silence(game);
+    update(game, DT);                 // one frame grinding the upper girder
+    return was - p.shield;
+  };
+  // BLACKOUT as the control, not GRAVITY WELL: a scrape is charged in
+  // proportion to the closing speed, and the gravity rule gives the ship
+  // vertical speed before it touches anything, so the two sides were being
+  // charged for different impacts (5.00 against 2.64, a ratio of 1.89).
+  const plain = cost('blackout');
+  const vac = cost('vacuum');
+  assert.ok(plain > 0, 'the control hull cost nothing to grind');
+  assert.ok(Math.abs(vac / plain - MOD_FORCE.vacuumScrape) < 0.1,
+    `HARD VACUUM charged ${vac.toFixed(2)} against ${plain.toFixed(2)}:`
+    + ` expected ${MOD_FORCE.vacuumScrape}x`);
+});
+
+test('HARD VACUUM doubles what the loot is worth', () => {
+  // The other half of the rule, and the half nothing covered: deleting the
+  // multiplier from pickups.js failed no test at all.
+  // Collected the way the game collects: a bar put where the ship is, and
+  // the real update run over it. collect() is private and exporting it for
+  // a test would be testing a function rather than the behaviour.
+  const worth = (id) => {
+    const game = ruledHull(id);
+    const { resetPickups, spawnPickup, updatePickups, pickups } = pickupsModule();
+    resetPickups();
+    const bar = spawnPickup(game, game.player.x, game.player.y, 'goldbar');
+    assert.ok(bar, 'no gold bar to collect');
+    bar.vx = 0; bar.vy = 0;
+    bar.baseY = game.player.y;
+    bar.x = game.player.x;
+    const before = game.score;
+    for (let f = 0; f < 10 && pickups.count; f++) updatePickups(game, DT);
+    assert.equal(pickups.count, 0, 'the bar was never picked up');
+    return game.score - before;
+  };
+  const plain = worth('blackout');
+  const vac = worth('vacuum');
+  assert.ok(plain > 0, 'a gold bar was worth nothing on the control hull');
+  assert.equal(vac, plain * MOD_FORCE.vacuumLoot,
+    `a gold bar paid ${vac} under HARD VACUUM against ${plain} without it`);
+});
+
+test('LIVE HULL stands a gun back up, behind you, and only once paid', () => {
+  const game = launchAt(LEVELS.length - 1);
+  game.hullMod = MODIFIERS.find((m) => m.id === 'livehull');
+  game.miniPlan = [];
+  const p = game.player;
+  const t = game.level.turrets.find((x) => x.x > 3000);
+  assert.ok(t, 'no gun to break');
+
+  p.x = t.x; p.y = 160; p.invuln = 1e9;
+  const scoreBefore = game.score;
+  const killedBefore = game.turretsKilled;
+  hitTurretDirect(game, t, 9999);
+  assert.ok(t.dead, 'the gun did not break');
+  const paidOnce = game.score - scoreBefore;
+  assert.ok(paidOnce > 0, 'breaking a gun paid nothing');
+  assert.equal(game.turretsKilled, killedBefore + 1);
+
+  // It must not come back while it is still on screen.
+  for (let f = 0; f < 120 * 12; f++) {
+    silence(game);
+    p.x = t.x; p.vx = 0;
+    game.cam.x = Math.max(0, t.x - 320);
+    update(game, DT);
+    assert.ok(t.dead, `the gun was rebuilt in front of the ship at t=${game.time.toFixed(1)}`);
+  }
+
+  // Fly well past it and it stands back up.
+  let back = false;
+  for (let f = 0; f < 120 * 12 && !back; f++) {
+    silence(game);
+    p.x = t.x + 2000; p.facing = 1; p.vx = 0;
+    game.cam.x = Math.max(0, p.x - 320);
+    update(game, DT);
+    back = !t.dead;
+  }
+  assert.ok(back, 'LIVE HULL never rebuilt the gun');
+
+  // ...and breaking it again pays nothing. A gun that could be farmed
+  // every nine seconds would make the rule an exploit.
+  const scoreAfter = game.score;
+  const killedAfter = game.turretsKilled;
+  hitTurretDirect(game, t, 9999);
+  assert.ok(t.dead, 'the rebuilt gun could not be broken');
+  assert.equal(game.score, scoreAfter, 'a rebuilt gun paid its score a second time');
+  assert.equal(game.turretsKilled, killedAfter, 'a rebuilt gun counted twice');
+});
+
+test('a hull with no LIVE HULL rule never rebuilds a gun', () => {
+  const game = ruledHull('gravity');
+  const p = game.player;
+  const t = game.level.turrets.find((x) => x.x > 3000);
+  t.dead = true;
+  t.downAt = 0;
+  for (let f = 0; f < 120 * 20; f++) {
+    silence(game);
+    p.x = t.x + 3000; p.facing = 1; p.vx = 0; p.invuln = 1e9;
+    game.cam.x = Math.max(0, p.x - 320);
+    update(game, DT);
+  }
+  assert.ok(t.dead, 'a gun came back on a hull with no rule for it');
 });

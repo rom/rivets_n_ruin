@@ -524,3 +524,130 @@ test('the known-gaps paragraph counts what the game has', () => {
       `Known gaps does not say "${words[n]} ${label}" — the game has ${n}`);
   }
 });
+
+test('the roster counts in the hull section are right too', () => {
+  // The same drift, in a second place. "What shoots back is its own
+  // subject" claimed six tower types and eight attacker types long after
+  // there were fifteen and sixteen; the check above only ever looked at
+  // the Known gaps slice, so this sentence went unexamined for as long as
+  // that one did.
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
+    'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen',
+    'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty',
+    'twenty-one', 'twenty-two', 'twenty-three', 'twenty-four', 'twenty-five'];
+  const at = readme.indexOf('What shoots back is its own subject');
+  assert.ok(at > 0, 'the paragraph that counts the roster is gone');
+  const para = readme.slice(at, at + 400);
+  for (const [label, n] of [
+    ['tower types', Object.keys(TOWERS).length],
+    ['attacker types', Object.keys(FOE_SPEC).length],
+    ['bosses', BOSSES.length],
+  ]) {
+    const pattern = `${words[n]} ${label}`.replace(/-/g, '[- ]').replace(/ /g, '\\s+');
+    assert.ok(new RegExp(pattern, 'i').test(para),
+      `that paragraph does not say "${words[n]} ${label}" — the game has ${n}`);
+  }
+});
+
+// --- the four things added for variety are described, and described right
+//
+// The gap list drifted because it was prose and nothing checked it. So is
+// all of this. The numbers below are the ones a reader would act on.
+
+test('the README lists every modifier, by the name the game shows', async () => {
+  const { MODIFIERS } = await import('../src/config.js');
+  for (const m of MODIFIERS) {
+    assert.ok(readme.includes(`**${m.name}**`),
+      `the README never mentions the ${m.name} modifier`);
+  }
+  const rows = [...readme.matchAll(/^\| \*\*([A-Z][A-Z ]+)\*\* \| /gm)].map((x) => x[1]);
+  const named = new Set(MODIFIERS.map((m) => m.name));
+  const claimed = rows.filter((r) => named.has(r));
+  assert.equal(claimed.length, MODIFIERS.length,
+    `the modifier table has ${claimed.length} rows for ${MODIFIERS.length} modifiers`);
+});
+
+test('the README counts the obstacle patterns its own table lists', () => {
+  // Counted against the table rather than against level.js. A branch
+  // count does not match either number: the generator has a branch each
+  // for a tower hanging from the top and one standing on the bottom,
+  // which the table rightly calls one pattern, and the spaceport has a
+  // section of its own instead of a row. So the claim this pins is the
+  // one a reader can check — the stated total is the rows plus the
+  // spaceport — and a thirteenth pattern added without a row fails it.
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
+    'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen'];
+  const m = readme.match(/([A-Za-z-]+) obstacle patterns/);
+  assert.ok(m, 'the README no longer says how many obstacle patterns there are');
+
+  const table = readme.slice(readme.indexOf('| Pattern | What it asks |'));
+  const rows = table.slice(0, table.indexOf('\n\n')).split('\n')
+    .filter((line) => line.trim().startsWith('|')).length - 2;   // header + rule
+  assert.ok(rows > 5, `only found ${rows} rows in the pattern table`);
+  assert.ok(readme.includes('## Spaceports') || readme.includes('### Spaceports'),
+    'the spaceport is counted as a pattern but has no section');
+
+  assert.equal(m[1].toLowerCase(), words[rows + 1],
+    `the README says ${m[1]} obstacle patterns and lists ${rows} rows`
+    + ' plus the spaceport');
+  assert.ok(/\| \*\*press\*\* \|/.test(table), 'the press is missing from the pattern table');
+});
+
+test('the README reports the real narrowest gap, and the press at its shut', async () => {
+  const { buildLevel, updateMovers, pointBlocked } = await import('../src/level.js');
+  const { FIELD_TOP, FIELD_BOT } = await import('../src/config.js');
+  const narrowest = (lv) => {
+    let best = Infinity;
+    for (let x = 10; x < lv.length; x += 7) {
+      let run = 0;
+      let widest = 0;
+      for (let y = FIELD_TOP + 1; y < FIELD_BOT; y += 1) {
+        if (pointBlocked(lv, x, y)) run = 0;
+        else { run += 1; widest = Math.max(widest, run); }
+      }
+      best = Math.min(best, widest);
+    }
+    return best;
+  };
+  let open = Infinity;
+  let shut = Infinity;
+  for (const L of LEVELS) {
+    const lv = buildLevel(L);
+    updateMovers(lv, 0);
+    open = Math.min(open, narrowest(lv));
+    if (!lv.movers.length) continue;
+    for (let s = 0; s <= 24; s++) {
+      updateMovers(lv, (s / 24) * 4);
+      shut = Math.min(shut, narrowest(lv));
+    }
+  }
+  const claimedOpen = Number((readme.match(/narrowest gap anywhere in the twenty-five hulls is (\d+)px/) || [])[1]);
+  const claimedShut = Number((readme.match(/to (\d+)px at its\s+shut/) || [])[1]);
+  assert.equal(claimedOpen, open,
+    `the README claims a narrowest gap of ${claimedOpen}px; it is ${open}px`);
+  assert.equal(claimedShut, shut,
+    `the README claims a press shuts to ${claimedShut}px; it reaches ${shut}px`);
+});
+
+test('the README names every formation a squadron can fly', async () => {
+  const src = readFileSync(new URL('../src/foes.js', import.meta.url), 'utf8');
+  const block = src.slice(src.indexOf('const FORMATION = {'), src.indexOf('\n};', src.indexOf('const FORMATION = {')));
+  const names = [...block.matchAll(/^  ([a-z]+): \(/gm)].map((m) => m[1]);
+  assert.ok(names.length >= 4, `only found ${names.length} formations in foes.js`);
+  const table = readme.slice(readme.indexOf('| Formation | Shape |'));
+  for (const n of names) {
+    assert.ok(table.slice(0, 900).includes(`**${n}**`),
+      `the README's formation table never mentions ${n}`);
+  }
+});
+
+test('the README counts the squadrons the table holds', async () => {
+  const { SQUADS } = await import('../src/foes.js');
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
+    'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen',
+    'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
+  const m = readme.match(/([A-Za-z-]+) of them in `SQUADS`/);
+  assert.ok(m, 'the README no longer says how many squadrons there are');
+  assert.equal(m[1].toLowerCase(), words[SQUADS.length],
+    `the README says ${m[1]} squadrons, foes.js has ${SQUADS.length}`);
+});

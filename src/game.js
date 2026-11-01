@@ -3,7 +3,9 @@ import {
   FIELD_TOP, FIELD_BOT, clamp, LANCE, FOE_PACE} from './config.js';
 import { diff, award, hurt } from './score.js';
 import { get as setting, set as setSetting, onChange as onSetting } from './settings.js';
-import { buildLevel, obstaclesNear, updateMovers } from './level.js';
+import {
+  buildLevel, obstaclesNear, updateMovers, modifierFor, specWithModifier,
+} from './level.js';
 import { updateGates, hitGate, gateHit, liveGates } from './gates.js';
 import { makeBoss, updateBoss, hitBoss, bossBeaten, arenaLeft } from './boss.js';
 import { makeCamera, updateCamera, kick } from './camera.js';
@@ -67,10 +69,12 @@ export function makeGame(modSpec = null) {
   // Drawn once here so the title screen's hull has one, and redrawn by
   // reset() for every run after.
   const runSeed = freshRunSeed();
-  const level = buildLevel(specs[0], runSeed);
+  const hullMod = modifierFor(0, specs[0], runSeed);
+  const level = buildLevel(specWithModifier(specs[0], hullMod), runSeed);
   const game = {
     level,
     runSeed,
+    hullMod,               // the rule this hull is flown under, or null
     cam: makeCamera(),
     player: makePlayer(),
     state: 'splash',       // splash | title | launching | play | dying
@@ -180,7 +184,8 @@ function reset(game) {
   // run's seed, which is neither setting's behaviour.
   game.runSeed = freshRunSeed();
   game.levelIndex = at;
-  game.level = buildLevel(game.specs[at], game.runSeed);
+  game.hullMod = modifierFor(at, game.specs[at], game.runSeed);
+  game.level = buildLevel(specWithModifier(game.specs[at], game.hullMod), game.runSeed);
   setTune(game.specs[at].tune);
   // The gates and turrets used to be walked here and put back by hand,
   // because the hull was only rebuilt when the index moved. It always is
@@ -294,7 +299,9 @@ function loadNextHull(game) {
   // The hull's haul and its end-of-hull bonus are both in by now, and a
   // pilot who closes the tab between hulls should keep them.
   saveHangar(game);
-  game.level = buildLevel(game.specs[game.levelIndex], game.runSeed);
+  game.hullMod = modifierFor(game.levelIndex, game.specs[game.levelIndex], game.runSeed);
+  game.level = buildLevel(
+    specWithModifier(game.specs[game.levelIndex], game.hullMod), game.runSeed);
   setTune(game.specs[game.levelIndex].tune);
 
   p.x = 180;
@@ -632,7 +639,7 @@ export function update(game, dt) {
       const sq = spawnSquadron(game);
       if (sq) weight = sq.weight;
     }
-    const rate = foeRateFor(game.level.spec);
+    const rate = foeRateFor(game.level.spec) * (game.level.spec.foeRateMul || 1);
     const gap = rate > 0 ? Math.max(FOE_PACE.floor, weight / rate) : FOE_PACE.floor;
     game.foeCd = gap * (FOE_PACE.jitter + Math.random() * (2 - FOE_PACE.jitter * 2));
   }

@@ -435,6 +435,40 @@ last point of a shield — but the bubble has to be gone before the attacker
 can die. The odds start at 22% on CUPRUM and climb to 54% on AURUM, and
 only the five kinds in `SHIELD.kinds` can carry one.
 
+### Squadrons
+
+They do not arrive one at a time. They used to — one uniform pull from the
+hull's roster every few seconds — and on a deep hull that is fifteen kinds
+all equally likely at every moment, which averages out. Nothing ever
+*arrived*; it just kept coming, and fifteen kinds shuffled that finely read
+as one kind.
+
+A squadron is a composition with a shape. Three gnats in a vee. A barge
+with two darts screening it. A monitor on its own, because that is what a
+monitor is. Seventeen of them in `SQUADS`, plus a singleton for every
+roster kind so no attacker stops being its own answer to something — except
+the two that are only half an attacker alone: a chainer has no tether
+without its mate, and one gnat is one hit point and no gun.
+
+| Formation | Shape |
+| --- | --- |
+| **vee** | arrowhead, widening toward the back |
+| **column** | nose to tail: a stream rather than a wall |
+| **line** | abreast — a wall to pick a side of |
+| **echelon** | a diagonal that crosses your lane whatever altitude you hold |
+| **screen** | the leader out front, everything else tucked in behind it |
+
+The pressure is deliberately unchanged. The gap after a squadron is its
+weight over the hull's rate — weight being what it is worth to kill, the
+one currency the roster already agrees on — so a swarm comes round again
+quickly and a monitor buys itself a long quiet. The rate is **per hull**
+and set to exactly what the old cadence delivered there. One global rate
+cannot work: the old threat rate climbed with roster depth, from 47 points
+a second on TANTALUM to 97 on FERRUM, and pacing against a single number
+flattens that by design — the best fit across all twenty-five hulls still
+left the deep ones 40% quieter than they had been. Per hull, every one
+lands within 0.4%, and a test holds it there.
+
 ## Minibosses
 
 The gap between an attacker you kill in two shots and a boss that gates the
@@ -662,8 +696,9 @@ past a plateau rather than wait it out.
   now, derived as the camera swing plus half a screen, so changing your
   mind cannot be the thing that loses something.
 - **12,000 to 41,150px of procedurally generated hull**, deterministic from
-  each hull's own `seed` in `LEVELS`. Eleven obstacle patterns, each
-  guaranteed to leave a corridor the ship fits through:
+  each hull's own `seed` in `LEVELS`, optionally mixed with a per-run seed
+  — see **Hull layouts** below. Twelve obstacle patterns, each guaranteed
+  to leave a corridor the ship fits through:
 
   | Pattern | What it asks |
   | --- | --- |
@@ -676,12 +711,21 @@ past a plateau rather than wait it out.
   | **double slot** | two walls in series with their gaps at different heights, so you commit twice |
   | **islands** | nothing in particular — several lines work, and picking one is the whole of it |
   | narrows | the corridor itself closes down and opens again; has to be flown rather than dodged |
+  | **press** | jaws that close and open on a cycle: the only pattern whose geometry moves, and a rhythm to arrive on rather than a shape to dodge |
   | stepped stack | climbs, so you commit to a line early |
 
-  The narrowest gap anywhere in the twenty-five hulls is 74px against a
-  ship that is 9 tall, and a test walks every hull at 7px intervals to
+  The narrowest gap anywhere in the twenty-five hulls is 39px against a
+  ship that is 9 tall, and a test walks every hull at 17px intervals to
   keep it that way — an unflyable hull is not a hard hull, it is a broken
-  one.
+  one. A press closes tighter than any static geometry, to 34px at its
+  shut, which is still nearly four times the ship: being caught at the
+  wrong phase is a scrape, never a crush.
+
+  The press is the one pattern that cannot be baked into the cached hull
+  texture, because a chunk is a bitmap held across frames and anything
+  drawn into one is frozen at the phase it was rendered at. Its jaws are
+  drawn live. They move vertically only, which is what keeps the
+  broad-phase collision index — bucketed on x — valid for them.
 - **Hull collision** with per-axis resolution and speed-proportional shield
   damage. A full-speed slam costs ~16 of 100; brushing it costs ~3.
 - Pre-rendered riveted plating, cast shadows, hazard chevrons on every surface
@@ -690,8 +734,9 @@ past a plateau rather than wait it out.
 - **Fully procedural audio** — see below.
 
 What shoots back is its own subject, and has grown well past the two kinds
-this list used to describe: six tower types, eight attacker types, four
-minibosses and twenty-five bosses, each covered in its own section above.
+this list used to describe: fifteen tower types, sixteen attacker types,
+four minibosses and twenty-five bosses, each covered in its own section
+above.
 Turret health rises with the hull too — 6 on ARGENTUM, 52 on ORICHALCUM —
 because a gun that dies to a sneeze makes breaking them a formality rather
 than the thing the end-of-hull bonus is paid on.
@@ -739,6 +784,53 @@ the arena, put an identical one there on the very next frame, banner and
 arrival sound and all. Every boss was fought twice. `game.bossDown`
 marks the hull's arena as done; `reset()` and `loadNextHull()` clear it,
 because the flag belongs to the hull and not to the campaign.
+
+## Hull modifiers
+
+Past AURUM the campaign is one formula with bigger numbers. Every
+generated hull fields the whole roster and the whole tower list and
+differs from its neighbour only in health, speed and spawn rate. That is a
+curve, and a curve is not a reason to fly a hull.
+
+A modifier is one named rule that changes how a hull is flown rather than
+how much of it there is. It is drawn from the hull's own seed, so under
+FIXED a hull always has the same one and can be learned, and under
+SHUFFLED the same hull is a different problem each run. It is named on the
+launch card with a line saying what it does, because a rule the pilot is
+not told about is not a modifier — it is the game behaving strangely.
+
+| Rule | What changes |
+| --- | --- |
+| **PRESSURE** | pattern on pattern, back to back, with almost no clear run between |
+| **FLAK CURTAIN** | the guns fire half again as often, and break half again as easily |
+| **OVERRUN** | squadrons come a third more often |
+| **GRAVITY WELL** | something under the hull pulls; nose up or sink |
+| **BLACKOUT** | the hull is unlit — your guns and their explosions are the lamp |
+| **LIVE HULL** | broken guns are rebuilt behind you |
+| **SALVAGE RUN** | no crates at all, and the wreckage pays double |
+| **HARD VACUUM** | scrapes cost double, everything you pick up is worth double |
+
+None on the first three hulls — they are the tutorial, and a rule you have
+to learn on top of the controls is two things at once. From the fourth the
+odds start at 45% and climb to a cap of 80%, so a clean hull stays
+possible and a ruled one is the norm where the campaign needs the variety
+most.
+
+Two of them needed a fence rather than a number.
+
+**LIVE HULL** rebuilds a gun only once it is behind you and off screen: an
+emplacement reassembling itself in view reads as a bug, and one rebuilt in
+front of you is a gun you already paid for arriving again with no warning.
+And a rebuilt gun pays nothing the second time. A tower that could be
+farmed for score and loot every nine seconds would make the best play
+parking behind one and waiting, which is the exact opposite of what the
+rule asks for. The end-of-hull bonus still counts the *final* state, so
+clearing a live hull means clearing it fast.
+
+**GRAVITY WELL** is sized against the ship's own thrust — a third of it —
+and applied before the drag, so it settles to a terminal sink rather than
+accelerating without limit, and holding the stick up still climbs. A rule
+that takes a direction away is a broken hull, not a hard one.
 
 ## Clearing a hull
 
@@ -1229,6 +1321,30 @@ the title screen offers with its arrows, in the place people look for
 settings. It is bounded by how far you have actually got, because a start
 hull past that is not a setting. Earlier refits are credited, so arriving
 on PYRITE in a factory-standard ship is not a thing that can happen.
+
+### Hull layouts
+
+A hull is generated from `mulberry32(spec.seed)`, so every run flew the
+same 12,000 pixels of ARGENTUM. That is right for learning a hull and for
+comparing two scores on it, and wrong for the fifth run in a row.
+
+`HULL LAYOUTS` picks between the two. **FIXED** is the historical
+behaviour and the default, bit for bit — a save written before this
+setting existed does not quietly reshuffle a campaign somebody was
+learning. **SHUFFLED** folds a per-run seed in and every hull is new.
+
+The run seed is a plain XOR, and deliberately nothing more: mulberry32
+avalanches its own seed before its first output, so consecutive run seeds
+already give uncorrelated hulls — measured at seven of eight distinct
+opening patterns for seeds 1 to 8, which is exactly what an extra
+scrambling step also gave.
+
+What the setting actually costs is a guarantee. The hull walk proves the
+eight shipped seeds are flyable; shuffling means the generator has to be
+right for seeds nobody has ever looked at, so the test sweeps four hulls
+across eight arbitrary seeds and confirms the ship still fits through
+every vertical slice — and that no turret ends up with its muzzle inside
+a block.
 
 ### Difficulty
 

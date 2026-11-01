@@ -1,5 +1,6 @@
 import {
   FIELD_TOP, FIELD_BOT, FIELD_H, RIM, APRON, THEMES, TOWERS, clamp,
+  MODIFIERS, MODIFIER_CHANCE,
 } from './config.js';
 import { mulberry32, rr, ri, hash2 } from './rng.js';
 import { buildGates } from './gates.js';
@@ -58,6 +59,36 @@ export function updateMovers(level, t) {
     o.y = r.y;
     o.h = r.h;
   }
+}
+
+// ---------------------------------------------------------- hull modifiers
+//
+// Which rule, if any, this hull is flown under. Drawn from the hull's own
+// seed mixed with the run's, so it moves with the layout: FIXED gives a
+// hull the same modifier every time and SHUFFLED gives it a new one each
+// run. Salted so it does not consume from, or correlate with, the stream
+// that generates the terrain.
+export function modifierFor(levelIndex, spec, runSeed = 0) {
+  if (levelIndex < MODIFIER_CHANCE.from) return null;
+  const r = mulberry32((mixSeed(spec.seed, runSeed) ^ 0x4d0d1f1e) >>> 0);
+  const chance = Math.min(MODIFIER_CHANCE.cap,
+    MODIFIER_CHANCE.base + MODIFIER_CHANCE.perHull * (levelIndex - MODIFIER_CHANCE.from));
+  if (r() >= chance) return null;
+  const pool = MODIFIERS.filter((m) => levelIndex >= m.from);
+  if (!pool.length) return null;
+  return pool[Math.floor(r() * pool.length)];
+}
+
+// The spec a hull is actually built from. A modifier's `spec` block
+// multiplies named fields; everything else about it is a flag that the
+// system it affects reads at run time.
+export function specWithModifier(spec, mod) {
+  if (!mod || !mod.spec) return spec;
+  const out = { ...spec };
+  for (const [key, mul] of Object.entries(mod.spec)) {
+    out[key] = (out[key] === undefined ? 1 : out[key]) * mul;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- generation

@@ -1,5 +1,6 @@
 import {
   TURRET, TOWERS, INTERCEPTOR, VIEW_W, FIELD_TOP, FIELD_BOT, APRON, clamp, CULL_MARGIN,
+  MOD_FORCE, hullRule,
 } from './config.js';
 import { makePool } from './pool.js';
 import { enemyShots, fire } from './projectiles.js';
@@ -22,8 +23,37 @@ const angleTo = (a, target, rate) => {
 // ------------------------------------------------- pattern 1: hull turrets
 // Static, mounted on the hull, 3 HP. Tracks within an arc, fires a lead-aimed
 // burst. Threat you choose to engage or evade; the reason to slow down.
+// LIVE HULL: the guns are put back.
+//
+// Only behind the ship, and only once it is far enough away not to watch
+// it happen — a gun reassembling itself on screen reads as a bug, and one
+// rebuilt in front of you is a gun you already paid for arriving again
+// with no warning. Clearing a live hull means clearing it fast, which is
+// the whole of what the rule asks.
+//
+// A rebuilt gun does not pay again: hullBonus counts the fraction of the
+// hull's guns destroyed, and a tower that could be farmed for score every
+// nine seconds would make a modifier into an exploit.
+function rebuildHull(game) {
+  const p = game.player;
+  for (const t of game.level.turrets) {
+    if (!t.dead || t.downAt === undefined) continue;
+    if (game.time - t.downAt < MOD_FORCE.rebuildAfter) continue;
+    // behind the ship, and off screen
+    if ((t.x - p.x) * p.facing > -VIEW_W * 0.6) continue;
+    t.dead = false;
+    t.downAt = undefined;
+    t.hp = Math.round(game.level.spec.turretHp * (t.tower ? t.tower.hpMul : 1));
+    t.cd = Math.random() * 0.8;
+    t.burstLeft = 0;
+    t.charge = 0;
+    t.angle = t.dir * Math.PI / 2;
+  }
+}
+
 export function updateTurrets(game, dt) {
   const p = game.player;
+  if (hullRule(game, 'livehull')) rebuildHull(game);
 
   // Wardens protect their neighbours, so the kill order matters. Recomputed
   // each frame because a warden dying must free its neighbours at once.
@@ -259,6 +289,8 @@ export function hitTurret(game, t, dmg) {
     return false;
   }
   t.dead = true;
+  // When, for LIVE HULL. Harmless on every other hull: nothing reads it.
+  t.downAt = game.time;
   const vol = t.tower && t.tower.volatile;
   explode(t.x, t.y - t.dir * 5, vol ? 3.4 : 1.5);
   sfxExplode(vol ? 2.6 : 1.5);
@@ -275,9 +307,18 @@ export function hitTurret(game, t, dmg) {
       x: t.x, y: t.y - t.dir * 6, r: vol.r, dmg: vol.dmg,
     });
   }
-  spoils(game, t.x, t.y - t.dir * 14, 'turret');
-  award(game, (t.tower && t.tower.score) || TURRET.score);
-  game.turretsKilled++;
+  // A gun pays once. On a LIVE HULL the same emplacement can be broken
+  // several times in a run, and a tower that could be farmed for score and
+  // loot every nine seconds would turn a modifier into an exploit — the
+  // right play would be to park behind one and wait, which is the opposite
+  // of what the rule asks for. The rebuild is the cost of leaving it
+  // standing, not a respawning pickup.
+  if (!t.paid) {
+    t.paid = true;
+    spoils(game, t.x, t.y - t.dir * 14, 'turret');
+    award(game, (t.tower && t.tower.score) || TURRET.score);
+    game.turretsKilled++;
+  }
   return true;
 }
 

@@ -19,7 +19,7 @@ import { foes, SPEC as FOE_SPEC, SHIELD as FOE_SHIELD } from './foes.js';
 import { drawMinis } from './miniboss.js';
 import { drawOrdnance } from './armory.js';
 import { drawPad } from './sequences.js';
-import { PICKUP } from './config.js';
+import { PICKUP, MOD_FORCE, hullRule } from './config.js';
 
 // How much of the full-screen flash survives REDUCE FLASHING. Not zero:
 // the flash is feedback, and removing it entirely takes information away
@@ -129,6 +129,19 @@ export function drawWorld(ctx, game) {
 
   // the hull: however many cached chunks cover the view
   drawHull(ctx, game.level, camX, camY);
+
+  // BLACKOUT: the hull is unlit. Laid over the plating and under the
+  // lights, so muzzle flashes and explosions still pick it out — the rule
+  // is that your guns are the lamp, which only works if the lamp is drawn
+  // after the dark. Not opaque: at MOD_FORCE.blackout the silhouette of
+  // what you are about to fly into is still there to be read, which is the
+  // line between a hard hull and an unfair one.
+  if (hullRule(game, 'blackout')) {
+    ctx.fillStyle = '#000000';
+    ctx.globalAlpha = MOD_FORCE.blackout;
+    ctx.fillRect(0, 0, VIEW_W, FIELD_H);
+    ctx.globalAlpha = 1;
+  }
 
   // lighting on the surface, under everything that sits on it
   drawLights(ctx, camX, camY);

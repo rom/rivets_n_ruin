@@ -1,5 +1,6 @@
 import {
-  SHIP, PICKUP, ARMORY, FIELD_TOP, FIELD_BOT, clamp, REAR, LANCE} from './config.js';
+  SHIP, PICKUP, ARMORY, FIELD_TOP, FIELD_BOT, clamp, REAR, LANCE,
+  MOD_FORCE, hullRule} from './config.js';
 
 // Cycles to the next ordnance you actually have, so the key is never a
 // no-op while something else is loaded.
@@ -108,6 +109,12 @@ export function updatePlayer(p, game, dt) {
 
   // --- vertical: snappier, settles quickly
   p.vy += iy * SHIP.accelY * p.accelMul * dt;
+  // GRAVITY WELL: something under the hull pulls. Applied before the drag
+  // so it settles to a terminal sink rather than accelerating without
+  // limit, and sized against SHIP.accelY so holding the stick up still
+  // climbs — a modifier that takes a direction away is a broken hull, not
+  // a hard one.
+  if (hullRule(game, 'gravity')) p.vy += SHIP.accelY * MOD_FORCE.gravity * dt;
   p.vy *= Math.exp(-SHIP.dragY * dt);
   const maxVY = SHIP.maxVY + p.maxVYBonus;
   p.vy = clamp(p.vy, -maxVY, maxVY);
@@ -327,7 +334,10 @@ function impact(p, game, speed, hx, hy, nx, ny) {
   sfxScrape(speed);
   if (p.scrapeCd > 0 || p.invuln > 0) return;
   p.scrapeCd = SHIP.scrapeCd;
-  const dmg = (SHIP.grindDamage + speed * SHIP.impactDamage) * (p.scrapeMul || 1) * diff().scrape;
+  // HARD VACUUM: no air between you and the plating, and it costs double.
+  const vac = hullRule(game, 'vacuum') ? MOD_FORCE.vacuumScrape : 1;
+  const dmg = (SHIP.grindDamage + speed * SHIP.impactDamage)
+    * (p.scrapeMul || 1) * diff().scrape * vac;
   p.shield -= dmg;
   kick(game.cam, 2.5 + speed * 0.02);
   game.flash = Math.max(game.flash, Math.min(0.5, 0.12 + speed * 0.0012));
