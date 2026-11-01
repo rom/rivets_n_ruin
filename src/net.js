@@ -83,6 +83,25 @@ function savePlayer(p) {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(p)); } catch { /* private mode */ }
 }
 
+// Forget who this browser is.
+//
+// A full reset has to do this, not just clear the local copies. The
+// account holds the hangar and the best score, and syncBest only ever
+// raises the local figure from the server's — so a reset that kept the
+// identity would watch the high score it had just cleared come straight
+// back on the next sync, which makes the button a lie.
+//
+// What it does NOT do is delete anything on the server. Runs already
+// submitted stay on the leaderboard under the old name, because that
+// board is a public record and a button in a settings screen is not
+// the right instrument for editing one. Signing back in gets the old
+// pilot, and everything of theirs, back.
+export function forgetPlayer() {
+  S.player = null;
+  S.best = 0;
+  try { localStorage.removeItem(STORE_KEY); } catch { /* private mode */ }
+}
+
 // A name nobody has to type before their first run.
 function suggestName() {
   const a = ['RUST', 'IRON', 'SLAG', 'BOLT', 'ARC', 'FLUX', 'DROSS', 'QUENCH', 'FORGE', 'SCRAP'];

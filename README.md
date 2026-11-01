@@ -69,6 +69,7 @@ backend down**; you lose the leaderboard, not the game.
 | `Q` | Quit the run (asks first; `Y` confirms, `N` cancels) |
 | `R` | Restart mid-run; reset settings to defaults on the settings screen |
 | `K` | Clear the hangar — settings screen only, and it asks twice |
+| `F` | Start over: everything earned, and the pilot with it — likewise |
 
 ## Screenshots
 
@@ -1087,6 +1088,29 @@ Storage is the one input a player can edit by hand, so nothing read back is
 trusted: unknown mod ids are dropped, levels and coins are bounded, a save
 from a newer version is ignored rather than half-read, and storage being
 unavailable at all is an empty hangar rather than a crash.
+
+### Starting over
+
+`F` twice on the settings screen is the bigger hammer: the hangar, the
+best score, the furthest hull reached, **and the pilot**.
+
+The account has to go with the rest or the button is a lie. It holds the
+hangar and the best score, and `syncBest` only ever raises the local
+figure from the server's — so a reset that kept the identity would watch
+the high score it had just cleared come straight back on the next sync.
+Forgetting it means the next connection registers somebody new.
+
+What it does **not** do is delete anything on the server. Runs already
+submitted stay on the leaderboard under the old name, because that board
+is a public record and a key on a settings screen is not the right
+instrument for editing one. Signing back in gets the old pilot, and
+everything of theirs, back — which is the escape hatch for anyone who
+pressed `F` and meant `K`.
+
+Settings, mute and the chosen tune survive it. Those are how somebody
+likes to play, not what they have achieved, and wiping an accessibility
+setting because a player wanted a clean campaign would be its own small
+bug.
 
 `K` twice on the settings screen clears it. Progress that persists needs a
 way back to nothing, and it asks twice because it is the one irreversible

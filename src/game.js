@@ -613,6 +613,26 @@ export function update(game, dt) {
 // follows the pilot across browsers and survives a cleared localStorage) and
 // localStorage caches it (so it still shows when the backend is unreachable).
 // Whichever is higher wins.
+// Everything the pilot has earned, forgotten.
+//
+// The hangar is cleared separately (clearHangar, which also zeroes the
+// live coins so the pagehide save cannot write them straight back);
+// this is the rest of it: the best score and the furthest hull reached.
+//
+// Deliberately not touched: the settings, the mute flag and the chosen
+// tune. Those are how somebody likes to play, not what they have
+// achieved, and wiping an accessibility setting because a player wanted
+// a clean campaign would be its own small bug.
+export function wipeProgress(game) {
+  game.best = 0;
+  game.unlocked = 0;
+  game.setStartHull(0);
+  for (const k of ['rnr.best', 'rnr.unlocked']) {
+    try { localStorage.removeItem(k); } catch { /* private mode */ }
+  }
+  return game;
+}
+
 export function syncBest(game) {
   const remote = serverBest();
   if (remote > game.best) {

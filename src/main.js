@@ -7,19 +7,19 @@ import {
 import { demoActions, IDLE_BEFORE_DEMO } from './demo.js';
 import { startLoop } from './loop.js';
 import { installErrorReporting, report } from './errors.js';
-import { makeGame, update, syncBest } from './game.js';
+import { makeGame, update, syncBest, wipeProgress } from './game.js';
 import { drawWorld } from './render.js';
 import {
   drawHud, drawPaused, drawQuitPrompt, drawSettings, drawShop, drawHelp, HELP_PAGES,
   drawDemoBadge,
 } from './hud.js';
-import { rows as shopRows, buy as shopBuy, applyMods } from './shop.js';
+import { rows as shopRows, buy as shopBuy, applyMods, resetShop } from './shop.js';
 import { saveHangar, clearHangar, setHangarSync, mergeHangars, applyHangar } from './hangar.js';
 import { unlock, toggleMute, isMuted, ready } from './audio.js';
 import { startMusic, stopMusic, musicRunning } from './music.js';
 import { sfxUi } from './sfx.js';
 import { initNet, rename, refreshTop, refreshRuns, refreshPresence, netState, toggleBoard,
-  fetchHangar, pushHangar, setIdentityHook } from './net.js';
+  fetchHangar, pushHangar, setIdentityHook, forgetPlayer } from './net.js';
 import { nextTune, tuneName, setTune, TUNES } from './music.js';
 import * as settings from './settings.js';
 import { applySettings } from './audio.js';
@@ -97,7 +97,10 @@ let demoOn = false;
 let helpOpen = false;
 let helpPage = 0;
 let settingsSel = 0;
-let wipeArmed = false;      // the hangar wipe has been asked for once
+// false, 'hangar' or 'all': which destructive key has been asked for
+// once. One variable rather than two booleans, so arming one answers
+// 'no' to the other instead of leaving both primed.
+let wipeArmed = false;
 let wipeNote = '';
 let shopOpen = false;
 let shopSel = 0;
@@ -148,6 +151,28 @@ async function syncHangar() {
 // Every moment the pilot this browser acts as can change: a sign-in, a
 // sign-up, a fresh anonymous registration, the backend coming back.
 setIdentityHook(syncHangar);
+
+// Start again from nothing.
+//
+// Clearing the local copies is not enough on its own. The account holds
+// the hangar and the best score, and both would be synced straight back
+// — so this forgets the account too and the next connection registers a
+// fresh pilot.
+//
+// Runs already on the leaderboard stay there, under the old name. That
+// board is a public record, and a key on a settings screen is not the
+// right instrument for editing one; signing back in gets the old pilot
+// and everything of theirs back.
+function fullReset() {
+  setHangarSync(null);        // nothing may upload while there is no pilot
+  clearHangar(game);          // coins, bars, mods, and the live copies
+  applyMods(game);            // ...so the ship stops carrying what was bought
+  wipeProgress(game);         // best score, furthest hull
+  forgetPlayer();             // the account, so none of it comes back
+  resetShop(game);
+  // Re-register as somebody new, if there is a backend to register with.
+  initNet().then((ok) => { if (ok) syncHangar(); });
+}
 
 // Backend comes up behind the game, never in front of it.
 initNet().then((ok) => {
@@ -261,13 +286,23 @@ startLoop(
       // modal: a modal over a settings page is a lot of machinery for a
       // question with two answers.
       if (tapped('wipe')) {
-        if (wipeArmed) {
+        if (wipeArmed === 'hangar') {
           clearHangar(game);
           applyMods(game);
           wipeArmed = false;
           wipeNote = 'HANGAR CLEARED';
         } else {
-          wipeArmed = true;
+          wipeArmed = 'hangar';
+          wipeNote = '';
+        }
+        sfxUi();
+      } else if (tapped('wipeall')) {
+        if (wipeArmed === 'all') {
+          fullReset();
+          wipeArmed = false;
+          wipeNote = 'EVERYTHING CLEARED — NEW PILOT';
+        } else {
+          wipeArmed = 'all';
           wipeNote = '';
         }
         sfxUi();

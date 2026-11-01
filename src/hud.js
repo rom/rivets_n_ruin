@@ -1342,13 +1342,20 @@ export function drawSettings(ctx, game, sel, wipe = {}) {
 
   text(ctx, 'UP / DOWN  CHOOSE      LEFT / RIGHT  CHANGE',
     cx, SETTINGS_LAYOUT.footer, COL.hudText, FONT, 'center');
-  if (wipe.wipeArmed) {
+  // Two irreversible keys, so each names exactly what it takes before
+  // it takes it. The full reset says "new pilot" because that is the
+  // part people do not expect: the account goes with it, or the best
+  // score syncs back down and the reset was not one.
+  if (wipe.wipeArmed === 'hangar') {
     text(ctx, 'K AGAIN TO CLEAR THE HANGAR — COINS AND MODS, GONE',
+      cx, SETTINGS_LAYOUT.footer2, COL.danger, FONT, 'center');
+  } else if (wipe.wipeArmed === 'all') {
+    text(ctx, 'F AGAIN TO START OVER — COINS, MODS, BEST, HULLS, PILOT',
       cx, SETTINGS_LAYOUT.footer2, COL.danger, FONT, 'center');
   } else if (wipe.wipeNote) {
     text(ctx, wipe.wipeNote, cx, SETTINGS_LAYOUT.footer2, COL.warmHi, FONT, 'center');
   } else {
-    text(ctx, 'R  RESET SETTINGS     K  CLEAR HANGAR     O / ESC  BACK',
+    text(ctx, 'R  SETTINGS    K  HANGAR    F  START OVER    O / ESC  BACK',
       cx, SETTINGS_LAYOUT.footer2, COL.hudText, FONT, 'center');
   }
 }

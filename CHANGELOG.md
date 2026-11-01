@@ -14,6 +14,15 @@ worth learning from.
 
 ### Added
 
+- **`F` twice on the settings screen starts you over**: the hangar, the
+  best score, the furthest hull reached, and the pilot with them. The
+  account has to go too, or the best score syncs straight back down and
+  the button is a lie. Runs already on the leaderboard stay there, under
+  the old name, because that board is a public record; signing back in
+  gets the old pilot and everything of theirs back. Settings, mute and
+  the chosen tune survive — those are how somebody likes to play, not
+  what they have achieved.
+
 - **Accounts keep your hangar.** Coins, gold bars and bought mods are
   held against the account as well as the browser, so they survive a new
   machine or a cleared cache. The two copies are reconciled at sign-in by
