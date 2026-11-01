@@ -23,7 +23,14 @@ func TestSnapshotIsNotServed(t *testing.T) {
 	write(t, data+".runs", `[{"id":"r1"}]`)
 	write(t, data+".tmp", `{"half":"written"}`)
 
-	srv := httptest.NewServer(hideData(root, data, http.FileServer(http.Dir(root))))
+	// Through ResolvePaths, the way the server builds it: passing the
+	// file alone would leave the directory listing readable, and the
+	// server does not pass the file alone.
+	paths, err := ResolvePaths(root, filepath.Dir(data), filepath.Dir(data), "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(hideData(root, paths.Hidden(), http.FileServer(http.Dir(root))))
 	defer srv.Close()
 
 	// Everything the snapshot touches, and the spellings that reach it by
@@ -66,7 +73,7 @@ func TestDataOutsideRootBlocksNothing(t *testing.T) {
 	data := filepath.Join(base, "state", "rnr.json")
 	write(t, data, `{"pass":{}}`)
 
-	srv := httptest.NewServer(hideData(root, data, http.FileServer(http.Dir(root))))
+	srv := httptest.NewServer(hideData(root, []string{data}, http.FileServer(http.Dir(root))))
 	defer srv.Close()
 
 	// A directory called data/ in the web root is an ordinary directory
@@ -89,7 +96,7 @@ func TestSnapshotInTheRootItself(t *testing.T) {
 	write(t, data+".runs", `[{"id":"r1"}]`)
 	write(t, data+".tmp", `{"half":"written"}`)
 
-	srv := httptest.NewServer(hideData(root, data, http.FileServer(http.Dir(root))))
+	srv := httptest.NewServer(hideData(root, []string{data}, http.FileServer(http.Dir(root))))
 	defer srv.Close()
 
 	// The sidecars matter most here. Everywhere else they happen to sit

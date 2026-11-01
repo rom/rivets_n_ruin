@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"io"
 	"log/slog"
 	"mime"
 	"net"
@@ -28,9 +29,16 @@ import (
 
 func main() {
 	var (
-		addr       = flag.String("addr", "127.0.0.1:8000", "address to listen on (use 0.0.0.0:8000 to expose on your network)")
-		dir        = flag.String("dir", ".", "directory of static game files")
-		data       = flag.String("data", "data/rnr.json", "path to the persistence snapshot")
+		addr  = flag.String("addr", "127.0.0.1:8000", "address to listen on (use 0.0.0.0:8000 to expose on your network)")
+		dir   = flag.String("dir", ".", "directory of static game files; never written to, may be read-only")
+		state = flag.String("state", "",
+			"directory for leaderboards, open runs and the log (default \"state\")")
+		accounts = flag.String("accounts", "",
+			"directory for the account database, which holds password and token hashes (default \"accounts\")")
+		data = flag.String("data", "",
+			"DEPRECATED single-file snapshot; use -state and -accounts")
+		logFile    = flag.Bool("log-file", false, "also write the log to <state>/server.log")
+		hsts       = flag.Bool("hsts", false, "send Strict-Transport-Security on HTTPS requests; only for a TLS deployment")
 		saveTick   = flag.Duration("save-interval", 30*time.Second, "how often to snapshot to disk")
 		verbose    = flag.Bool("v", false, "log every request, including static assets")
 		rlRate     = flag.Float64("rate-limit", 10, "sustained API requests per second, per IP")
@@ -47,14 +55,39 @@ func main() {
 	level := slog.LevelInfo
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	root, err := filepath.Abs(*dir)
+	paths, err := ResolvePaths(*dir, *state, *accounts, *data, *logFile)
 	if err != nil {
-		log.Error("resolving -dir", "err", err)
+		log.Error("resolving paths", "err", err)
 		os.Exit(1)
 	}
+	root := paths.Content
 	if _, err := os.Stat(filepath.Join(root, "index.html")); err != nil {
 		log.Error("no index.html found — run this from the repository root", "dir", root)
 		os.Exit(1)
+	}
+	if err := paths.EnsureDirs(); err != nil {
+		log.Error("preparing writable directories", "err", err)
+		os.Exit(1)
+	}
+	if loose := paths.LoosePerms(); len(loose) > 0 {
+		log.Warn("a writable directory is readable by other users on this machine; "+
+			"the account database in it holds password hashes",
+			"dirs", strings.Join(loose, " "), "fix", "chmod 700")
+	}
+	if *data != "" {
+		log.Warn("-data is deprecated: the account database and the leaderboards are now "+
+			"separate so they can have separate permissions and separate disks",
+			"use", "-state <dir> -accounts <dir>")
+	}
+	if *logFile {
+		f, err := os.OpenFile(paths.Log, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
+		if err != nil {
+			log.Error("opening the log file", "path", paths.Log, "err", err)
+			os.Exit(1)
+		}
+		defer f.Close()
+		log = slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, f),
+			&slog.HandlerOptions{Level: level}))
 	}
 
 	// A browser rejects an ES module served as anything but a JavaScript MIME
@@ -74,11 +107,20 @@ func main() {
 	}
 
 	st := store.NewMemory()
-	if err := st.Load(*data); err != nil {
-		log.Error("loading snapshot", "path", *data, "err", err)
-		os.Exit(1)
+	// Two files, or one when -data put them in the same place. Loading
+	// the same path twice would append every score to itself.
+	load := []string{paths.AccountsFile}
+	if paths.Scores != paths.AccountsFile {
+		load = append(load, paths.Scores)
 	}
-	log.Info("store loaded", "path", *data, "stats", st.Stats())
+	for _, f := range load {
+		if err := st.Load(f); err != nil {
+			log.Error("loading snapshot", "path", f, "err", err)
+			os.Exit(1)
+		}
+	}
+	log.Info("store loaded", "accounts", paths.AccountsFile, "scores", paths.Scores,
+		"stats", st.Stats())
 
 	apiSrv := api.New(st, log, api.Config{RateLimitPerSec: *rlRate, RateBurst: *rlBurst, RequireRuns: *strictRuns})
 
@@ -87,7 +129,7 @@ func main() {
 	// and the player's submission came back "no such run" — the same
 	// failure as the leaderboard rejecting an honest score, and just as
 	// invisible from where they are sitting.
-	runPath := *data + ".runs"
+	runPath := paths.Runs
 	if n, err := apiSrv.LoadRuns(runPath); err != nil {
 		log.Warn("could not restore open runs", "path", runPath, "err", err)
 	} else if n > 0 {
@@ -97,18 +139,19 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiSrv.Routes())
 	mux.Handle("/", noCache(staticLog(log, *verbose,
-		hideData(root, *data, http.FileServer(http.Dir(root))))))
+		hideData(root, paths.Hidden(), http.FileServer(http.Dir(root))))))
 
-	// Say it out loud when the two defaults overlap. The path is blocked
-	// either way, but an operator who believes the snapshot is reachable
-	// over HTTP may have built something around that, and an operator who
-	// has not thought about it at all should be told where the file is.
-	if dataAbs := absOr(*data); strings.HasPrefix(dataAbs, root+string(filepath.Separator)) {
-		log.Warn("the snapshot sits inside the web root; it is blocked from being served, "+
-			"but it holds password hashes and belongs outside",
-			"data", dataAbs, "root", root, "fix", "-data /var/lib/rivets-n-ruin/rnr.json")
+	// Say it out loud when anything the server writes sits inside the
+	// directory it serves. Those paths are blocked either way, but an
+	// operator who has not thought about it should be told where their
+	// password hashes are, and the default layout does exactly this.
+	if len(paths.Exposed) > 0 {
+		log.Warn("the server writes inside its own web root; those paths are blocked from "+
+			"being served, but the account database holds password hashes and belongs outside",
+			"paths", strings.Join(paths.Exposed, " "), "root", root,
+			"fix", "-state /var/lib/rivets-n-ruin -accounts /var/lib/rivets-n-ruin/private")
 	}
-	handler := secureHeaders(mux)
+	handler := secureHeaders(*hsts, mux)
 
 	srv := &http.Server{
 		Addr:              *addr,
@@ -135,10 +178,13 @@ func main() {
 		log.Error("bad -harden value", "err", err)
 		os.Exit(1)
 	}
+	// Content read-only, and only the two state roots writable. The
+	// server has no reason to write into the directory it serves, and
+	// saying so here is what lets that directory be a read-only mount.
 	report, err := hardening.Apply(hardening.Config{
 		Mode:          mode,
 		ReadDirs:      []string{root},
-		ReadWriteDirs: []string{filepath.Dir(absOr(*data))},
+		ReadWriteDirs: paths.WritableDirs(),
 		AllowRoot:     *allowRoot,
 	})
 	if err != nil {
@@ -157,11 +203,8 @@ func main() {
 		for {
 			select {
 			case <-t.C:
-				if err := st.Snapshot(*data); err != nil {
+				if err := saveAll(st, apiSrv, paths); err != nil {
 					log.Error("snapshot failed", "err", err)
-				}
-				if err := apiSrv.SaveRuns(runPath); err != nil {
-					log.Error("run snapshot failed", "err", err)
 				}
 			case <-stopSaver:
 				return
@@ -170,7 +213,8 @@ func main() {
 	}()
 
 	go func() {
-		log.Info("rivets 'n ruin up", "addr", "http://"+*addr, "static", root, "data", *data)
+		log.Info("rivets 'n ruin up", "addr", "http://"+*addr, "static", root,
+			"state", paths.State, "accounts", paths.Accounts)
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("serve", "err", err)
 			os.Exit(1)
@@ -189,16 +233,33 @@ func main() {
 		log.Error("graceful shutdown failed", "err", err)
 	}
 	// Final snapshot after connections are drained, so nothing in flight is lost.
-	if err := st.Snapshot(*data); err != nil {
+	if err := saveAll(st, apiSrv, paths); err != nil {
 		log.Error("final snapshot failed", "err", err)
 		os.Exit(1)
 	}
-	// Open runs too. A restart is the common case this exists for, and a
-	// restart that drops them is exactly as bad as a crash that does.
-	if err := apiSrv.SaveRuns(runPath); err != nil {
-		log.Error("final run snapshot failed", "err", err)
+	log.Info("saved", "accounts", paths.AccountsFile, "scores", paths.Scores, "runs", paths.Runs)
+}
+
+// Writes everything that has to survive a restart.
+//
+// Three files, or two when -data has put the accounts and the scores in
+// the same one. Open runs are in the third because a restart is the
+// common case they exist for, and a restart that drops them is exactly
+// as bad as a crash that does.
+func saveAll(st *store.Memory, srv *api.Server, paths Paths) error {
+	if paths.Scores == paths.AccountsFile {
+		if err := st.Snapshot(paths.AccountsFile); err != nil {
+			return err
+		}
+	} else {
+		if err := st.SnapshotPart(paths.AccountsFile, store.Accounts); err != nil {
+			return err
+		}
+		if err := st.SnapshotPart(paths.Scores, store.Public); err != nil {
+			return err
+		}
 	}
-	log.Info("saved", "path", *data, "runs", runPath)
+	return srv.SaveRuns(paths.Runs)
 }
 
 // noCache stops the browser serving a stale module after an edit, which is
@@ -222,28 +283,57 @@ func absOr(p string) string {
 // frame, and nothing may frame it. The game has no third-party anything
 // — no fonts, no analytics, no CDN — so the policy has no exceptions,
 // which is the only kind of policy worth writing.
-func secureHeaders(next http.Handler) http.Handler {
-	const csp = "default-src 'self'; " +
-		"script-src 'self'; " +
-		"style-src 'self' 'unsafe-inline'; " +
-		"img-src 'self' data:; " +
-		"connect-src 'self'; " +
-		"object-src 'none'; " +
-		"base-uri 'none'; " +
-		"form-action 'none'; " +
-		"frame-ancestors 'none'"
+// The policy, as one string so it can be asserted on in a test rather
+// than reconstructed by one.
+//
+// No 'unsafe-inline' anywhere. style-src used to carry it because the
+// page had a <style> block; the CSS moved to src/game.css precisely so
+// this line could say 'self' and mean it. A policy with an exception in
+// it protects against the attacks nobody was going to try.
+const CSP = "default-src 'self'; " +
+	"script-src 'self'; " +
+	"style-src 'self'; " +
+	"img-src 'self' data:; " +
+	"connect-src 'self'; " +
+	"font-src 'self'; " +
+	"media-src 'self'; " +
+	"worker-src 'self'; " +
+	"manifest-src 'self'; " +
+	"object-src 'none'; " +
+	"base-uri 'none'; " +
+	"form-action 'none'; " +
+	"frame-ancestors 'none'; " +
+	"upgrade-insecure-requests"
+
+func secureHeaders(hsts bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
-		h.Set("Content-Security-Policy", csp)
+		h.Set("Content-Security-Policy", CSP)
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
+		// frame-ancestors above is the modern spelling and this is the
+		// one older browsers obey. Both, because the cost is 24 bytes.
+		h.Set("X-Frame-Options", "DENY")
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
 		h.Set("Cross-Origin-Resource-Policy", "same-origin")
+		// The game loads nothing from anywhere else, so it can say so
+		// and get a properly isolated context for free.
+		h.Set("Cross-Origin-Embedder-Policy", "require-corp")
+		h.Set("X-DNS-Prefetch-Control", "off")
 		// Nothing here wants a camera, a microphone, a location or a
 		// payment handler, and saying so stops a future bug asking.
 		h.Set("Permissions-Policy",
 			"accelerometer=(), camera=(), geolocation=(), gyroscope=(), "+
-				"magnetometer=(), microphone=(), payment=(), usb=()")
+				"magnetometer=(), microphone=(), payment=(), usb=(), "+
+				"interest-cohort=(), browsing-topics=()")
+		// Behind a flag, and only ever sent over TLS. Announced on a
+		// plain-HTTP origin it is ignored by the browser, but a
+		// misconfigured proxy that terminates TLS and forwards cleartext
+		// would make it stick — and an HSTS pin you did not mean is a
+		// site you cannot reach.
+		if hsts && (r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https") {
+			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
 		next.ServeHTTP(w, r)
 	})
 }

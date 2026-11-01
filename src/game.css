@@ -1,0 +1,22 @@
+/* Page chrome for the canvas. Lives in a file rather than a <style>
+   block so the content security policy can say style-src 'self' and
+   mean it: an inline block forces 'unsafe-inline', which re-opens the
+   whole class of injected-style attacks the policy exists to close. */
+
+:root { color-scheme: dark; }
+html, body { margin: 0; height: 100%; background: #05070a; overflow: hidden; }
+body {
+  display: grid; place-items: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+canvas {
+  display: block;
+  image-rendering: auto;
+  background: #05070a;
+  box-shadow: 0 0 0 1px #1b212b, 0 24px 80px -20px #000;
+}
+#hint {
+  position: fixed; bottom: 10px; left: 0; right: 0;
+  text-align: center; color: #39424e; font-size: 11px; letter-spacing: .09em;
+  pointer-events: none; user-select: none;
+}

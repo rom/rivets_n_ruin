@@ -1639,11 +1639,41 @@ Rather than pretend, the macOS build does what it can and says the rest
 is unavailable — the answer there is a launchd job with its own user and
 a `sandbox-exec` profile.
 
-**The snapshot is never served**, however the paths are arranged. The
-two defaults overlap: `-dir` is `.` and `-data` is `data/rnr.json`
-underneath it, so running the release tree the way it tells you to —
-`./rnr-server` from inside it — puts the snapshot in the directory the
-static handler serves. It used to come back on request:
+### Three roots
+
+The server reads one directory and writes two, and they are separate
+because they have three different jobs:
+
+| flag | holds | wants |
+| --- | --- | --- |
+| `-dir` | the game: HTML, modules, CSS, images | **never written to.** A read-only mount, a squashfs, a container layer — the server neither needs nor asks for a write bit |
+| `-state` | leaderboards, open runs, the log | writable. Losing it costs a scoreboard |
+| `-accounts` | password hashes, token hashes | writable, and nowhere near the other two |
+
+```bash
+./rnr-server \
+  -dir      /usr/local/share/rivets-n-ruin \
+  -state    /var/lib/rivets/state \
+  -accounts /var/lib/rivets/accounts
+```
+
+Both writable roots are created `0700`. An existing directory keeps
+whatever mode it has — silently re-permissioning somebody else's
+directory is not this program's business — but the server says so at
+startup if either is readable by other users on the machine.
+
+Nothing holding a credential belongs in the directory whose entire job
+is to be published, which is why `-accounts` is its own root and not a
+subdirectory of `-state`. On Linux the sandbox is told the same thing:
+content read-only, the other two read-write, everything else invisible.
+
+`-data` still works and names a single combined file, for a deployment
+that predates the split. It warns, and nothing else changes.
+
+**None of it is ever served**, however the paths are arranged. The
+defaults overlap — `-dir` is `.`, so running the release tree the way it
+tells you to puts both writable roots inside the directory being served.
+That used to come back on request:
 
 ```
 GET /data/rnr.json -> 200
@@ -1652,18 +1682,40 @@ GET /data/rnr.json -> 200
 That file holds every player's PBKDF2 password hash and the token table.
 Writing it `0600` in a `0700` directory is worth doing and does nothing
 about this, because the web server is its owner. The static handler now
-refuses the snapshot, anything sharing its name (`.runs`, and the
-temporary file a save leaves behind) and the directory holding it,
-answering `404` rather than `403` so a refusal does not confirm the file
-is there. Found by extracting the 1.0.0 archive, running it as
-documented, and fetching the path the startup log prints.
+refuses every path the server writes — the files, their `.runs` and
+`.tmp` siblings, and the directories holding them — answering `404`
+rather than `403`, so a refusal does not confirm the file is there.
+Found by extracting the 1.0.0 archive, running it as documented, and
+fetching the path the startup log prints.
 
-Keeping it outside the web root is still the right arrangement, and the
-server says so at startup when it is not:
+### Headers
 
-```bash
-./rnr-server -data /var/lib/rivets-n-ruin/rnr.json
-```
+Every response carries the same set:
+
+| header | value |
+| --- | --- |
+| `Content-Security-Policy` | `default-src 'self'` and one source for everything else; `object-src`, `base-uri`, `form-action` and `frame-ancestors` all `'none'` |
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `DENY` — the older spelling of `frame-ancestors`, for 24 bytes |
+| `Referrer-Policy` | `no-referrer` |
+| `Cross-Origin-Opener-Policy` | `same-origin` |
+| `Cross-Origin-Resource-Policy` | `same-origin` |
+| `Cross-Origin-Embedder-Policy` | `require-corp` |
+| `X-DNS-Prefetch-Control` | `off` |
+| `Permissions-Policy` | camera, microphone, geolocation, payment, USB, sensors and the ad-topics APIs all denied |
+
+There is no `'unsafe-inline'` anywhere in the policy. `style-src` used to
+carry it because the page had a `<style>` block; the CSS moved to
+`src/game.css` precisely so that line could say `'self'` and mean it. A
+policy with an exception in it protects against the attacks nobody was
+going to try — so a test fails if an inline `<style>` or a `style=""`
+attribute ever comes back.
+
+`Strict-Transport-Security` is behind `-hsts` and is only ever sent on a
+request that arrived over TLS. Announced on a plain-HTTP origin it is
+ignored by browsers, but a proxy that terminates TLS and forwards
+cleartext would make it stick — and an HSTS pin you did not mean is a
+site you cannot reach.
 
 **systemd** users get `deploy/rivets-n-ruin.service`, which does the
 things a process cannot do to itself: an empty `CapabilityBoundingSet`,

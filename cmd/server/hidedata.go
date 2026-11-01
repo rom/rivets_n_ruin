@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Keep the persistence snapshot off the web.
+// Keep everything the server writes off the web.
 //
 // The static handler serves the whole directory it is pointed at, and the
 // defaults point both things at the same place: -dir is "." and -data is
@@ -27,13 +27,25 @@ import (
 // the one almost everyone will use, and a server that exits on first run
 // teaches people to pass flags they have not thought about. This way the
 // default is simply safe.
-func hideData(root, dataPath string, next http.Handler) http.Handler {
-	data := absOr(dataPath)
-	dir := filepath.Dir(data)
+func hideData(root string, paths []string, next http.Handler) http.Handler {
 	rootAbs := absOr(root)
+	hide := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		abs := absOr(p)
+		// Hiding the web root would hide the game. Anyone who points
+		// -state at -dir gets the individual files hidden instead,
+		// which the caller arranges by listing them.
+		if abs == rootAbs {
+			continue
+		}
+		hide = append(hide, abs)
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if hidden(rootAbs, data, dir, r.URL.Path) {
+		if hidden(rootAbs, hide, r.URL.Path) {
 			// 404 and not 403: a refusal confirms the file is there,
 			// and there is nothing to be gained by confirming it.
 			http.NotFound(w, r)
@@ -43,28 +55,23 @@ func hideData(root, dataPath string, next http.Handler) http.Handler {
 	})
 }
 
-// Whether a request path resolves to the snapshot, something sitting
-// beside it, or the directory holding it.
-func hidden(root, data, dir, urlPath string) bool {
+// Whether a request resolves to anything the server writes.
+func hidden(root string, hide []string, urlPath string) bool {
 	// The same resolution net/http does before it opens anything, so the
 	// decision is made about the file that would actually be served
 	// rather than about the spelling of the request.
 	target := filepath.Join(root, filepath.Clean("/"+urlPath))
 
-	// The snapshot, and the files that live alongside it under the same
-	// stem: rnr.json.runs is written next to rnr.json, and a save in
-	// progress leaves a temporary file there too. Matching on the prefix
-	// covers all of them, including ones added later.
-	if target == data || strings.HasPrefix(target, data) {
-		return true
-	}
-
-	// The directory itself, so a listing cannot even show the snapshot is
-	// there. Skipped when the snapshot sits directly in the web root,
-	// because then "the directory holding it" is the game.
-	if dir != root &&
-		(target == dir || strings.HasPrefix(target, dir+string(filepath.Separator))) {
-		return true
+	for _, h := range hide {
+		// Equal, inside it, or sharing its stem. The last one matters:
+		// runs.json sits beside scores.json and a save in progress
+		// leaves a .tmp next to both, so matching the prefix covers
+		// the sidecars without anyone having to list them.
+		if target == h ||
+			strings.HasPrefix(target, h+string(filepath.Separator)) ||
+			strings.HasPrefix(target, h) {
+			return true
+		}
 	}
 	return false
 }
