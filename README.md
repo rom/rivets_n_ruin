@@ -1609,6 +1609,32 @@ Rather than pretend, the macOS build does what it can and says the rest
 is unavailable — the answer there is a launchd job with its own user and
 a `sandbox-exec` profile.
 
+**The snapshot is never served**, however the paths are arranged. The
+two defaults overlap: `-dir` is `.` and `-data` is `data/rnr.json`
+underneath it, so running the release tree the way it tells you to —
+`./rnr-server` from inside it — puts the snapshot in the directory the
+static handler serves. It used to come back on request:
+
+```
+GET /data/rnr.json -> 200
+```
+
+That file holds every player's PBKDF2 password hash and the token table.
+Writing it `0600` in a `0700` directory is worth doing and does nothing
+about this, because the web server is its owner. The static handler now
+refuses the snapshot, anything sharing its name (`.runs`, and the
+temporary file a save leaves behind) and the directory holding it,
+answering `404` rather than `403` so a refusal does not confirm the file
+is there. Found by extracting the 1.0.0 archive, running it as
+documented, and fetching the path the startup log prints.
+
+Keeping it outside the web root is still the right arrangement, and the
+server says so at startup when it is not:
+
+```bash
+./rnr-server -data /var/lib/rivets-n-ruin/rnr.json
+```
+
 **systemd** users get `deploy/rivets-n-ruin.service`, which does the
 things a process cannot do to itself: an empty `CapabilityBoundingSet`,
 `ProtectSystem=strict` with one `ReadWritePaths`, `PrivateUsers`,
