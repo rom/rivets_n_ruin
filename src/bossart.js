@@ -425,9 +425,103 @@ function drawPart(ctx, b, part) {
   ctx.restore();
 }
 
+// ------------------------------------------------------------------- tiers
+//
+// Twenty-five bosses, eight ships. Through the first sixteen hulls every
+// silhouette comes round exactly twice, and drawn identically the second
+// one reads as the first turning up again under a new name — reported
+// from play as "all bosses occur twice".
+//
+// A tier does not redraw the ship. It refits it: a livery wash over the
+// whole hull, heavier rim plating, and hardware that changes the
+// outline. Same class, visibly a different vessel, and the eight bodies
+// below did not have to be written four times.
+
+// No tinting pass. The obvious implementation washes the livery over the
+// hull with source-atop, which clips to pixels already drawn — and the
+// world canvas is opaque, so that tints a 300x300 block of dreadnought
+// instead of the boss. The colour is carried by hardware drawn on top of
+// the body instead, which costs nothing and cannot bleed.
+const TIERS = [
+  null,
+  { rim: '#6f8fd0', lamp: '#b4d2ff', spines: 3, bands: 1, name: 'line' },
+  { rim: '#c4663c', lamp: '#ffb089', spines: 5, bands: 2, name: 'siege' },
+  { rim: '#9a6fd0', lamp: '#d9b4ff', spines: 7, bands: 3, name: 'flag' },
+];
+
+export const tierOf = (b) => TIERS[Math.min(b.tier || 0, TIERS.length - 1)];
+
+// Dorsal and ventral hardware: ribs along the spine that break the
+// silhouette, so a tier reads before the colour does — which matters for
+// anyone who cannot rely on the colour.
+function tierSpines(ctx, b, tier) {
+  const n = tier.spines;
+  // Rooted well inside the hull and run outward past it. Started at the
+  // outer edge instead, they read as marks floating near the ship rather
+  // than hardware bolted to it — which is what the first version looked
+  // like, and the bodies are different enough sizes that there is no one
+  // edge to start from.
+  const root = 18;
+  const reach = 52 + n * 4;
+  ctx.strokeStyle = tier.rim;
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const k = n === 1 ? 0.5 : i / (n - 1);
+    const x = -34 + k * 68;
+    const lean = Math.sin(b.t * 0.8 + i) * 2;
+    ctx.moveTo(x, -root);
+    ctx.lineTo(x + lean, -reach);
+    ctx.moveTo(x, root);
+    ctx.lineTo(x + lean, reach);
+  }
+  ctx.stroke();
+  ctx.lineCap = 'butt';
+
+  // Caps, so the ribs end in something rather than fraying out.
+  ctx.fillStyle = tier.lamp;
+  for (let i = 0; i < n; i++) {
+    const k = n === 1 ? 0.5 : i / (n - 1);
+    const x = Math.round(-34 + k * 68);
+    ctx.fillRect(x - 3, -reach - 4, 6, 5);
+    ctx.fillRect(x - 3, reach - 1, 6, 5);
+  }
+}
+
+// Refit plating across the hull, in the tier's colour: bands bolted over
+// whatever the body underneath happens to be, with a marker lamp on each.
+function tierBands(ctx, b, tier) {
+  for (let i = 0; i < tier.bands; i++) {
+    const x = -26 + i * 22;
+    ctx.fillStyle = tier.rim;
+    ctx.fillRect(x - 3, -40, 6, 80);
+    ctx.fillStyle = '#1b2029';
+    ctx.fillRect(x - 1, -38, 2, 76);
+    rivets(ctx, x, -36, x, 36, 5, tier.lamp);
+  }
+  // One lamp, pulsing, so the tier is legible even on a dark hull.
+  const pulse = 0.55 + 0.45 * Math.sin(b.t * 3 + tier.spines);
+  ctx.globalAlpha = pulse;
+  ctx.fillStyle = tier.lamp;
+  ctx.fillRect(-4, -52, 8, 5);
+  ctx.globalAlpha = 1;
+}
+
 export function drawBossBody(ctx, b) {
   const draw = BODIES[b.kind] || BODIES.riveter;
+  const tier = tierOf(b);
+
+  if (!tier) { draw(ctx, b, b.flash > 0); return; }
+
+  // Spines behind the hull, plating in front of it, so the refit reads as
+  // bolted onto a ship rather than floating near one.
+  tierSpines(ctx, b, tier);
   draw(ctx, b, b.flash > 0);
+  // Not on a hit frame: the white flash is damage feedback and the
+  // plating drawn over it would punch holes in the one frame that has to
+  // read instantly.
+  if (b.flash <= 0) tierBands(ctx, b, tier);
 }
 
 export function drawBossParts(ctx, b) {
