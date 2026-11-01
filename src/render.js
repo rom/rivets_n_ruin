@@ -1,6 +1,5 @@
 import {
-  VIEW_W, VIEW_H, FIELD_H, FIELD_TOP, FIELD_BOT, SHIP, COL, clamp,
-} from './config.js';
+  VIEW_W, VIEW_H, FIELD_H, FIELD_TOP, FIELD_BOT, SHIP, COL, clamp, LANCE} from './config.js';
 import { interceptors } from './enemies.js';
 import { playerShots, enemyShots } from './projectiles.js';
 import { particles, lights } from './particles.js';
@@ -148,6 +147,7 @@ export function drawWorld(ctx, game) {
   drawPad(ctx, camX, camY);
   if (game.player.alive) {
     if (setting('aimLine')) drawFiringLine(ctx, game, camX);
+    drawLance(ctx, game, camX);
     drawDrones(ctx, game.player);
     drawShip(ctx, game.player, game.seqTilt, game);
   }
@@ -821,6 +821,35 @@ function drawFoes(ctx) {
       ctx.globalAlpha = 1;
       ctx.restore();
     }
+
+    // The chainer's tether is the thing that hurts, so it is drawn big
+    // and hot: a hazard on the hull, not a decoration on the ship. Drawn
+    // from the end that holds the link, and only while both ends live —
+    // which is the visual that tells you killing either one drops it.
+    if (f.kind === 'chainer' && f.holdsLink && f.mate
+      && !f.mate.dead && f.mate.hp > 0 && !f.dead) {
+      const m = f.mate;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = '#ffd24a';
+      ctx.globalAlpha = 0.22;
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.moveTo(f.x, f.y); ctx.lineTo(m.x, m.y); ctx.stroke();
+      ctx.globalAlpha = 0.9;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(f.x, f.y); ctx.lineTo(m.x, m.y); ctx.stroke();
+      ctx.restore();
+      // beads running along it, so it reads as live rather than as a wire
+      const n = 5;
+      for (let k = 0; k < n; k++) {
+        const u = ((k / n) + (f.t * 0.6) % 1) % 1;
+        ctx.fillStyle = '#fff3c4';
+        ctx.fillRect(Math.round(f.x + (m.x - f.x) * u) - 1,
+          Math.round(f.y + (m.y - f.y) * u) - 1, 2, 2);
+      }
+    }
   }
 }
 
@@ -837,6 +866,37 @@ function drawFiringLine(ctx, game, camX) {
   const to = p.facing > 0 ? camX + VIEW_W : camX;
   ctx.fillRect(Math.min(from, to), Math.round(p.y), Math.abs(to - from), 1);
   ctx.restore();
+}
+
+// SPINAL LANCE: a charge glow that says it is nearly ready, then the
+// beam itself. The charge matters more than the beam — the beam is over
+// in a fifth of a second, and the decision it asks for is where to be
+// pointing before that.
+function drawLance(ctx, game, camX) {
+  const p = game.player;
+  if (!p.lance) return;
+  const to = p.facing > 0 ? camX + VIEW_W : camX;
+  const from = p.x + p.facing * 16;
+  const x = Math.min(from, to);
+  const w = Math.abs(to - from);
+
+  if (p.lanceFire > 0) {
+    const k = p.lanceFire / LANCE.dwell;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = LANCE.colour;
+    ctx.globalAlpha = 0.25 * k;
+    ctx.fillRect(x, p.y - LANCE.halfHeight, w, LANCE.halfHeight * 2);
+    ctx.globalAlpha = 0.9 * k;
+    ctx.fillRect(x, p.y - 1, w, 2);
+    ctx.restore();
+  } else if (p.lanceCharge > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.10 + 0.25 * p.lanceCharge;
+    ctx.fillStyle = LANCE.colour;
+    ctx.fillRect(x, p.y - 1, w * p.lanceCharge, 1);
+    ctx.restore();
+  }
 }
 
 function drawShots(ctx) {

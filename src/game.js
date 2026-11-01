@@ -1,8 +1,7 @@
 import {
   SHIP, INTERCEPTOR, LEVELS, LEVEL_UP, PICKUP, BOSS, HULL_BONUS, APRON, VIEW_W,
-  FIELD_TOP, FIELD_BOT, clamp,
-} from './config.js';
-import { diff, award } from './score.js';
+  FIELD_TOP, FIELD_BOT, clamp, LANCE} from './config.js';
+import { diff, award, hurt } from './score.js';
 import { get as setting, set as setSetting, onChange as onSetting } from './settings.js';
 import { buildLevel, obstaclesNear } from './level.js';
 import { updateGates, hitGate, gateHit, liveGates } from './gates.js';
@@ -32,7 +31,7 @@ import { tapped, anyTapped, endFrame } from './input.js';
 import {
   sfxCoin, sfxGoldBar, sfxCoffin, sfxTreasure,
   sfxPickup, sfxPlayerHit, sfxHullAbsorb, sfxDeath, sfxRespawn,
-  sfxArrival, sfxComplete, sfxGameOver, sfxUi,
+  sfxArrival, sfxComplete, sfxGameOver, sfxUi, sfxShoot,
 } from './sfx.js';
 import { setIntensity, setTune } from './music.js';
 import { submitRun, heartbeat, serverBest, startRun } from './net.js';
@@ -125,6 +124,7 @@ export function makeGame(modSpec = null) {
   // hangar.js for why those two and nothing else.
   const owned = loadHangar(Object.keys(MODS));
   game.coins = owned.coins;
+  game.bars = owned.bars;
   game.mods = owned.mods;
   applyMods(game);
 
@@ -180,7 +180,11 @@ function reset(game) {
   // Everything else a shop sells is the run's loadout and does reset; see
   // resetShop and hangar.js.
   game.coffins = 0;
-  game.bars = 0;
+  // game.bars is the purse now, not a run counter: the armourer prices
+  // its permanent systems in gold bars, so banking them has to work the
+  // way banking coins does. The per-run and per-hull counts the bonus and
+  // the end screen read are in haul and hullHaul, where they already were.
+
   game.treasures = 0;
   game.haul = freshHaul();
   game.hullHaul = freshHaul();
@@ -224,7 +228,12 @@ function applyRefit(game) {
   p.refits = (p.refits || 0) + 1;
   const every = (n) => n > 0 && p.refits % n === 0;
 
-  p.shieldMax += LEVEL_UP.shieldMax;
+  // Bounded: see SHIP.shieldCap. The bonus the upgrades have added rides
+  // on top of the cap rather than being squeezed out by it, or a healthbar
+  // collected before the cap would silently stop counting after it.
+  const refitFloor = Math.min(SHIP.shieldCap, p.shieldMax - (p.shieldBonus || 0)
+    + LEVEL_UP.shieldMax);
+  p.shieldMax = refitFloor + (p.shieldBonus || 0);
   p.shield = p.shieldMax;
   p.accelMul *= LEVEL_UP.accelMul;
   p.maxVXBonus += LEVEL_UP.maxVXAdd;
@@ -506,6 +515,7 @@ export function update(game, dt) {
   updateBoss(game, dt);
   // Missiles need something to chase; gather it once rather than per missile.
   collectSeekable(game);
+  fireLance(game);
   updateOrdnance(game, dt);
   applyBlasts(game);
   updatePickups(game, dt);
@@ -599,6 +609,66 @@ export function syncBest(game) {
     game.best = remote;
     try { localStorage.setItem('rnr.best', String(remote)); } catch { /* private mode */ }
   }
+}
+
+// SPINAL LANCE: while the beam is out, everything in the line ahead
+// takes damage. Applied here rather than in player.js because this is
+// where the collision pairs live, and a weapon that reaches across the
+// screen is a collision pair like any other.
+//
+// Damage is applied once per firing, not once per frame: the beam dwells
+// for a fifth of a second, and at 120Hz that is twenty-six frames of
+// contact. Billing all of them would make it the strongest thing in the
+// game by two orders of magnitude.
+function fireLance(game) {
+  const p = game.player;
+  if (!p.alive || !p.lance || p.lanceFire <= 0 || p.lanceSpent) return;
+  p.lanceSpent = true;
+  const tier = Math.min(p.lance, LANCE.damage.length) - 1;
+  const dmg = LANCE.damage[tier];
+  const reach = VIEW_W;
+  const x0 = p.x;
+
+  for (let i = foes.count - 1; i >= 0; i--) {
+    const f = foes.items[i];
+    const dx = (f.x - x0) * p.facing;
+    if (dx > 0 && dx < reach && Math.abs(f.y - p.y) < LANCE.halfHeight + 10) {
+      hitFoe(game, i, f.x, f.y, dmg);
+    }
+  }
+  for (let i = interceptors.count - 1; i >= 0; i--) {
+    const e = interceptors.items[i];
+    const dx = (e.x - x0) * p.facing;
+    if (dx > 0 && dx < reach && Math.abs(e.y - p.y) < LANCE.halfHeight + 8) {
+      hitInterceptor(game, i, dmg);
+    }
+  }
+  for (const t of game.level.turrets) {
+    const dx = (t.x - x0) * p.facing;
+    if (!t.dead && dx > 0 && dx < reach && Math.abs(t.y - p.y) < LANCE.halfHeight + 10) {
+      hitTurret(game, t, dmg);
+    }
+  }
+  // hitMinis takes a point, not a line, so the line test is here and the
+  // hit goes through the same single-target call everything else uses.
+  for (let i = minis.count - 1; i >= 0; i--) {
+    const m = minis.items[i];
+    if (m.dead) continue;
+    const dx = (m.x - x0) * p.facing;
+    if (dx > 0 && dx < reach && Math.abs(m.y - p.y) < LANCE.halfHeight + m.spec.r) {
+      hitMini(game, i, m.x, m.y, dmg);
+    }
+  }
+  const b = game.boss;
+  if (b && !b.dead && b.entry <= 0) {
+    for (const pt of b.parts) {
+      const dx = (b.x + pt.dx - x0) * p.facing;
+      if (!pt.dead && dx > 0 && dx < reach && Math.abs(b.y + pt.dy - p.y) < LANCE.halfHeight + 14) {
+        hitBoss(game, b, b.x + pt.dx, b.y + pt.dy, dmg);
+      }
+    }
+  }
+  sfxShoot();
 }
 
 // Everything a homing missile may lock onto, rebuilt each frame. Turrets
@@ -854,7 +924,7 @@ function collide(game) {
     if (Math.abs(s.x - p.x) < hw + s.r && Math.abs(s.y - p.y) < hh + s.r) {
       enemyShots.kill(i);
       if (p.invuln <= 0) {
-        p.shield -= s.dmg * diff().enemyDmg;
+        hurt(game, s.dmg);
         game.flash = Math.max(game.flash, 0.3);
         kick(game.cam, 3.5);
         sparks(s.x, s.y, -Math.sign(s.vx), 0, 6, '#e8434f');
@@ -878,7 +948,7 @@ function collide(game) {
     if (Math.abs(e.x - p.x) < hw + 9 && Math.abs(e.y - p.y) < hh + 6) {
       hitInterceptor(game, j, 99);
       if (p.invuln <= 0) {
-        p.shield -= INTERCEPTOR.ramDamage;
+        hurt(game, INTERCEPTOR.ramDamage);
         game.flash = Math.max(game.flash, 0.45);
         kick(game.cam, 7);
         sfxPlayerHit();

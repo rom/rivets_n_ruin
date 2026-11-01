@@ -403,3 +403,29 @@ func TestValidatorIsSelfConsistent(t *testing.T) {
 		t.Errorf("a maximal legitimate campaign is rejected: %v", err)
 	}
 }
+
+// The hardening report is carried on /api/stats so the state of the
+// sandbox is observable on a running server rather than assumed.
+func TestStatsCarriesTheHardeningReport(t *testing.T) {
+	s := New(store.NewMemory(), slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config{RateLimitPerSec: 1e6, RateBurst: 1e6})
+	s.SetHardening(map[string]any{"mode": "auto", "applied": []string{"landlock"}})
+	h := s.Routes()
+
+	_, body := do(t, h, "GET", "/api/stats", "", nil)
+	got, _ := body["hardening"].(map[string]any)
+	if got == nil {
+		t.Fatalf("no hardening in /api/stats: %v", body)
+	}
+	if got["mode"] != "auto" {
+		t.Errorf("mode came back as %v", got["mode"])
+	}
+	// ...and a server that was never told stays quiet rather than
+	// reporting an empty object as if it had been hardened.
+	quiet := New(store.NewMemory(), slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Config{RateLimitPerSec: 1e6, RateBurst: 1e6}).Routes()
+	_, body2 := do(t, quiet, "GET", "/api/stats", "", nil)
+	if _, present := body2["hardening"]; present {
+		t.Error("a server with no hardening report still advertised one")
+	}
+}

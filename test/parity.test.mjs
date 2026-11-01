@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  LEVELS, BOSSES, SHIP, LEVEL_UP, PICKUP, HULL_BONUS, DIFFICULTY,
+  LEVELS, BOSSES, SHIP, LEVEL_UP, PICKUP, HULL_BONUS, DIFFICULTY, ARMORY,
 } from '../src/config.js';
 import { MODS } from '../src/shop.js';
 import { BODY_KINDS } from '../src/foeart.js';
@@ -224,7 +224,7 @@ test('the README attacker table lists every attacker, from the right hull', () =
   // ...and claims the right number of them.
   const count = Object.keys(real).length;
   const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
-    'eight', 'nine', 'ten', 'eleven', 'twelve'];
+    'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen'];
   assert.ok(new RegExp(`${words[count]} more types`, 'i').test(readme),
     `the README does not say "${words[count]} more types" for ${count} attackers`);
 });
@@ -248,6 +248,8 @@ test('the README refit table matches the grant schedule', () => {
     assert.ok(readme.includes(`${label} +${value}`),
       `the README does not say "${label} +${value}"`);
   }
+  assert.ok(readme.includes(`ceiling of ${SHIP.shieldCap}`),
+    `the README does not state the shield ceiling of ${SHIP.shieldCap}`);
 });
 
 test('the README crate table matches the drop weights', () => {
@@ -301,7 +303,7 @@ test('the README layout block names every client module', () => {
 
 test('the README counts the art it claims to count', () => {
   const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
-    'eight', 'nine', 'ten'];
+    'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen'];
   assert.ok(readme.includes(`the ${words[BODY_KINDS.length]} attacker bodies`),
     `the layout block miscounts the ${BODY_KINDS.length} attacker bodies`);
   const minis = Object.keys(MINI_KINDS).length;
@@ -370,4 +372,46 @@ test('every README image resolves, and none is orphaned', () => {
   const orphans = [...onDisk].filter((f) => f.endsWith('.png')
     && !used.has(f) && !/icon|apple-touch/.test(f));
   assert.deepEqual(orphans, [], `images nobody references: ${orphans.join(', ')}`);
+});
+
+// The armourer's gate table is a fourth copy of the mod list, and the one
+// most likely to drift: it is prose about numbers that live in shop.js.
+test('the README gate table matches when each mod is offered', () => {
+  for (const [id, m] of Object.entries(MODS)) {
+    const name = m.name;
+    assert.ok(readme.includes(name), `the README never mentions ${name}`);
+  }
+  // The row of hull numbers under the heading, in the same order as the
+  // names above it.
+  const block = readme.slice(readme.indexOf('### What it sells, and when'));
+  const header = block.match(/\| \| ([^\n]*REAR BATTERY[^\n]*)\|/);
+  assert.ok(header, 'the gate table is gone from the README');
+  const names = header[1].split('|').map((c) => c.trim()).filter(Boolean);
+  const nums = block.match(/\| from hull \| ([^\n]+)\|/);
+  assert.ok(nums, 'the gate table has no hull row');
+  const hulls = nums[1].split('|').map((c) => Number(c.trim()));
+  assert.equal(names.length, hulls.length,
+    `${names.length} mods named against ${hulls.length} hull numbers`);
+
+  const byName = new Map(Object.values(MODS).map((m) => [m.name, (m.from || 0) + 1]));
+  names.forEach((cell, i) => {
+    for (const n of cell.split(',').map((x) => x.trim())) {
+      assert.ok(byName.has(n), `the gate table names "${n}", which is not a mod`);
+      assert.equal(hulls[i], byName.get(n),
+        `the README says ${n} arrives on hull ${hulls[i]}, shop.js says ${byName.get(n)}`);
+    }
+  });
+  // ...and no mod is missing from it.
+  const listed = new Set(names.flatMap((c) => c.split(',').map((x) => x.trim())));
+  const missing = [...byName.keys()].filter((n) => !listed.has(n));
+  assert.deepEqual(missing, [], `mods missing from the gate table: ${missing.join(', ')}`);
+});
+
+test('the README armory table lists every ordnance kind', () => {
+  for (const kind of ARMORY.order) {
+    const name = ARMORY[kind].name;
+    const pretty = name.charAt(0) + name.slice(1).toLowerCase();
+    assert.ok(readme.includes(`**${pretty}**`) || readme.includes(`**${name}**`),
+      `the armory table does not list ${name}`);
+  }
 });

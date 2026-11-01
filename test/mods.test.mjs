@@ -4,11 +4,17 @@ import assert from 'node:assert/strict';
 import {
   MODS, ITEMS, rows, buy, applyMods, resetShop, modLevel, modName, maxLevel,
 } from '../src/shop.js';
-import { PICKUP } from '../src/config.js';
+import { PICKUP, LEVELS } from '../src/config.js';
 
-function fakeGame(coins = 100000) {
+// levelIndex matters now: mods arrive as the campaign does, so a game on
+// the first hull is not offered most of them. The default is the last
+// hull, which is where every row exists, and the gating has its own
+// tests below.
+function fakeGame(coins = 100000, levelIndex = LEVELS.length - 1) {
   const game = {
     coins,
+    bars: 500,
+    levelIndex,
     mods: {},
     bought: {},
     player: {

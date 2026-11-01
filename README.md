@@ -36,7 +36,7 @@ backend API, so there is one thing to run and no CORS to think about.
 | `make icons` | Regenerate the favicon |
 
 Server flags: `-addr`, `-dir`, `-data`, `-save-interval`, `-rate-limit`,
-`-rate-burst`, `-require-runs`, `-v`.
+`-rate-burst`, `-require-runs`, `-harden`, `-allow-root`, `-v`.
 
 > **A note on `node --check`.** It reports success on a `.js` file containing ES
 > module syntax even when the file is genuinely unparseable — it only diagnoses
@@ -285,8 +285,8 @@ and checks exactly that.
 
 ## Attackers
 
-Interceptors teach dodging and turrets teach prioritising. Eight more types
-arrive hull by hull, each asking a different question:
+Interceptors teach dodging and turrets teach prioritising.
+Eleven more types arrive hull by hull, each asking a different question:
 
 ![The attacker roster](docs/attackers.png)
 
@@ -309,13 +309,27 @@ one accent colour per kind carried on the trim and the running lights.
 | **Splitter** | PYRITE | Breaks into two halves that keep coming. Killing it early is cheaper |
 | **Leech** | WOLFRAM | Clamps onto the hull and drains the shield until you shoot it off |
 | **Bomber** | FERRUM | Seeds mines along its path, so ignoring it costs you the lane |
+| **Mirror** | WOLFRAM | Sends most of what you shoot at it straight back. Stop shooting and go round |
+| **Chainer** | FERRUM | Spawns as a linked pair with a live tether between them. Go round, or break a link |
+| **Carrier** | AURUM | Launches weavers. Spend the time on the source, or keep swatting what it sends |
 
 Which hull fields which is `LEVELS[].foes` in `src/config.js`. ARGENTUM
 fields none of them — the first hull is turrets and interceptors only.
 
+The last three are deliberately not more of the same. A mirror makes
+shooting the wrong move, which is the one thing a shoot 'em up never asks
+of you — it sends about three quarters of what you fire at it back down
+the line it came from, and the answer is to stop and flank. A chainer is
+not a ship at all but a pair and the wire between them: flying through
+the wire hurts, and killing either end drops it. A carrier poses the
+oldest question in the genre honestly — the source or the swarm — and
+caps its own brood so leaving it alone fills the screen rather than the
+pool.
+
 A leech is the only attacker that does not simply have to be avoided: once
 it is on, it is on, and it costs 11 shield a second until something takes
-it off. Two things about that were wrong and are now fixed:
+it off — for up to four and a half seconds, after which it has had its
+fill and lets go. Two things about that were wrong and are now fixed:
 
 - **It drained at five times its stated rate.** An attached leech sits at
   the ship's own position, which also tripped the generic ram check: 18
@@ -368,11 +382,24 @@ keeps spawning while you do.
 | **BULWARK** | PYRITE | Radial walls and a lot of health. Expensive to stop for |
 | **HARRIER PACK** | FERRUM | Fast, and calls escorts while it runs rings around you |
 
-They are drawn in the same register as the bosses: the hauler is a pirate
-freighter with a bridge tower and colours off the stern, the cutter is an
-alien ray with one eye and an arc strung between two horns, the bulwark is
-an assault drum with its barrels out, and the harrier is a raider with a
-crew canopy and a pennant.
+They are drawn from the attackers' own vocabulary rather than in a style of
+their own — a dark hull with one lit upper surface, panel lines and rivets
+so there is a scale to read them against, engine bells on their own clock,
+and a canopy or an eye so you can tell which way one is looking. A miniboss
+should be the same navy at four times the size, so `src/miniart.js` imports
+those parts from `src/foeart.js` instead of defining a second rivet.
+
+They were drawn inline out of bare polygons and quadratic curves, which is
+what made them read as diagrams of ships rather than ships: a slab with a
+notch is a *shape*. What they have now is interior structure, because they
+are big enough to show it. The hauler is a pirate ore freighter with four
+open hoppers that visibly empty as it comes apart, a bridge tower with lit
+windows and colours off the stern. The cutter is an alien ray with a
+chitin shell, veins that dim as it is hurt and an arc strung between two
+horns. The bulwark is a siege barge in visible layers of plate with a
+projector ring turning amidships. The harrier is a swept interceptor with
+launch rails under the wings — loaded while it still has escorts to send —
+and four engines it plainly does not need.
 
 One appears on ARGENTUM and a fourth is added by AURUM, spread evenly along
 the hull and always clear of both aprons and of the boss arena. If a boss is
@@ -491,7 +518,7 @@ difficulty curve is met with a power curve rather than just better flying:
 
 | | When |
 | --- | --- |
-| Shield maximum +45 | every hull |
+| Shield maximum +15, to a ceiling of 400 | every hull |
 | Acceleration ×1.09 | every hull |
 | Top speed +24 horizontal, +18 vertical | every hull |
 | Muzzle velocity +50 | every hull |
@@ -534,9 +561,26 @@ past a plateau rather than wait it out.
   now, derived as the camera swing plus half a screen, so changing your
   mind cannot be the thing that loses something.
 - **12,000 to 41,150px of procedurally generated hull**, deterministic from
-  each hull's own `seed` in `LEVELS`. Six obstacle patterns — a clear run,
-  a tower hanging from either surface, a pincer, a free-standing pillar and a
-  stepped stack — each guaranteed to leave a navigable corridor.
+  each hull's own `seed` in `LEVELS`. Eleven obstacle patterns, each
+  guaranteed to leave a corridor the ship fits through:
+
+  | Pattern | What it asks |
+  | --- | --- |
+  | clear run | nothing — the breathing room that makes the dense parts read |
+  | tower, from either surface | go over or under |
+  | pincer | a forced corridor, the signature Uridium threat |
+  | free-standing pillar | pass above or below |
+  | **chicane** | be somewhere specific *next* — alternating stubs, flown as a weave |
+  | **comb** | a row of fingers with clear water between: run the open side, or thread the teeth for what is parked in them |
+  | **double slot** | two walls in series with their gaps at different heights, so you commit twice |
+  | **islands** | nothing in particular — several lines work, and picking one is the whole of it |
+  | narrows | the corridor itself closes down and opens again; has to be flown rather than dodged |
+  | stepped stack | climbs, so you commit to a line early |
+
+  The narrowest gap anywhere in the twenty-five hulls is 74px against a
+  ship that is 9 tall, and a test walks every hull at 7px intervals to
+  keep it that way — an unflyable hull is not a hard hull, it is a broken
+  one.
 - **Hull collision** with per-axis resolution and speed-proportional shield
   damage. A full-speed slam costs ~16 of 100; brushing it costs ~3.
 - Pre-rendered riveted plating, cast shadows, hazard chevrons on every surface
@@ -557,19 +601,25 @@ than the thing the end-of-hull bonus is paid on.
 
 The cannon is a line. Each of these answers a situation a line handles badly,
 so carrying them is a decision rather than a strict upgrade. `X` fires the
-selected one, `C` cycles, `1`–`3` select directly. All three are finite, and
-all three are lost with a ship.
+selected one, `C` cycles, `1`–`3` select the first three directly. All of
+them are finite, and all are lost with a ship.
 
 | | Behaviour | Answers |
 | --- | --- | --- |
 | **Bomb** | Dropped in place, detonates after a fuse, large blast | Something that got close |
 | **Grenade** | Lobbed on an arc, bounces off hull and girders | Something behind cover |
 | **Missile** | Acquires the nearest target and steers at it | Something you cannot line up on |
+| **Spike mine** | Left where you are, arms after half a second, then waits | Something that is *following* you |
+
+The mine is the only one you place before you need it, and the only one
+that does not care which way the nose is pointing. It goes off on contact
+once armed, and burns out on its own after fourteen seconds so a hull does
+not slowly fill with forgotten ones.
 
 Blasts ignore a warder's frontal plate, which is rather the point of them.
-You are not immune to your own ordnance, though you take far less of it.
-
-Crates drop from kills; each refills a couple of rounds, up to a cap.
+You are not immune to your own ordnance, though you take far less of it —
+and that, unlike enemy fire, is not scaled by the hull: it is a mistake
+with a fixed price.
 
 ## The wreck window
 
@@ -635,15 +685,45 @@ of the screen, which changes how a hull is flown as much as any gun does.
 | **CELL REGENERATOR** | I · II | The shield comes back on its own, at 2.5 then 6 a second |
 | **POINT DEFENCE** | — | Shoots down enemy missiles that get close. Automatic |
 | **SIEGE FRAME** | — | +60 maximum shield and heavier plating, at the cost of acceleration |
+| **REAR BATTERY** | — | A gun on the tail. Fires itself, backwards, and only when something is actually back there |
+| **SPINAL LANCE** | I–II | A beam down the centreline on its own clock, straight through everything in the line |
 | **ABLATIVE PLATING** | — | Hull scrapes cost 40% less shield |
 | **AUTOLOADER** | — | Ordnance reloads 35% faster |
 | **AFTERBURNER** | — | +40 top speed, quicker acceleration |
 | **RECLAIMER** | — | Keep one gun level when a ship is lost |
 
-The last five change what the ship *is* rather than what a number on it
+The systems change what the ship *is* rather than what a number on it
 says, and every one is visible on the hull: drones fly in formation and
 fire when you fire, point defence draws a line to the missile it just
-took, the siege frame is plated, the extra mounts are extra barrels.
+took, the siege frame is plated, the extra mounts are extra barrels, the
+tail gun answers what is behind you and the lance draws a line through
+the hull ahead of you.
+
+### What it sells, and when, and in what
+
+Two things decide whether a row is on the shelf.
+
+**Mods arrive as the campaign does.** Each one states the hull it first
+appears on, and before that it simply is not listed. Everything being
+available on the first hull made the armourer a wall of twenty-odd rows
+in front of a pilot with four hundred coins, and buried the interesting
+question — which two of these can I afford — under rows that were not
+really offers. A row you cannot buy, for a reason the shop will not
+state, is worse than no row.
+
+| | LODESTONE, SCAVENGER RIG | AFTERBURNER | ABLATIVE PLATING | AUTOLOADER | RECLAIMER | EXTRA MOUNT | REAR BATTERY | CELL REGENERATOR | DRONE WING | POINT DEFENCE | SIEGE FRAME | SPINAL LANCE |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| from hull | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 10 | 12 | 14 | 17 |
+
+**The permanent systems cost gold bars.** Coins accumulate by playing;
+a bar is a thing you went out of your way for, and pricing the systems in
+them makes fitting one a decision about how you flew rather than about how
+long. The shop shows both purses and marks a bar price with a `b`, because
+`15` next to `2600` reads as a bargain rather than as a different
+currency, which is exactly backwards.
+
+Bars are banked with the coins — see *What survives a closed tab* — so a
+system is something you save toward across runs.
 
 The two that change how the whole hull is flown — how far loot reaches and
 what it is worth — go up to three tiers, each dearer than the last
@@ -878,15 +958,24 @@ cannot sit on the hull-clear screen forever.
 
 ## Help
 
-`H` or `/` from anywhere that is not flight. Three pages, and all three are
-here because a page you cannot see is a page nobody checks:
+`H` or `/` from anywhere that is not flight, arrows to page. Four pages,
+and all four are here because a page you cannot see is a page nobody
+checks:
 
 | | |
 | --- | --- |
 | ![Controls](docs/help-1.png) | ![The run](docs/help-2.png) |
 | **CONTROLS** | **THE RUN** — what a hull asks of you, what pays and what costs |
-| ![Reading the screen](docs/help-3.png) | |
-| **READING THE SCREEN** — the radar legend, the loot legend, and the tells that say what is about to shoot you | |
+| ![Reading the screen](docs/help-3.png) | ![Flying it well](docs/help-4.png) |
+| **READING THE SCREEN** — the radar legend, the loot legend, and the tells that say what is about to shoot you | **FLYING IT WELL** — what the hull rewards once you can stay alive |
+
+The fourth page is strategy rather than reference, which is the thing a
+control list cannot tell you: that reverse thrust brakes before it flips,
+that the lane between the surfaces is the calm part, that killing a warden
+first makes its neighbours killable at all, that you are *allowed* to
+outrun a miniboss and should count the cost of stopping, that two mods at
+tier III change a run where five at tier I do not, and that a hull which
+is killing you is a hull whose sweep bonus is not worth it.
 
 A test measures each page against the layout and fails if one runs past
 its own footer, checks every row fits its column, and asserts that every
@@ -1267,37 +1356,84 @@ registering the same name while holding that token.
 
 ### Anti-cheat — what it does and does not do
 
-**You cannot verify a score from a client you do not control.** The only real
-verification is re-simulating the run server-side from an input trace, and
-this does not do that: the game is several thousand lines of JavaScript and
-the server is Go.
+**You cannot verify a score from a client you do not control.** The only
+real verification is re-simulating the run server-side from an input
+trace, and this does not do that: the game is several thousand lines of
+JavaScript and the server is Go. Everything below makes cheating *cost*
+something; none of it makes a score *proof* of anything.
 
-What it does is make cheating cost something, removing the easy routes in
-roughly ascending order of effort to defeat:
+Worth being clear about who is being stopped. In rough order of effort:
 
-1. **A run must be opened before it can be submitted**, and each run can be
-   submitted once. Replaying a captured request stops working.
-2. **The server times the run itself.** A claimed 400-second campaign that
-   took eleven seconds of wall clock is rejected. This is the check the
-   physics bounds cannot make, because they only see the numbers the client
-   chose to send.
-3. **The submission is signed** with a secret issued at run start and never
-   present in the page source. Forging a request means reading it out of a
-   live session rather than reading the code.
-4. **Progress heartbeats are counted.** A long run that never once reported
-   being in flight did not happen the way it claims.
+| | Who | Stopped by |
+| --- | --- | --- |
+| 1 | Someone who finds `/api/scores` in devtools and posts a number | the run requirement, the signature |
+| 2 | Someone who replays a captured submission | single-use runs |
+| 3 | Someone who posts an absurd number from a real run | the plausibility bounds |
+| 4 | Someone who fast-forwards the client clock | the server's own wall clock |
+| 5 | Someone who opens a run and submits without playing | the heartbeat count |
+| 6 | **Someone who modifies the client, plays slowly, and lies a little at the end** | **nothing here** |
 
-Someone running a modified client can still defeat all four by playing
-slowly and lying at the end. That is inherent. The honest position is to say
-so rather than imply the leaderboard proves anything.
+Six is inherent, and the honest position is to say so rather than imply
+the board proves anything.
 
-`-require-runs` rejects any score not tied to an opened run, which closes the
-simplest bypass of all: not opening one. It is off by default so an older
-client keeps working.
+#### The five layers
 
-A rejected submission deliberately does **not** burn the run — a client bug
-or a mangled request would otherwise void a legitimate campaign, and without
-the secret an attacker gains nothing by retrying.
+**A run must be opened first, and spent once.** `POST /api/runs/start`
+mints a run id and a 256-bit secret. A submission naming a run that was
+already submitted gets `409`. Replaying a captured request therefore stops
+working after the first time.
+
+**The submission is signed.** The secret never appears in the page source
+— it is handed out per run over the wire and imported straight into
+WebCrypto as a non-extractable HMAC key. The client signs
+`runId|points|timeSec|levels`, with the time to exactly two decimals,
+and `sign()` in `internal/api/runs.go` reproduces that byte for byte;
+anything else is `422`. Forging a submission means reading the secret out
+of a live session rather than reading the code.
+
+**The server times the run itself.** It knows when the run was opened, so
+a claimed 400-second campaign that took eleven seconds of wall clock is
+rejected regardless of what the client says its clock did. There is
+**25 seconds** of slack for pauses, loading and a sloppy frame clock. This
+is the check the physics bounds cannot make, because they only ever see
+the numbers the client chose to send.
+
+**Progress heartbeats are counted.** `POST /api/presence` is sent while
+flying anyway, for the "who is out there" list; a run longer than a
+minute is expected to have reported in at least **three times a minute**.
+A long run that never once said it was in flight did not happen the way
+it claims. The rate is deliberately forgiving — a dropped connection
+should not void a campaign.
+
+**The numbers themselves have to be physically possible.** That is
+`internal/validate`, and it has its own section below, because getting it
+*wrong* has cost real players real runs twice.
+
+#### Everything else about the surface
+
+- A run expires after **8 hours**, swept every 15 minutes, and open runs
+  are snapshotted so a restart does not void the campaigns in flight.
+- Every `/api/` route is behind a per-IP token bucket, **10 requests a
+  second sustained with a burst of 40** by default (`-rate-limit`,
+  `-rate-burst`).
+- Bodies are capped and unknown JSON fields are rejected outright, so a
+  submission cannot smuggle a field a later version might read.
+- `-require-runs` rejects any score not tied to an opened run, closing the
+  simplest bypass of all: not opening one. Off by default so an older
+  client keeps working.
+- A rejected submission deliberately does **not** burn the run. A client
+  bug or a mangled request would otherwise void a legitimate campaign, and
+  without the secret an attacker gains nothing by retrying.
+- Tokens are 256-bit and the server stores only their SHA-256, so the
+  database does not contain anything that logs anyone in.
+
+#### What would actually prove a score
+
+Submitting the input trace and re-simulating it server-side against the
+same seed. The game is deterministic from each hull's `seed` and a fixed
+120Hz timestep, so it is achievable — it needs the simulation to exist in
+Go as well as JavaScript, or the server to run the JavaScript. It is a
+separate piece of work and it is not done here.
 
 ### Legacy identity
 
@@ -1377,6 +1513,92 @@ input trace and re-simulating it server-side against the same seed — the game 
 deterministic from each hull's `seed` and a fixed timestep, so that is achievable, but
 it is a separate piece of work and it is not done here.
 
+### Hardening the process
+
+The server is small and stdlib-only, which is a good start and is not the
+same as being hard to misuse. If a bug in it ever does let someone read a
+path or run something, what decides how bad that is, is what the kernel
+will still let the process do. `internal/hardening` narrows that, from
+the inside, after the snapshot is loaded and the port is bound and before
+the first request is answered.
+
+| | Linux | macOS | elsewhere |
+| --- | --- | --- | --- |
+| Refuse/announce uid 0 | yes | yes | yes |
+| `no_new_privs` | yes | — | — |
+| Non-dumpable (no core files holding tokens) | yes | `RLIMIT_CORE=0` | — |
+| Filesystem sandbox | **Landlock**, ABI 1–7 | — | — |
+
+On Linux the process ends up able to read the web root and read/write the
+data directory, **and nothing else on the filesystem**, whatever bug it
+has. Everything is raw syscalls rather than `golang.org/x/sys`, because
+having no dependencies at all is worth more here than the convenience.
+
+Three rules make this safe to have on by default:
+
+- **Degrade, do not fail.** An old kernel, a container without the
+  syscall, a platform with none of it — the server starts and says what
+  it could not apply. `-harden=require` inverts that. `-harden=off` turns
+  it off, which is what you want under `strace`.
+- **Apply late.** Landlock is irreversible, so it goes on after
+  everything that needs a wide view of the filesystem has finished.
+- **Say what happened.** `/api/stats` carries the report and the startup
+  log prints it. A hardening layer whose state nobody can see gets
+  quietly broken and stays broken.
+
+**`CGO_ENABLED=0` is not optional here**, and the Makefile sets it.
+`no_new_privs` and `landlock_restrict_self` are *per-thread* flags in the
+kernel, and the Go runtime spreads goroutines over however many OS
+threads it likes; the stdlib's `syscall.AllThreadsSyscall` exists for
+exactly this and is refused outright in any binary that links cgo — which
+a default `go build` on Linux does, through `net`'s resolver. A cgo build
+therefore reports the sandbox as unavailable rather than pretending.
+
+This was not reasoned out in advance. The first version used plain
+`syscall.Syscall`, reported success every time, and failed its own check
+against `/proc/self/status` about one run in four, because whichever
+thread the check landed on was usually not the one that had been
+hardened. A sandbox that reports success and protects an eighth of the
+process is worse than none, because nobody goes looking.
+
+The tests are the point of the whole section: `Apply()` returning
+`landlock ABI 7 (2 paths)` proves three syscalls returned zero, not that
+anything is denied. Landlock is irreversible, so the real check runs in a
+subprocess and tries to open a file on each side of the boundary — one
+test that the outside is denied, and one that the server can still reach
+its own directories, because a sandbox that breaks the server is not a
+hardened server.
+
+**macOS** has a sandbox and this binary cannot reach it: it is a C API,
+the public entry point is long deprecated, and getting at it means cgo.
+Rather than pretend, the macOS build does what it can and says the rest
+is unavailable — the answer there is a launchd job with its own user and
+a `sandbox-exec` profile.
+
+**systemd** users get `deploy/rivets-n-ruin.service`, which does the
+things a process cannot do to itself: an empty `CapabilityBoundingSet`,
+`ProtectSystem=strict` with one `ReadWritePaths`, `PrivateUsers`,
+`MemoryDenyWriteExecute`, `RestrictAddressFamilies=AF_INET AF_INET6`, and
+`SystemCallFilter=@system-service` minus the dangerous sets. It uses
+systemd's own named syscall sets deliberately: a hand-written allowlist
+against a moving Go runtime is how people end up with a filter they
+switch off the first time it breaks.
+
+**SELinux and AppArmor** need no special support — the process writes one
+directory and reads one, which is exactly the shape a confinement policy
+wants. Point the policy at `-data`'s directory and the static root.
+
+### HTTP headers
+
+Every response carries a content security policy with no exceptions in
+it, because the game has no third-party anything: no fonts, no analytics,
+no CDN. `default-src 'self'`, no inline script, `object-src 'none'`,
+`base-uri 'none'`, `form-action 'none'`, `frame-ancestors 'none'`, plus
+`X-Content-Type-Options`, `Referrer-Policy: no-referrer`, both
+`Cross-Origin-*-Policy` headers, and a `Permissions-Policy` that turns
+off the camera, microphone, geolocation and payment handlers nothing here
+will ever want.
+
 ### Storage
 
 An in-process store behind a `Store` interface, snapshotted to JSON (written to
@@ -1416,10 +1638,11 @@ src/level.js      hull generation, collision buckets, pre-rendered plating
 src/player.js     ship physics, flip, firing, hull collision response
 src/enemies.js    turret and interceptor behaviour
 src/miniboss.js   the four mid-hull minibosses
+src/miniart.js    their bodies, from the same vocabulary as the attackers
 src/boss.js       boss arenas, phases, weak points and the wreck window
 src/bossart.js    the eight boss shapes and their destructible sections
 src/gates.js      laser gates: the wall, the emitter, and what breaks it
-src/foeart.js     the nine attacker bodies
+src/foeart.js     the twelve attacker bodies
 src/shipart.js    the player's ship, as its marks, guns, load and mods make it
 src/demo.js       the attract-mode pilot
 src/score.js      difficulty multipliers, and the one way points are awarded
@@ -1453,11 +1676,13 @@ tools/make_gallery.cjs  regenerates the README images from the live game
 tools/make_icons.py     regenerates favicon.ico
 test/             the client tests; see below
 .github/workflows/ci.yml
+deploy/rivets-n-ruin.service  a hardened systemd unit
 cmd/server/       the binary: static files + API
 internal/model/   shared types
 internal/store/   Store interface, in-memory implementation, snapshots
 internal/api/     routing, handlers, auth, rate limiting
 internal/validate/ score plausibility, derived from the game's physics
+internal/hardening/ asks the OS to take privileges away at startup
 ```
 
 `make smoke` flies the game in a headless browser and reads pixels, asserting
@@ -1511,7 +1736,9 @@ about which:
 The thresholds live in `tools/coverage.sh`, not in the workflow, so
 `make coverage-gate` gives the same answer on your machine as it does in
 CI. A gate you cannot reproduce locally is one people learn to ignore, and
-then to delete. The floor is **85%** each side; `cmd/server` is excluded
+then to delete. The floor is **86%** Go and **89%** JavaScript — a notch
+under where each actually sits, because a floor set to the exact current
+number turns every unrelated refactor into a coverage failure; `cmd/server` is excluded
 because it is `main()` — flag parsing, a listener and a signal handler —
 and the only way to cover it is to start the process, which `make smoke`
 already does end to end. Counting it would mean either a permanently
@@ -1689,7 +1916,7 @@ playthrough does not settle.
   deaf is eight chances to be wrong.
 - **The graphics are unjudged.** Bloom strength, foreground density and the
   surface shading are tuned by eye against screenshots, not by playing.
-  Bloom in particular is easy to overdo. The eight boss shapes, the nine
+  Bloom in particular is easy to overdo. The eight boss shapes, the eleven
   attackers, the twenty-five ship marks and the radar strip were all drawn
   against still frames; whether any of it reads at speed with forty bullets
   on screen is a different question, and a fully fitted Mark VIII is

@@ -14,9 +14,20 @@ import { saveHangar } from './hangar.js';
 // worth — go up to three, each dearer than the last. A pilot who commits to
 // one of those is choosing it over everything else in the shop, which is
 // the only reason a tier list is more interesting than a bigger number.
+//
+// `from` is the hull index a mod first appears on. Everything being
+// available on the first hull made the armourer a wall of twenty-odd rows
+// on a pilot with four hundred coins, and the interesting choice — which
+// two of these can I afford — was buried under rows that were not really
+// offers. They arrive as the campaign does.
+//
+// `currency` is 'coins' unless it says otherwise. The four systems cost
+// GOLD BARS: they are the permanent ones, and a bar is a thing you went
+// out of your way for rather than a number that accumulates by playing.
 export const MODS = {
   magnet: {
     name: 'LODESTONE',
+    from: 0,
     tiers: [
       { cost: 900, mul: 2, blurb: 'Pickups and coins pull toward you from twice as far.' },
       { cost: 1800, mul: 3.2, blurb: 'Reach again by half. Loot comes to you across a gap.' },
@@ -25,14 +36,17 @@ export const MODS = {
   },
   plating: {
     name: 'ABLATIVE PLATING',
+    from: 2,
     tiers: [{ cost: 1200, blurb: 'Hull scrapes cost 40% less shield.' }],
   },
   autoloader: {
     name: 'AUTOLOADER',
+    from: 3,
     tiers: [{ cost: 1000, blurb: 'Ordnance reloads 35% faster.' }],
   },
   scavenger: {
     name: 'SCAVENGER RIG',
+    from: 0,
     tiers: [
       { cost: 1100, mul: 2, blurb: 'Coins, bars, coffins and treasure are worth double.' },
       { cost: 2200, mul: 2.8, blurb: 'Everything you pick up is worth 2.8x.' },
@@ -41,10 +55,12 @@ export const MODS = {
   },
   afterburner: {
     name: 'AFTERBURNER',
+    from: 1,
     tiers: [{ cost: 1300, blurb: '+40 top speed and quicker acceleration.' }],
   },
   reclaimer: {
     name: 'RECLAIMER',
+    from: 4,
     tiers: [{ cost: 1500, blurb: 'Keep one gun level when a ship is lost.' }],
   },
 
@@ -52,6 +68,7 @@ export const MODS = {
   // what a number on it says, and every one of them is visible on the hull.
   mount: {
     name: 'EXTRA MOUNT',
+    from: 5,
     tiers: [
       { cost: 1600, blurb: 'A third gun rail: one more level of speed and spread.' },
       { cost: 3000, blurb: 'A fourth rail. The nose is mostly gun now.' },
@@ -59,25 +76,47 @@ export const MODS = {
   },
   drone: {
     name: 'DRONE WING',
+    from: 9,
+    currency: 'bars',
     tiers: [
-      { cost: 1900, blurb: 'An escort drone flies your wing and fires with you.' },
-      { cost: 3400, blurb: 'A second drone, on the other wing.' },
+      { cost: 10, blurb: 'An escort drone flies your wing and fires with you.' },
+      { cost: 18, blurb: 'A second drone, on the other wing.' },
     ],
   },
   pointdef: {
     name: 'POINT DEFENCE',
-    tiers: [{ cost: 2100, blurb: 'Shoots down enemy missiles that get close. Automatic.' }],
+    from: 11,
+    currency: 'bars',
+    tiers: [{ cost: 12, blurb: 'Shoots down enemy missiles that get close. Automatic.' }],
   },
   regen: {
     name: 'CELL REGENERATOR',
+    from: 7,
+    currency: 'bars',
     tiers: [
-      { cost: 1700, mul: 2.5, blurb: 'The shield comes back on its own, slowly.' },
-      { cost: 3200, mul: 6, blurb: 'The shield comes back on its own, rather less slowly.' },
+      { cost: 8, mul: 2.5, blurb: 'The shield comes back on its own, slowly.' },
+      { cost: 16, mul: 6, blurb: 'The shield comes back on its own, rather less slowly.' },
+    ],
+  },
+  rear: {
+    name: 'REAR BATTERY',
+    from: 6,
+    tiers: [{ cost: 1800, blurb: 'A gun on the tail. Fires behind you, on its own.' }],
+  },
+  lance: {
+    name: 'SPINAL LANCE',
+    from: 16,
+    currency: 'bars',
+    tiers: [
+      { cost: 14, blurb: 'A beam down the centreline that goes through things.' },
+      { cost: 26, blurb: 'A heavier beam, more often.' },
     ],
   },
   siege: {
     name: 'SIEGE FRAME',
-    tiers: [{ cost: 2600, blurb: '+60 maximum shield and heavier plating. Slower to turn.' }],
+    from: 13,
+    currency: 'bars',
+    tiers: [{ cost: 15, blurb: '+60 maximum shield and heavier plating. Slower to turn.' }],
   },
 };
 
@@ -156,6 +195,11 @@ export const ITEMS = [
     can: (p) => p.ammo.grenade < ARMORY.grenade.maxAmmo,
     buy: (p) => { p.ammo.grenade = Math.min(ARMORY.grenade.maxAmmo, p.ammo.grenade + 3); },
     owned: (p) => p.ammo.grenade, max: () => ARMORY.grenade.maxAmmo },
+  { id: 'mine', name: 'SPIKE MINES', base: 200, step: 45,
+    blurb: 'Two more mines. Dropped behind you, for whatever is following.',
+    can: (p) => p.ammo.mine < ARMORY.mine.maxAmmo,
+    buy: (p) => { p.ammo.mine = Math.min(ARMORY.mine.maxAmmo, p.ammo.mine + 2); },
+    owned: (p) => p.ammo.mine, max: () => ARMORY.mine.maxAmmo },
   { id: 'missile', name: 'MISSILES', base: 260, step: 60,
     blurb: 'Two more homing missiles.',
     can: (p) => p.ammo.missile < ARMORY.missile.maxAmmo,
@@ -176,6 +220,9 @@ export function rows(game) {
   for (const [id, m] of Object.entries(MODS)) {
     const lvl = modLevel(game, id);
     if (lvl >= m.tiers.length) continue;      // fully fitted
+    // Not offered yet. Not greyed out either: a row you cannot buy for a
+    // reason the shop will not state is worse than no row.
+    if ((game.levelIndex || 0) < (m.from || 0)) continue;
     const tier = m.tiers[lvl];
     out.push({
       kind: 'mod',
@@ -183,13 +230,29 @@ export function rows(game) {
       name: modName(id, lvl + 1),
       blurb: tier.blurb,
       cost: tier.cost,
+      currency: m.currency || 'coins',
       affordable: false,
       detail: m.tiers.length > 1 ? `MOD ${lvl}/${m.tiers.length}` : 'MOD',
       available: true,
     });
   }
-  for (const r of out) r.affordable = r.available && game.coins >= r.cost;
+  for (const r of out) {
+    r.currency = r.currency || 'coins';
+    r.affordable = r.available && purse(game, r.currency) >= r.cost;
+  }
   return out;
+}
+
+// What the pilot has of a given currency. Gold bars are counted rather
+// than valued: a bar is a thing you went out of your way for, which is
+// what makes it worth pricing the permanent systems in.
+export function purse(game, currency) {
+  return currency === 'bars' ? (game.bars || 0) : (game.coins || 0);
+}
+
+function spend(game, currency, n) {
+  if (currency === 'bars') game.bars = (game.bars || 0) - n;
+  else game.coins -= n;
 }
 
 export function price(game, it) {
@@ -199,14 +262,18 @@ export function price(game, it) {
 
 // Returns a short result string for the UI, or null if nothing happened.
 export function buy(game, row) {
-  if (!row || !row.available || game.coins < row.cost) return null;
+  const currency = (row && row.currency) || 'coins';
+  if (!row || !row.available || purse(game, currency) < row.cost) return null;
 
   if (row.kind === 'mod') {
     game.mods = game.mods || {};
     const lvl = modLevel(game, row.id);
     if (lvl >= maxLevel(row.id)) return null;
+    // Not offered on this hull: the row should not exist, and a stale one
+    // handed in from anywhere must not buy anything.
+    if ((game.levelIndex || 0) < (MODS[row.id].from || 0)) return null;
     game.mods[row.id] = lvl + 1;
-    game.coins -= row.cost;
+    spend(game, currency, row.cost);
     applyMods(game);
     saveHangar(game);
     return 'FITTED ' + row.name;
@@ -214,7 +281,7 @@ export function buy(game, row) {
 
   const it = ITEMS.find((x) => x.id === row.id);
   if (!it || !it.can(game.player)) return null;
-  game.coins -= row.cost;
+  spend(game, currency, row.cost);
   it.buy(game.player);
   game.bought = game.bought || {};
   game.bought[it.id] = (game.bought[it.id] || 0) + 1;
@@ -253,6 +320,11 @@ export function applyMods(game) {
   p.gunCap = Math.min(PICKUP.gunCapMax, (p.gunCapBase || PICKUP.gunLevels) + mounts);
   p.drones = modLevel(game, 'drone');
   p.pointDefence = modLevel(game, 'pointdef') > 0;
+  // A gun on the tail, and a beam down the centreline. Both act by
+  // setting a field the player update already reads, like every other
+  // mod, rather than being checked for by name where they matter.
+  p.rearGun = modLevel(game, 'rear') > 0;
+  p.lance = modLevel(game, 'lance');
   p.shieldRegen = modLevel(game, 'regen') ? modMul(game, 'regen') : 0;
   if (modLevel(game, 'siege') && !p._siege) {
     p._siege = true;

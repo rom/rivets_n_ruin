@@ -281,3 +281,25 @@ func TestMinRunSecCoversOnlyTheHullsFlown(t *testing.T) {
 		t.Errorf("minRunSec(0, huge) = %.3f, want the clamped %.3f", got, all)
 	}
 }
+
+// ModName is the one validator the mod endpoints use and nothing else
+// covered it, so a mod could be published under a name no leaderboard
+// could render.
+func TestModName(t *testing.T) {
+	ok := []string{"SCRAPYARD", "a b", "日本語", "x-y_z 12", "  trimmed  "}
+	for _, n := range ok {
+		if _, err := ModName(n); err != nil {
+			t.Errorf("ModName(%q) rejected: %v", n, err)
+		}
+	}
+	bad := []string{"", "a", strings.Repeat("x", 200), "nul\x00byte", "two\nlines"}
+	for _, n := range bad {
+		if _, err := ModName(n); err == nil {
+			t.Errorf("ModName(%q) accepted", n)
+		}
+	}
+	got, err := ModName("  spaced  ")
+	if err != nil || got != "spaced" {
+		t.Errorf("ModName did not trim: %q, %v", got, err)
+	}
+}

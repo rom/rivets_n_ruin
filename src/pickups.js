@@ -14,7 +14,7 @@ import { sparks } from './particles.js';
 export const TREASURES = Object.keys(PICKUP.treasure);
 
 export const KINDS = ['shield', 'life', 'healthbar', 'gunspeed', 'gunblaze',
-  'coin', 'goldbar', 'coffin', 'bomb', 'grenade', 'missile', ...TREASURES];
+  'coin', 'goldbar', 'coffin', 'bomb', 'grenade', 'missile', 'mine', ...TREASURES];
 
 // Everything that is loot rather than an upgrade. One list, so the HUD, the
 // minimap, the end-of-hull bonus and the drop code cannot disagree about

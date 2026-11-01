@@ -14,6 +14,18 @@ NODE        ?= node
 # Strip debug info; this is a game server, not something anyone will dlv into.
 LDFLAGS     := -s -w
 
+# No cgo in anything shipped. Two reasons, and the second is the one that
+# bites: it makes the binary genuinely static, and
+# syscall.AllThreadsSyscall — which internal/hardening needs, because
+# no_new_privs and landlock are per-thread flags — is refused outright in
+# any binary that links cgo. The default `go build` on Linux does link
+# it, through net's resolver, so a plain build silently ships with the
+# sandbox unavailable.
+#
+# Scoped to the build recipes rather than exported: `go test -race`
+# *requires* cgo, and the hardening tests skip themselves under it.
+NOCGO       := CGO_ENABLED=0
+
 .DEFAULT_GOAL := help
 .PHONY: help run build test test-race test-js coverage coverage-gate bench fmt vet check js-check smoke tidy clean dist icons gallery stats
 
@@ -32,7 +44,7 @@ build: $(BUILD_DIR)/$(BINARY) ## Compile the server binary
 
 $(BUILD_DIR)/$(BINARY): $(GOFILES)
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build -ldflags '$(LDFLAGS)' -o $@ ./cmd/server
+	$(NOCGO) $(GO) build -ldflags '$(LDFLAGS)' -o $@ ./cmd/server
 	@echo "built $@"
 
 test: ## Run the Go tests

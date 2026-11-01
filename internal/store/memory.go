@@ -440,11 +440,17 @@ func (m *Memory) Snapshot(path string) error {
 	}
 	m.mu.RUnlock()
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	// 0700 and 0600, not the 0755/0644 os.Create gives you. This file
+	// holds every pilot's token hash and password hash; on a shared box
+	// the default made them world-readable, which is the whole database
+	// available to anyone with a login. The run file beside it was
+	// already 0600 and this one was not, which is the kind of
+	// inconsistency that is only ever an oversight.
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
-	f, err := os.Create(tmp)
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}

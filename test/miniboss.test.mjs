@@ -1,6 +1,7 @@
 import './_setup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   KINDS, rosterFor, minis, resetMinis, planMinis, updateMinis, hitMinis, miniTargets,
   drawMinis, spawnMini,
@@ -315,4 +316,62 @@ test('drawMinis survives a wreck mid-animation', () => {
   drawMinis(ctx);     // throws if the draw path reads anything undefined
   updateMinis(game, 1.4);
   assert.equal(minis.count, 0, 'the wreck never cleared');
+});
+
+// --- the bodies
+//
+// They were drawn inline out of bare polygons and read as diagrams of
+// ships rather than ships. They are built from the attackers' own
+// vocabulary now, in miniart.js, so a miniboss is the same navy at four
+// times the size rather than a different art style that happens to be
+// nearby.
+
+test('every miniboss has a body of its own', async () => {
+  const { MINI_BODY_KINDS } = await import('../src/miniart.js');
+  for (const kind of Object.keys(KINDS)) {
+    assert.ok(MINI_BODY_KINDS.includes(kind),
+      `${kind} has no body, so it would draw as nothing at all`);
+  }
+  // ...and nothing is drawn that is not a miniboss.
+  for (const kind of MINI_BODY_KINDS) {
+    assert.ok(KINDS[kind], `miniart draws "${kind}", which is not a miniboss`);
+  }
+});
+
+test('every miniboss draws at every state of damage', async () => {
+  const { drawMiniBody } = await import('../src/miniart.js');
+  const ctx = document.createElement('canvas').getContext('2d');
+  for (const [kind, spec] of Object.entries(KINDS)) {
+    for (const frac of [1, 0.66, 0.3, 0.01, 0]) {
+      for (const lit of [false, true]) {
+        const m = {
+          kind, x: 0, y: 0, t: 1.4, hp: spec.hp * frac, maxHp: spec.hp,
+          escorts: 1, dead: frac === 0, deathT: 0.2, spec,
+        };
+        assert.doesNotThrow(
+          () => drawMiniBody(ctx, m, spec, lit, '#ff7a2f'),
+          `${kind} threw at ${Math.round(frac * 100)}% health, lit=${lit}`,
+        );
+      }
+    }
+  }
+});
+
+test('an unknown kind draws nothing rather than guessing', async () => {
+  const { drawMiniBody } = await import('../src/miniart.js');
+  const ctx = document.createElement('canvas').getContext('2d');
+  const m = { kind: 'nonesuch', x: 0, y: 0, t: 1, hp: 1, maxHp: 1, escorts: 0 };
+  assert.equal(drawMiniBody(ctx, m, { r: 20, colour: '#fff' }, false, '#fff'), false,
+    'an unknown miniboss silently drew as something else');
+});
+
+// The shared vocabulary is shared, not copied: a second definition of a
+// rivet is a second thing to keep in step.
+test('the miniboss bodies are built from the attackers\' own parts', async () => {
+  const src = readFileSync(new URL('../src/miniart.js', import.meta.url), 'utf8');
+  assert.match(src, /from '\.\/foeart\.js'/,
+    'miniart does not share the attackers\' vocabulary');
+  for (const part of ['engine', 'rivets', 'litTop', 'hull']) {
+    assert.ok(src.includes(part), `miniart never uses ${part}()`);
+  }
 });

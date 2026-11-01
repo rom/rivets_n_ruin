@@ -13,6 +13,10 @@
 // browser session. Coins go with them, because a currency you cannot bank
 // is not a currency.
 //
+// Gold bars are here too, and for the same reason: the armourer prices
+// its permanent systems in them, so a bar has to survive the tab the way
+// a coin does.
+//
 // What deliberately does NOT live here: anything bought from the ITEMS
 // list. Those are the run's loadout, they are already forfeit on death,
 // and persisting them would hand a fresh run a maxed ship.
@@ -27,7 +31,7 @@ const VERSION = 1;
 export const MAX_COINS = 1e9;
 export const MAX_MOD_LEVEL = 99;
 
-export const freshHangar = () => ({ coins: 0, mods: {} });
+export const freshHangar = () => ({ coins: 0, bars: 0, mods: {} });
 
 // Everything read back from storage goes through this. Storage is the one
 // input a player can edit by hand, so nothing from it is trusted: an
@@ -38,9 +42,9 @@ export function sanitise(raw, validIds = null) {
   const out = freshHangar();
   if (!raw || typeof raw !== 'object') return out;
 
-  const coins = Number(raw.coins);
-  if (Number.isFinite(coins) && coins > 0) {
-    out.coins = Math.min(MAX_COINS, Math.floor(coins));
+  for (const field of ['coins', 'bars']) {
+    const n = Number(raw[field]);
+    if (Number.isFinite(n) && n > 0) out[field] = Math.min(MAX_COINS, Math.floor(n));
   }
 
   const mods = raw.mods;
@@ -76,7 +80,7 @@ export function loadHangar(validIds = null) {
 // rather than a hangar object so there is exactly one copy of the truth —
 // a separate mirror would be one more thing to keep in step.
 export function saveHangar(game) {
-  const h = sanitise({ coins: game.coins, mods: game.mods });
+  const h = sanitise({ coins: game.coins, bars: game.bars, mods: game.mods });
   try {
     localStorage.setItem(KEY, JSON.stringify({ version: VERSION, ...h }));
   } catch { /* private mode; the run still plays, it just will not keep */ }
@@ -94,6 +98,7 @@ export function clearHangar(game = null) {
   try { localStorage.removeItem(KEY); } catch { /* nothing to do */ }
   if (game) {
     game.coins = 0;
+    game.bars = 0;
     game.mods = {};
   }
   return freshHangar();

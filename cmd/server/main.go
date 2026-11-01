@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/rom/rivets_n_ruin/internal/api"
+	"github.com/rom/rivets_n_ruin/internal/hardening"
 	"github.com/rom/rivets_n_ruin/internal/store"
 )
 
@@ -36,6 +37,10 @@ func main() {
 		rlBurst    = flag.Float64("rate-burst", 40, "API requests allowed back-to-back, per IP")
 		strictRuns = flag.Bool("require-runs", false,
 			"reject scores not tied to an opened run session (see internal/api/runs.go)")
+		harden = flag.String("harden", "auto",
+			"OS hardening: auto applies what the platform offers, require fails without it, off applies none")
+		allowRoot = flag.Bool("allow-root", false,
+			"permit running as uid 0, which this does not need")
 	)
 	flag.Parse()
 
@@ -92,10 +97,11 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiSrv.Routes())
 	mux.Handle("/", noCache(staticLog(log, *verbose, http.FileServer(http.Dir(root)))))
+	handler := secureHeaders(mux)
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       20 * time.Second,
 		WriteTimeout:      20 * time.Second,
@@ -107,6 +113,30 @@ func main() {
 		log.Error("cannot bind", "addr", *addr, "err", err)
 		os.Exit(1)
 	}
+
+	// Give privileges back to the kernel, now that everything needing a
+	// wide view of the filesystem has happened: the snapshot is loaded,
+	// the runs are restored, the port is bound. After this the process
+	// cannot reach anything outside the web root and the data directory,
+	// where the platform can express that. See internal/hardening.
+	mode, err := hardening.ParseMode(*harden)
+	if err != nil {
+		log.Error("bad -harden value", "err", err)
+		os.Exit(1)
+	}
+	report, err := hardening.Apply(hardening.Config{
+		Mode:          mode,
+		ReadDirs:      []string{root},
+		ReadWriteDirs: []string{filepath.Dir(absOr(*data))},
+		AllowRoot:     *allowRoot,
+	})
+	if err != nil {
+		log.Error("hardening", "err", err)
+		os.Exit(1)
+	}
+	apiSrv.SetHardening(report)
+	log.Info("hardened", "mode", report.Mode, "applied", report.Applied,
+		"unavailable", report.Skipped)
 
 	// Periodic snapshots, so an abrupt kill loses at most one interval.
 	stopSaver := make(chan struct{})
@@ -162,6 +192,51 @@ func main() {
 
 // noCache stops the browser serving a stale module after an edit, which is
 // the most confusing thing that can happen while playtesting.
+// absOr is only for naming a directory to the sandbox: a path that will
+// not resolve is passed through and fails loudly there rather than
+// silently granting the wrong directory.
+func absOr(p string) string {
+	a, err := filepath.Abs(p)
+	if err != nil {
+		return p
+	}
+	return a
+}
+
+// Headers that cost nothing and remove whole classes of problem from a
+// page that loads its own modules and talks to its own origin.
+//
+// The content security policy is as tight as the game allows: everything
+// comes from this origin, there is no inline script, no plugin, no
+// frame, and nothing may frame it. The game has no third-party anything
+// — no fonts, no analytics, no CDN — so the policy has no exceptions,
+// which is the only kind of policy worth writing.
+func secureHeaders(next http.Handler) http.Handler {
+	const csp = "default-src 'self'; " +
+		"script-src 'self'; " +
+		"style-src 'self' 'unsafe-inline'; " +
+		"img-src 'self' data:; " +
+		"connect-src 'self'; " +
+		"object-src 'none'; " +
+		"base-uri 'none'; " +
+		"form-action 'none'; " +
+		"frame-ancestors 'none'"
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", csp)
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		h.Set("Cross-Origin-Resource-Policy", "same-origin")
+		// Nothing here wants a camera, a microphone, a location or a
+		// payment handler, and saying so stops a future bug asking.
+		h.Set("Permissions-Policy",
+			"accelerometer=(), camera=(), geolocation=(), gyroscope=(), "+
+				"magnetometer=(), microphone=(), payment=(), usb=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
 func noCache(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store, must-revalidate")

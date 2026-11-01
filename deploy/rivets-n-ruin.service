@@ -1,0 +1,94 @@
+# A hardened systemd unit for the game server.
+#
+# internal/hardening narrows what the process can do from the inside;
+# this narrows it from the outside, before the binary starts. The two
+# overlap on purpose. The in-process sandbox covers the case where the
+# operator did not use systemd at all, and the unit covers the things a
+# process cannot do to itself — it cannot un-grant its own capabilities
+# before the kernel has already given them, and it cannot install a
+# seccomp filter without a great deal of care about which syscalls the
+# Go runtime needs on the architecture it happens to be running on.
+#
+#   install -Dm0755 build/rnr-server /usr/local/bin/rnr-server
+#   install -Dm0644 deploy/rivets-n-ruin.service /etc/systemd/system/
+#   useradd --system --home /var/lib/rivets --shell /usr/sbin/nologin rivets
+#   systemctl enable --now rivets-n-ruin
+
+[Unit]
+Description=Rivets 'n Ruin game server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rivets
+Group=rivets
+
+ExecStart=/usr/local/bin/rnr-server \
+    -addr 127.0.0.1:8000 \
+    -dir /usr/local/share/rivets-n-ruin \
+    -data /var/lib/rivets/rnr.json \
+    -harden require
+
+Restart=on-failure
+RestartSec=2s
+
+# --- filesystem
+# The server writes exactly one directory. StateDirectory creates and
+# owns it; everything else is read-only or invisible.
+StateDirectory=rivets
+StateDirectoryMode=0700
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ReadWritePaths=/var/lib/rivets
+
+# --- privileges
+# It binds a high port as an unprivileged user and needs nothing else.
+# An empty bounding set means no capability can be acquired at all.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateUsers=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+# --- kernel and namespaces
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+
+# --- memory and execution
+# A Go binary never needs to write memory and then execute it.
+MemoryDenyWriteExecute=yes
+
+# --- network
+# IPv4 and IPv6 sockets, and nothing else: no netlink, no packet sockets,
+# no unix sockets to other services.
+RestrictAddressFamilies=AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+# --- syscalls
+# The named sets are systemd's own, which is the point: maintaining a
+# hand-written allowlist against a moving Go runtime is how people end
+# up with a filter they disable the first time it breaks.
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete @mount @swap @reboot @debug @cpu-emulation
+SystemCallArchitectures=native
+SystemCallErrorNumber=EPERM
+
+# --- resources
+LimitNOFILE=4096
+LimitCORE=0
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

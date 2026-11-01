@@ -3,12 +3,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   HELP, HELP_LAYOUT, HELP_PAGES, SETTINGS_LAYOUT, END_LAYOUT, endLayout,
-  rankLine, REASON_CHARS, settingsWindow, drawHelp, drawSettings,
+  rankLine, REASON_CHARS, settingsWindow, HUD_X, HUD_ARMORY, TITLE_HULL,
+  drawHelp, drawSettings, drawHud,
 } from '../src/hud.js';
 import {
   DEFS, GROUPS, get as setting, set as setSetting, nudge, reset, display,
 } from '../src/settings.js';
-import { LEVELS, VIEW_W, FIELD_H } from '../src/config.js';
+import { LEVELS, VIEW_W, FIELD_H, SHIP, PICKUP, ARMORY } from '../src/config.js';
+import { makeGame } from '../src/game.js';
 import { TUNES } from '../src/music.js';
 
 const ctx = () => document.createElement('canvas').getContext('2d');
@@ -34,8 +36,11 @@ test('no help page overruns its own footer', () => {
     for (const row of p.rows) {
       y += row.head ? HELP_LAYOUT.headGap + HELP_LAYOUT.headPitch : HELP_LAYOUT.pitch;
     }
-    assert.ok(y <= HELP_LAYOUT.bottom,
-      `"${p.title}" ends at y=${y}, past the footer at ${HELP_LAYOUT.bottom}`);
+    // A margin, not just "does not overrun": a page whose last row sits
+    // on the footer reads as one block of text with the key hints.
+    assert.ok(y + HELP_LAYOUT.pitch <= HELP_LAYOUT.bottom,
+      `"${p.title}" ends at y=${y} against a footer at ${HELP_LAYOUT.bottom} — `
+      + `${HELP_LAYOUT.bottom - y}px clear, which is under one row`);
   }
 });
 
@@ -488,4 +493,108 @@ test('an absurdly long reason is cut to something that fits', () => {
   const line = rankLine({ online: true, submitState: 'refused', submitError: 'x'.repeat(500) });
   assert.equal(line.sub.length, REASON_CHARS);
   assert.ok(line.sub.length * CHAR <= VIEW_W - 16);
+});
+
+// --- the HUD row
+//
+// The armory's slots were 28px wide and held a three-character label at
+// +2 with a right-aligned count ending at +26. One digit fits. Grenades
+// cap at twelve, and at two digits the count was drawn straight through
+// the last letter of the label, so the readout said "GR12". Reported from
+// play, and invisible to every test here because nothing measured it.
+
+test('an armory slot fits its label and its largest count', () => {
+  const labelEnds = HUD_ARMORY.pad + HUD_ARMORY.labelChars * CHAR;
+  const countStarts = HUD_ARMORY.slotW - HUD_ARMORY.pad - HUD_ARMORY.countChars * CHAR;
+  assert.ok(countStarts >= labelEnds,
+    `the label ends at +${labelEnds} and a ${HUD_ARMORY.countChars}-digit count `
+    + `starts at +${countStarts}; they overlap by ${labelEnds - countStarts}px`);
+});
+
+test('the armory slot allows for every ordnance label and count', () => {
+  for (const kind of ARMORY.order) {
+    const spec = ARMORY[kind];
+    assert.ok(spec.short.length <= HUD_ARMORY.labelChars,
+      `"${spec.short}" is ${spec.short.length} characters, the slot allows for `
+      + `${HUD_ARMORY.labelChars}`);
+    const digits = String(spec.maxAmmo).length;
+    assert.ok(digits <= HUD_ARMORY.countChars,
+      `${kind} holds up to ${spec.maxAmmo}, which is ${digits} digits, and the slot `
+      + `allows for ${HUD_ARMORY.countChars}`);
+  }
+});
+
+// Everything on the row, measured against what it can actually contain.
+// `width` is the widest the block ever gets; the next block must start
+// after it.
+test('no two HUD blocks overlap at their widest', () => {
+  const maxShield = SHIP.shieldCap + PICKUP.shieldBonusMax;
+  const blocks = [
+    ['shield', HUD_X.shield, Math.max(`SHIELD ${maxShield}`.length * CHAR, 10 * 7)],
+    ['ships', HUD_X.ships, PICKUP.maxLives * 7],
+    ['vel', HUD_X.vel, 38 + 4 + 2 * CHAR],
+    ['guns', HUD_X.guns, PICKUP.gunCapMax * 5],
+    ['armory', HUD_X.armory, ARMORY.order.length * HUD_ARMORY.pitch - 3],
+    ['score', HUD_X.score, 8 * CHAR],
+    ['prog', HUD_X.prog, null],
+  ];
+  // A gutter, not just "does not overlap": two readouts a pixel apart are
+  // legally distinct and read as one word.
+  const GUTTER = 6;
+  for (let i = 1; i < blocks.length; i++) {
+    const [name, x, w] = blocks[i - 1];
+    const [next, nx] = blocks[i];
+    assert.ok(x + w + GUTTER <= nx,
+      `"${name}" runs to x=${x + w} at its widest and "${next}" starts at ${nx} — `
+      + `${nx - (x + w)}px apart, which is under the ${GUTTER}px gutter`);
+  }
+  // ...and the last one still has to fit on the screen.
+  const widestHull = Math.max(...LEVELS.map((l) => l.name.length));
+  const progText = `> ${'X'.repeat(widestHull)}  ${LEVELS.length}/${LEVELS.length}`;
+  assert.ok(HUD_X.prog + progText.length * CHAR <= VIEW_W,
+    `the hull readout runs to x=${HUD_X.prog + progText.length * CHAR} on a ${VIEW_W}px screen`);
+});
+
+test('the HUD draws at its widest without throwing', () => {
+  const c = ctx();
+  const game = makeGame();
+  const p = game.player;
+  p.shieldMax = SHIP.shieldCap + PICKUP.shieldBonusMax;
+  p.shield = p.shieldMax;
+  p.lives = PICKUP.maxLives;
+  p.gunCap = PICKUP.gunCapMax;
+  p.gunSpeed = PICKUP.gunCapMax;
+  p.gunBlaze = PICKUP.gunCapMax;
+  p.ammo = Object.fromEntries(ARMORY.order.map((k) => [k, ARMORY[k].maxAmmo]));
+  p.secondary = 'grenade';
+  game.score = 99999999;
+  game.hullHaul = { coins: 999, bars: 9, coffins: 9, treasures: 9, value: 1 };
+  assert.doesNotThrow(() => drawHud(c, game, { muted: false, audio: true }));
+});
+
+// --- the title screen's hull selector
+//
+// Two rows of very different widths: a hull name is at most ten
+// characters, a subtitle up to thirty-six. The hull counter sat on the
+// subtitle row and was drawn straight through the end of it — the title
+// screen read "SILVER CLASS — PATROL HUL1/25".
+
+test('the hull counter clears the longest name', () => {
+  const longest = Math.max(...LEVELS.map((l) => l.name.length));
+  const half = (longest * CHAR) / 2;
+  const counter = `${LEVELS.length}/${LEVELS.length}`.length * CHAR;
+  assert.ok(half + 6 <= TITLE_HULL.countX - counter,
+    `the longest hull name reaches x=${half} from centre and the counter starts at `
+    + `${TITLE_HULL.countX - counter}`);
+});
+
+test('the longest subtitle fits its box, and nothing shares its row', () => {
+  const longest = Math.max(...LEVELS.map((l) => l.subtitle.length));
+  const half = (longest * CHAR) / 2;
+  assert.ok(half <= TITLE_HULL.boxHalf - 4,
+    `"${LEVELS.find((l) => l.subtitle.length === longest).subtitle}" is ${longest} `
+    + `characters and runs ${half}px either side of centre, in a box ${TITLE_HULL.boxHalf} wide`);
+  // The counter is on the name row precisely so that it cannot collide
+  // with this one; if it moves back, the collision comes back.
+  assert.equal(TITLE_HULL.nameY < TITLE_HULL.subY, true);
 });

@@ -11,6 +11,7 @@ import {
   FIELD_TOP, FIELD_BOT, VIEW_W, APRON, clamp, CULL_MARGIN,
 } from './config.js';
 import { makePool } from './pool.js';
+import { drawMiniBody } from './miniart.js';
 import { enemyShots, fire } from './projectiles.js';
 import { explode, sparks, addLight } from './particles.js';
 import { kick } from './camera.js';
@@ -266,130 +267,14 @@ export function drawMinis(ctx) {
     ctx.fillRect(r - 2, -4, 9 + Math.sin(m.t * 17) * 3, 8);
     ctx.globalAlpha = m.dead ? 0.4 + 0.4 * Math.abs(Math.sin(m.deathT * 20)) : 1;
 
+    // The bodies live in miniart.js, built from the same vocabulary as
+    // the attackers: a dark hull with one lit upper surface, panel lines
+    // and rivets for scale, engine bells on their own clock, a canopy or
+    // an eye so you can see which way it is looking. Drawn inline here
+    // out of bare polygons, they read as diagrams of ships rather than
+    // ships, which is what they were.
     ctx.lineJoin = 'miter';
-    ctx.strokeStyle = spec.colour;
-    ctx.lineWidth = 2;
-    ctx.fillStyle = body;
-
-    if (m.kind === 'hauler') {
-      // A pirate ore freighter: slab hull, ore hoppers down the spine, a
-      // bridge tower bolted on top and colours flown off the stern.
-      poly(ctx, [[-r, -r * 0.5], [-r * 0.6, -r * 0.8], [r * 0.8, -r * 0.8],
-        [r, -r * 0.4], [r, r * 0.4], [r * 0.8, r * 0.8], [-r * 0.6, r * 0.8], [-r, r * 0.5]]);
-      ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#2b323d';
-      for (let k = -2; k <= 1; k++) ctx.fillRect(k * 13 + 2, -r * 0.6, 10, r * 1.2);
-      ctx.fillStyle = core;
-      for (let k = -2; k <= 1; k++) ctx.fillRect(k * 13 + 4, -r * 0.45, 6, 4);
-      // bridge tower
-      ctx.fillStyle = body;
-      ctx.strokeStyle = spec.colour;
-      ctx.beginPath();
-      ctx.moveTo(-r + 1, -r * 0.8); ctx.lineTo(-r + 3, -r - 7);
-      ctx.lineTo(-r + 14, -r - 7); ctx.lineTo(-r + 15, -r * 0.8);
-      ctx.closePath(); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#9ae8f8';
-      ctx.fillRect(-r + 4, -r - 5, 8, 3);
-      // colours, off the stern
-      ctx.fillStyle = '#b02a3a';
-      for (let k = 0; k <= 4; k++) {
-        ctx.fillRect(r + 2 + k * 2, -8 + Math.sin(m.t * 5 + k) * 2, 2, 7);
-      }
-    } else if (m.kind === 'cutter') {
-      // Alien: a ray, with two horns and the cutting arc strung between
-      // them. Nothing on it is bolted to anything.
-      ctx.beginPath();
-      ctx.moveTo(-r, 0);
-      ctx.quadraticCurveTo(-r * 0.2, -r * 1.05, r * 0.95, -r * 0.5);
-      ctx.quadraticCurveTo(r * 0.5, 0, r * 0.95, r * 0.5);
-      ctx.quadraticCurveTo(-r * 0.2, r * 1.05, -r, 0);
-      ctx.closePath(); ctx.fill(); ctx.stroke();
-      // horns
-      ctx.strokeStyle = spec.colour;
-      ctx.lineWidth = 3;
-      for (const sy of [-1, 1]) {
-        ctx.beginPath();
-        ctx.moveTo(-r * 0.45, sy * r * 0.5);
-        ctx.quadraticCurveTo(-r * 1.25, sy * r * 0.75, -r * 1.05, sy * r * 0.2);
-        ctx.stroke();
-      }
-      // the arc itself, crackling between them
-      ctx.strokeStyle = core;
-      ctx.lineWidth = 1.5 + Math.abs(Math.sin(m.t * 11)) * 2.5;
-      ctx.beginPath();
-      ctx.moveTo(-r * 1.05, -r * 0.2);
-      ctx.quadraticCurveTo(-r * 1.5 - Math.sin(m.t * 9) * 4, 0, -r * 1.05, r * 0.2);
-      ctx.stroke();
-      // a single eye, which is the only symmetric thing about it
-      ctx.fillStyle = core;
-      ctx.beginPath(); ctx.ellipse(0, 0, 7, 4 + Math.sin(m.t * 3) * 1.5, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#0a0d13';
-      ctx.fillRect(-1, -3, 2, 6);
-    } else if (m.kind === 'bulwark') {
-      // Assault drum: an armoured octagon ringed with barrels, nose plate
-      // forward. Built to be shot at.
-      ctx.beginPath();
-      for (let k = 0; k < 8; k++) {
-        const a = Math.PI / 8 + (k / 8) * Math.PI * 2;
-        const px = Math.cos(a) * r;
-        const py = Math.sin(a) * r;
-        if (k === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-      }
-      ctx.closePath(); ctx.fill(); ctx.stroke();
-      // barrels in the ports, turning with the drum
-      for (let k = 0; k < 8; k++) {
-        const a = (k / 8) * Math.PI * 2 + m.t * 0.6;
-        const bx = Math.cos(a);
-        const by = Math.sin(a);
-        ctx.strokeStyle = '#8e9aa9';
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(bx * r * 0.8, by * r * 0.8);
-        ctx.lineTo(bx * (r + 7), by * (r + 7));
-        ctx.stroke();
-        ctx.fillStyle = core;
-        ctx.fillRect(bx * (r + 7) - 2, by * (r + 7) - 2, 4, 4);
-      }
-      ctx.fillStyle = '#2b323d';
-      ctx.beginPath(); ctx.arc(0, 0, r * 0.58, 0, Math.PI * 2); ctx.fill();
-      // forward nose plate
-      ctx.fillStyle = '#8e9aa9';
-      ctx.beginPath();
-      ctx.moveTo(-r - 6, 0); ctx.lineTo(-r * 0.6, -r * 0.6);
-      ctx.lineTo(-r * 0.6, r * 0.6);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = core;
-      ctx.beginPath(); ctx.arc(0, 0, 6 + Math.sin(m.t * 6) * 1.5, 0, Math.PI * 2); ctx.fill();
-    } else {
-      // Pirate raider: swept delta, canopy for a crew, a drone pod slung
-      // under each wing and a pennant off the tail.
-      poly(ctx, [[-r * 1.15, 0], [r * 0.3, -r * 0.6], [r, -r * 0.85],
-        [r * 0.65, 0], [r, r * 0.85], [r * 0.3, r * 0.6]]);
-      ctx.fill(); ctx.stroke();
-      for (const sy of [-1, 1]) {
-        ctx.fillStyle = body;
-        ctx.strokeStyle = spec.colour;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.ellipse(r * 0.1, sy * r * 0.72, 8, 4, 0, 0, Math.PI * 2);
-        ctx.fill(); ctx.stroke();
-        ctx.fillStyle = core;
-        ctx.fillRect(r * 0.1 - 7, sy * r * 0.72 - 1.5, 4, 3);
-      }
-      // canopy
-      ctx.fillStyle = '#0a0d13';
-      ctx.beginPath(); ctx.ellipse(-r * 0.42, 0, 7, 4, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#9ae8f8';
-      ctx.beginPath(); ctx.ellipse(-r * 0.45, 0, 5, 2.4, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = core;
-      poly(ctx, [[-r * 0.95, 0], [-r * 0.2, -4], [-r * 0.2, 4]]);
-      ctx.fill();
-      // pennant
-      ctx.fillStyle = '#b02a3a';
-      for (let k = 0; k <= 3; k++) {
-        ctx.fillRect(r * 0.7 + k * 3, -3 + Math.sin(m.t * 6 + k) * 2.5, 3, 5);
-      }
-    }
+    drawMiniBody(ctx, m, spec, lit, core);
     ctx.restore();
 
     // Its own health bar, above it, on a dark plate so it never merges with
