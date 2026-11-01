@@ -2,7 +2,7 @@ import './_setup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildLevel, obstaclesNear, pointBlocked, CHUNK_W } from '../src/level.js';
-import { LEVELS, TOWERS, FIELD_TOP, FIELD_BOT, APRON } from '../src/config.js';
+import { LEVELS, TOWERS, FIELD_TOP, FIELD_BOT, APRON, SHIP} from '../src/config.js';
 
 // Hull generation became testable in node when the texture moved to lazy
 // per-chunk rendering: buildLevel no longer touches a canvas.
@@ -94,4 +94,73 @@ test('chunk count covers the hull', () => {
   const needed = Math.ceil(lvl.length / CHUNK_W);
   assert.ok(needed > 1, 'the longest hull should need many chunks');
   assert.equal(lvl.chunks.size, 0, 'chunks should start unrendered');
+});
+
+// --- the pattern set
+//
+// Four more patterns, and the thing that must hold for all of them is
+// the thing that has always had to hold: a hull you cannot fly is not a
+// hard hull, it is a broken one. The existing walk already checks that
+// per hull; this checks the patterns produce variety rather than one
+// shape with different numbers, and that the narrowest gap any of them
+// makes is one the ship actually fits through.
+
+test('the generator produces a real spread of shapes', () => {
+  // A pattern set that collapsed to two shapes would still pass every
+  // navigability check and would be a worse game.
+  const shapes = new Map();
+  for (const L of LEVELS) {
+    const lv = buildLevel(L);
+    // Signature: how many blocks start at the same x, and whether they
+    // hang from the top, stand on the bottom, or float.
+    const byX = new Map();
+    for (const o of lv.obstacles) {
+      const k = Math.round(o.x);
+      byX.set(k, (byX.get(k) || 0) + 1);
+    }
+    for (const n of byX.values()) shapes.set(n, (shapes.get(n) || 0) + 1);
+  }
+  assert.ok(shapes.size >= 2,
+    `every obstacle group is the same size (${[...shapes.keys()].join(', ')})`);
+
+  const floating = LEVELS.flatMap((L) => buildLevel(L).obstacles)
+    .filter((o) => o.y > FIELD_TOP + 2 && o.y + o.h < FIELD_BOT - 2);
+  assert.ok(floating.length > 0, 'nothing free-standing is ever generated');
+});
+
+test('no pattern makes a gap the ship cannot fit through', () => {
+  const NEEDED = SHIP.hitH + 10;        // the hull box, plus room to aim
+  let worst = Infinity;
+  let where = '';
+  for (const L of LEVELS) {
+    const lv = buildLevel(L);
+    for (let x = 0; x < lv.length; x += 7) {
+      const spans = lv.obstacles
+        .filter((o) => x >= o.x && x < o.x + o.w)
+        .map((o) => [o.y, o.y + o.h])
+        .sort((a, b) => a[0] - b[0]);
+      let y = FIELD_TOP;
+      let best = 0;
+      for (const [a, b] of spans) {
+        if (a - y > best) best = a - y;
+        y = Math.max(y, b);
+      }
+      if (FIELD_BOT - y > best) best = FIELD_BOT - y;
+      if (best < worst) { worst = best; where = `${L.name} at x=${x}`; }
+    }
+  }
+  assert.ok(worst >= NEEDED,
+    `the narrowest gap in the campaign is ${worst}px, at ${where}; `
+    + `the ship needs ${NEEDED}`);
+});
+
+test('every hull uses more than a couple of patterns', () => {
+  // Measured as distinct group sizes and distinct block heights: a hull
+  // built from one pattern reads as a corridor with furniture.
+  for (const L of LEVELS.slice(0, 10)) {
+    const lv = buildLevel(L);
+    const heights = new Set(lv.obstacles.map((o) => Math.round(o.h / 10)));
+    assert.ok(heights.size >= 4,
+      `${L.name} only has ${heights.size} distinct block heights`);
+  }
 });

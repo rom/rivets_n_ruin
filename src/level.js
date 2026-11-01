@@ -19,17 +19,17 @@ function layout(r, spec) {
   const roll = r();
   if (roll < spec.clearChance) {
     // clear run — the breathing room that makes the dense parts read
-  } else if (roll < 0.33) {
+  } else if (roll < 0.24) {
     const w = rr(r, 64, 132), h = rr(r, 52, 136);
     obstacles.push({ x: 0, y: FIELD_TOP, w, h, face: 1 });
     if (r() < 0.55) turrets.push({ x: w / 2, y: FIELD_TOP + h, dir: 1 });
     advance = w;
-  } else if (roll < 0.53) {
+  } else if (roll < 0.40) {
     const w = rr(r, 64, 132), h = rr(r, 52, 136);
     obstacles.push({ x: 0, y: FIELD_BOT - h, w, h, face: -1 });
     if (r() < 0.55) turrets.push({ x: w / 2, y: FIELD_BOT - h, dir: -1 });
     advance = w;
-  } else if (roll < 0.73) {
+  } else if (roll < 0.55) {
     // pincer — a forced corridor, the signature Uridium threat
     const gap = rr(r, 88, 118);
     const gapY = rr(r, FIELD_TOP + 44, FIELD_BOT - 44 - gap);
@@ -40,14 +40,97 @@ function layout(r, spec) {
     if (t < 0.35) turrets.push({ x: w / 2, y: gapY, dir: 1 });
     else if (t < 0.7) turrets.push({ x: w / 2, y: gapY + gap, dir: -1 });
     advance = w;
-  } else if (roll < 0.88) {
+  } else if (roll < 0.64) {
     // free-standing pillar — pass above or below
     const w = rr(r, 52, 92), h = rr(r, 66, 118);
     const y = rr(r, FIELD_TOP + 58, FIELD_BOT - 58 - h);
     obstacles.push({ x: 0, y, w, h, face: 1 });
     if (r() < 0.45) turrets.push({ x: w / 2, y, dir: 1 });
     advance = w;
-  } else if (roll < 0.95) {
+  } else if (roll < 0.72) {
+    // Chicane: stubs from alternating surfaces, never overlapping in x,
+    // so every slice is at least half open and the line through it is a
+    // weave rather than a dodge. The first pattern that asks you to be
+    // somewhere specific *next*, rather than not where you are.
+    const n = ri(r, 3, 5);
+    let sx = 0;
+    let fromTop = r() < 0.5;
+    for (let i = 0; i < n; i++) {
+      const w = rr(r, 54, 86);
+      const h = rr(r, 0.44, 0.58) * (FIELD_BOT - FIELD_TOP);
+      obstacles.push({
+        x: sx, y: fromTop ? FIELD_TOP : FIELD_BOT - h, w, h, face: fromTop ? 1 : -1,
+      });
+      if (r() < 0.4) {
+        turrets.push({
+          x: sx + w / 2, y: fromTop ? FIELD_TOP + h : FIELD_BOT - h, dir: fromTop ? 1 : -1,
+        });
+      }
+      sx += w + rr(r, 18, 40);
+      fromTop = !fromTop;
+    }
+    advance = sx;
+  } else if (roll < 0.79) {
+    // Comb: a row of fingers off one surface with clear water between
+    // them. Flyable straight down the open side, or threaded if you want
+    // what is parked in the teeth.
+    const n = ri(r, 4, 7);
+    const fromTop = r() < 0.5;
+    const depth = rr(r, 0.42, 0.62) * (FIELD_BOT - FIELD_TOP);
+    let sx = 0;
+    for (let i = 0; i < n; i++) {
+      const w = rr(r, 16, 28);
+      obstacles.push({
+        x: sx, y: fromTop ? FIELD_TOP : FIELD_BOT - depth, w, h: depth,
+        face: fromTop ? 1 : -1,
+      });
+      sx += w + rr(r, 34, 52);
+    }
+    if (r() < 0.6) {
+      turrets.push({
+        x: sx / 2, y: fromTop ? FIELD_TOP + depth : FIELD_BOT - depth, dir: fromTop ? 1 : -1,
+      });
+    }
+    advance = sx;
+  } else if (roll < 0.85) {
+    // Two walls in series, each with one slot, at different heights. The
+    // first is a pincer; the second is a pincer you have to already be
+    // moving toward. Nothing else in the set makes you commit twice.
+    const span = FIELD_BOT - FIELD_TOP;
+    const gap = rr(r, 74, 96);
+    const w = rr(r, 40, 64);
+    const firstY = rr(r, FIELD_TOP + 30, FIELD_BOT - 30 - gap);
+    // The second slot is deliberately elsewhere, but never so far that
+    // the move cannot be made in the run between them.
+    const shift = (r() < 0.5 ? -1 : 1) * rr(r, span * 0.22, span * 0.34);
+    const secondY = clamp(firstY + shift, FIELD_TOP + 24, FIELD_BOT - 24 - gap);
+    const between = rr(r, 150, 230);
+    for (const [sx, gy] of [[0, firstY], [w + between, secondY]]) {
+      if (gy - FIELD_TOP > 8) {
+        obstacles.push({ x: sx, y: FIELD_TOP, w, h: gy - FIELD_TOP, face: 1 });
+      }
+      if (FIELD_BOT - (gy + gap) > 8) {
+        obstacles.push({ x: sx, y: gy + gap, w, h: FIELD_BOT - gy - gap, face: -1 });
+      }
+    }
+    if (r() < 0.5) turrets.push({ x: w / 2, y: firstY, dir: 1 });
+    advance = w * 2 + between;
+  } else if (roll < 0.90) {
+    // Islands: free-standing blocks at different heights, spread out. No
+    // forced line at all — several work, and picking one is the whole of
+    // it. The counterweight to the patterns above, which all insist.
+    const n = ri(r, 3, 4);
+    let sx = 0;
+    for (let i = 0; i < n; i++) {
+      const w = rr(r, 34, 58);
+      const h = rr(r, 30, 62);
+      const y = rr(r, FIELD_TOP + 26, FIELD_BOT - 26 - h);
+      obstacles.push({ x: sx, y, w, h, face: 1 });
+      if (r() < 0.3) turrets.push({ x: sx + w / 2, y, dir: 1 });
+      sx += w + rr(r, 40, 76);
+    }
+    advance = sx;
+  } else if (roll < 0.96) {
     // A narrows: the corridor itself closes down for a long stretch and
     // opens again. Single obstacles are dodged; this has to be flown.
     const seg = ri(r, 5, 9);

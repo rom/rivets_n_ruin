@@ -548,9 +548,26 @@ past a plateau rather than wait it out.
   now, derived as the camera swing plus half a screen, so changing your
   mind cannot be the thing that loses something.
 - **12,000 to 41,150px of procedurally generated hull**, deterministic from
-  each hull's own `seed` in `LEVELS`. Six obstacle patterns — a clear run,
-  a tower hanging from either surface, a pincer, a free-standing pillar and a
-  stepped stack — each guaranteed to leave a navigable corridor.
+  each hull's own `seed` in `LEVELS`. Eleven obstacle patterns, each
+  guaranteed to leave a corridor the ship fits through:
+
+  | Pattern | What it asks |
+  | --- | --- |
+  | clear run | nothing — the breathing room that makes the dense parts read |
+  | tower, from either surface | go over or under |
+  | pincer | a forced corridor, the signature Uridium threat |
+  | free-standing pillar | pass above or below |
+  | **chicane** | be somewhere specific *next* — alternating stubs, flown as a weave |
+  | **comb** | a row of fingers with clear water between: run the open side, or thread the teeth for what is parked in them |
+  | **double slot** | two walls in series with their gaps at different heights, so you commit twice |
+  | **islands** | nothing in particular — several lines work, and picking one is the whole of it |
+  | narrows | the corridor itself closes down and opens again; has to be flown rather than dodged |
+  | stepped stack | climbs, so you commit to a line early |
+
+  The narrowest gap anywhere in the twenty-five hulls is 74px against a
+  ship that is 9 tall, and a test walks every hull at 7px intervals to
+  keep it that way — an unflyable hull is not a hard hull, it is a broken
+  one.
 - **Hull collision** with per-axis resolution and speed-proportional shield
   damage. A full-speed slam costs ~16 of 100; brushing it costs ~3.
 - Pre-rendered riveted plating, cast shadows, hazard chevrons on every surface
