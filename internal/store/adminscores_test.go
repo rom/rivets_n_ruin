@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -59,12 +60,18 @@ func TestListScoresPagesNewestFirst(t *testing.T) {
 func TestListScoresFiltersByNameAndID(t *testing.T) {
 	m := NewMemory()
 	rom := mustPlayer(t, m, "rom")
-	ada := mustPlayer(t, m, "ada")
+	// "zara", searched as "ZAR". Not "ada" searched as "AD": ids are
+	// hex, so a query of hex letters can match one by luck, and a test
+	// that depends on which ids the store happened to mint is a test
+	// that fails somewhere else. 'z' and 'r' are not hex digits, so no
+	// id can match this one however the dice land. The id rule has its
+	// own test below, which contrives the collision on purpose.
+	zara := mustPlayer(t, m, "zara")
 	addRun(t, m, rom, 100)
-	target := addRun(t, m, ada, 200)
+	target := addRun(t, m, zara, 200)
 
-	byName, total := m.ListScores("AD", 50, 0)
-	if total != 1 || len(byName) != 1 || byName[0].Name != "ada" {
+	byName, total := m.ListScores("ZAR", 50, 0)
+	if total != 1 || len(byName) != 1 || byName[0].Name != "zara" {
 		t.Fatalf("filtering by a partial name gave %d rows (total %d)", len(byName), total)
 	}
 
@@ -78,8 +85,8 @@ func TestListScoresFiltersByNameAndID(t *testing.T) {
 		t.Fatalf("the first ten characters of a run id did not find it")
 	}
 
-	byPlayer, _ := m.ListScores(ada.ID, 50, 0)
-	if len(byPlayer) != 1 || byPlayer[0].PlayerID != ada.ID {
+	byPlayer, _ := m.ListScores(zara.ID, 50, 0)
+	if len(byPlayer) != 1 || byPlayer[0].PlayerID != zara.ID {
 		t.Fatalf("a player id did not find their runs")
 	}
 
@@ -98,7 +105,20 @@ func TestListScoresFiltersByNameAndID(t *testing.T) {
 // for a collision, so it fails every time if that changes back.
 func TestAShortNameSearchDoesNotMatchRandomIDs(t *testing.T) {
 	m := NewMemory()
-	other := mustPlayer(t, m, "zz")
+	// Player ids are random hex, so one of them can begin with "ad" by
+	// luck — about once in 256 runs, which is exactly often enough to
+	// fail in CI and never on the machine that wrote it. Minted until
+	// it does not, so this test is about the rule and not the dice.
+	var other *model.Player
+	for i := 0; i < 100; i++ {
+		other = mustPlayer(t, m, fmt.Sprintf("zz%d", i))
+		if !strings.HasPrefix(other.ID, "ad") {
+			break
+		}
+	}
+	if strings.HasPrefix(other.ID, "ad") {
+		t.Skip("could not mint a player id that does not start with ad")
+	}
 	wanted := mustPlayer(t, m, "ada")
 	// Give the other pilot's run an id that CONTAINS the query and does
 	// not start with it, which is exactly the case that was wrong.
