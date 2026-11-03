@@ -67,6 +67,31 @@ type Store interface {
 	// account and its credential, for the case where someone wants a
 	// clean slate rather than to be gone.
 	ResetPlayer(id string) error
+	// SetPlayerStats overwrites a pilot's counters. The counters are a
+	// cache: the leaderboard is computed from the recorded runs, and
+	// nothing here touches those. An operator who sets a best that no
+	// recorded run supports has made the two disagree on purpose, so
+	// the API hands back both numbers rather than hiding one.
+	SetPlayerStats(id string, runs, best int) error
+
+	// --- the recorded runs, as an operator sees them
+	//
+	// ListScores is the admin's view of the whole table, newest first:
+	// everything AddScore has ever taken, not one player's slice of it
+	// and not the leaderboard's fold. `query` matches a pilot name or
+	// an id, either partially.
+	ListScores(query string, limit, offset int) ([]model.Score, int)
+	ScoreByID(id string) (*model.Score, error)
+	// DeleteScore removes one recorded run and recomputes the owner's
+	// counters from what is left. A delete that left Best alone would
+	// leave the cheated number on the pilot's card after the run behind
+	// it was gone, which is the one thing this is for.
+	DeleteScore(id string) error
+	// ResetScores drops every recorded run and zeroes every pilot's
+	// counters, leaving the accounts themselves alone. Returns how many
+	// runs went. This is the blunt instrument; DeleteScore is the one
+	// to reach for first.
+	ResetScores() int
 
 	// What a pilot owns between runs. Never nil: a pilot who has banked
 	// nothing reads as empty rather than missing, so every caller has

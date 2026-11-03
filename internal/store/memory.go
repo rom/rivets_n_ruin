@@ -724,3 +724,142 @@ func (m *Memory) dropScoresLocked(playerID string) {
 	}
 	m.scores = kept
 }
+
+// ------------------------------------------------------- the operator's view
+//
+// Everything below exists for internal/api/admin.go and is reachable
+// from no pilot-facing route. Listing and deleting other people's runs
+// is exactly what the public API must never offer.
+
+// SetPlayerStats overwrites the counters on a pilot's card.
+//
+// The counters are a cache. Runs and Best are maintained by AddScore so
+// that reading a player does not mean walking the score table, but the
+// leaderboard is computed from the runs themselves. Setting a best here
+// that no recorded run supports makes the card and the board disagree,
+// which is sometimes exactly what an operator wants — correcting a
+// counter after removing a run by hand — and sometimes a mistake. It is
+// not this layer's job to decide which; see adminSetStats for how the
+// disagreement is surfaced.
+func (m *Memory) SetPlayerStats(id string, runs, best int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.players[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if runs < 0 {
+		runs = 0
+	}
+	if best < 0 {
+		best = 0
+	}
+	p.Runs = runs
+	p.Best = best
+	return nil
+}
+
+// ListScores is the admin's view of the recorded runs: newest first,
+// across every pilot. The second return is the total that matched
+// before the page was cut, so a UI can say "20 of 413" rather than
+// leaving the operator to guess whether there is more.
+func (m *Memory) ListScores(query string, limit, offset int) ([]model.Score, int) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	q := strings.ToLower(strings.TrimSpace(query))
+	out := []model.Score{}
+	total := 0
+	for i := len(m.scores) - 1; i >= 0; i-- {
+		s := m.scores[i]
+		if q != "" && !strings.Contains(strings.ToLower(s.Name), q) &&
+			!strings.Contains(strings.ToLower(s.PlayerID), q) &&
+			!strings.Contains(strings.ToLower(s.ID), q) {
+			continue
+		}
+		total++
+		if total <= offset || len(out) >= limit {
+			continue
+		}
+		out = append(out, *s)
+	}
+	return out, total
+}
+
+func (m *Memory) ScoreByID(id string) (*model.Score, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, s := range m.scores {
+		if s.ID == id {
+			c := *s
+			return &c, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+// DeleteScore removes one run and rebuilds the owner's counters from
+// what is left of theirs.
+func (m *Memory) DeleteScore(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	at := -1
+	for i, s := range m.scores {
+		if s.ID == id {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		return ErrNotFound
+	}
+	owner := m.scores[at].PlayerID
+	m.scores = append(m.scores[:at], m.scores[at+1:]...)
+	// The slice is one shorter now; the old tail slot still points at a
+	// live score, so there is nothing to nil out here — append moved
+	// every element down.
+	m.recountLocked(owner)
+	return nil
+}
+
+// ResetScores wipes the board. Accounts, credentials and hangars stay.
+func (m *Memory) ResetScores() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := len(m.scores)
+	for i := range m.scores {
+		m.scores[i] = nil
+	}
+	m.scores = nil
+	for _, p := range m.players {
+		p.Runs = 0
+		p.Best = 0
+	}
+	return n
+}
+
+// recountLocked rebuilds one pilot's cached counters from the runs
+// still on record. Caller holds the write lock.
+func (m *Memory) recountLocked(playerID string) {
+	p, ok := m.players[playerID]
+	if !ok {
+		return
+	}
+	runs, best := 0, 0
+	for _, s := range m.scores {
+		if s.PlayerID != playerID {
+			continue
+		}
+		runs++
+		if s.Points > best {
+			best = s.Points
+		}
+	}
+	p.Runs = runs
+	p.Best = best
+}

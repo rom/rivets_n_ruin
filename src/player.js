@@ -19,7 +19,8 @@ import { sparks, thrust, addLight } from './particles.js';
 import { fireSecondary } from './armory.js';
 import { diff } from './score.js';
 import { kick } from './camera.js';
-import { sfxShoot, sfxScrape, sfxFlip, sfxJump } from './sfx.js';
+import { sfxShoot, sfxScrape, sfxFlip, sfxJump,
+  sfxBurning, sfxTowStrain, sfxFieldEnter, sfxFieldHold } from './sfx.js';
 import { get as setting } from './settings.js';
 
 // Built from ARMORY.order rather than written out, so adding ordnance
@@ -101,22 +102,36 @@ export function updatePlayer(p, game, dt) {
     p.jumpWasCharging -= dt;
   }
   if (p.jumpT > 0) p.jumpT -= dt;
-  if (p.towT > 0) p.towT -= dt;
+  if (p.towT > 0) {
+    p.towT -= dt;
+    // The line creaking, for as long as it holds. Throttled in sfx.js,
+    // so calling it every frame is what it is written for.
+    if (p.alive) sfxTowStrain();
+  }
   // Burning outlasts the thing that lit you, which is the whole point of
-  // it: killing the scorcher does not put the fire out.
+  // it: killing the scorcher does not put the fire out. Which is also
+  // why it needs a sound of its own — with nothing alight on screen but
+  // your own ship, the shield bar is otherwise the only tell.
   if (p.burnT > 0) {
     p.burnT -= dt;
-    if (p.alive && p.invuln <= 0) p.shield -= STATUS.burnDps * dt;
+    if (p.alive && p.invuln <= 0) { p.shield -= STATUS.burnDps * dt; sfxBurning(); }
   }
 
   // Standing in a hazard field. Charged by the second rather than on
   // entry, so crossing a corner is cheap and cutting the long way
   // through is not — which is the whole of the decision a field offers.
+  const wasField = p.inField && p.inField.kind;
   p.inField = p.alive
     ? hazardAt(game.level, p.x, p.y, SHIP.hitW / 2, SHIP.hitH / 2) : null;
   if (p.inField && p.invuln <= 0) {
     p.shield -= HAZARDS[p.inField.kind].dps * dt;
     p.fieldT = (p.fieldT || 0) + dt;
+    // Crossing the edge is louder than being inside, and the four kinds
+    // do not share a voice. Keyed on the kind rather than on being in
+    // something, so flying straight from a vortex into a fire sounds
+    // like what it is rather than like one unbroken field.
+    if (p.inField.kind !== wasField) sfxFieldEnter(p.inField.kind);
+    else sfxFieldHold(p.inField.kind);
   } else {
     p.fieldT = 0;
   }

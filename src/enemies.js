@@ -5,7 +5,8 @@ import {
 import { makePool } from './pool.js';
 import { enemyShots, fire } from './projectiles.js';
 import { explode, sparks } from './particles.js';
-import { sfxTurretShot, sfxEnemyHit, sfxExplode } from './sfx.js';
+import { sfxTurretShot, sfxEnemyHit, sfxExplode,
+  sfxCistern, sfxReactor, sfxPylon, sfxLit } from './sfx.js';
 import { spoils } from './pickups.js';
 import { diff, award } from './score.js';
 
@@ -310,6 +311,7 @@ const BEAM_WIDTH = 0.22;
 function beamLights(game, dt) {
   const p = game.player;
   let caught = null;
+  let lit = false;
   for (const t of game.level.turrets) {
     if (!t.tower || !t.tower.beam) continue;
     const sw = t.tower.beam;
@@ -329,10 +331,18 @@ function beamLights(game, dt) {
     const out = (p.y - t.y) * t.dir;
     const dist = Math.hypot(across, out);
     const bearing = Math.atan2(across, Math.max(1e-3, out));
+    const was = t.beamLit;
     t.beamLit = game.player.alive && out > 0 && dist < sw.range
       && Math.abs(bearing - aim) < BEAM_WIDTH;
+    // On the edge, not every frame it holds you. Being lit is not
+    // damage — it is the guns around you getting better — so the cue
+    // belongs at the moment it becomes true and nowhere else.
+    if (t.beamLit && !was) lit = true;
     if (t.beamLit) (caught ||= []).push(t);
   }
+  // One ping however many lights found you at once, because three
+  // lights on one post all sweep past within a second of each other.
+  if (lit) sfxLit();
   return caught;
 }
 
@@ -353,7 +363,15 @@ export function hitTurret(game, t, dmg) {
   t.downAt = game.time;
   const vol = t.tower && t.tower.volatile;
   explode(t.x, t.y - t.dir * 5, vol ? 3.4 : 1.5);
-  sfxExplode(vol ? 2.6 : 1.5);
+  // Three structures are loud enough, or consequential enough, to be
+  // worth hearing apart from everything else going up. A cistern
+  // reaches four times as far as a fuel tank and the sound is the only
+  // warning anyone beside one gets; a reactor takes the whole plant's
+  // quickening with it; a pylon drops the line between two of them.
+  if (t.kind === 'cistern') sfxCistern();
+  else if (t.kind === 'reactor') sfxReactor();
+  else if (t.kind === 'pylon') sfxPylon();
+  else sfxExplode(vol ? 2.6 : 1.5);
   // A fuel tank takes its neighbours with it. Queued as an ordinary
   // blast rather than applied here, so it goes through the same code
   // every other explosion does — which is also what makes the chain

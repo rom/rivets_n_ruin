@@ -161,16 +161,24 @@ globalThis.document = globalThis.document || {
   addEventListener: noop,
 };
 
+// The audio stub records what it was asked to make, so a test can tell
+// one sound from another. Without this, "does it make a sound" is the
+// only question node can answer — and the bug worth catching is the one
+// where three different attackers all made the SAME sound.
 class StubAudioParam {
-  constructor() { this.value = 0; }
-  setValueAtTime() { return this; }
-  linearRampToValueAtTime() { return this; }
-  exponentialRampToValueAtTime() { return this; }
-  setTargetAtTime() { return this; }
-  cancelScheduledValues() { return this; }
+  constructor() { this.value = 0; this.log = []; }
+  setValueAtTime(v, t) { this.value = v; this.log.push(['set', v, t]); return this; }
+  linearRampToValueAtTime(v, t) { this.value = v; this.log.push(['lin', v, t]); return this; }
+  exponentialRampToValueAtTime(v, t) { this.value = v; this.log.push(['exp', v, t]); return this; }
+  setTargetAtTime(v, t) { this.value = v; this.log.push(['target', v, t]); return this; }
+  cancelScheduledValues() { this.log.push(['cancel']); return this; }
+  // The first value this parameter was given, which for a filter or an
+  // oscillator is the one that characterises the sound.
+  first() { return this.log.length ? this.log[0][1] : this.value; }
 }
 class StubNode {
-  constructor() {
+  constructor(kind = 'node') {
+    this.kind = kind;
     this.gain = new StubAudioParam();
     this.frequency = new StubAudioParam();
     this.detune = new StubAudioParam();
@@ -191,14 +199,22 @@ class StubNode {
   setPeriodicWave() {}
 }
 globalThis.AudioContext = class {
-  constructor() { this.currentTime = 0; this.sampleRate = 44100; this.state = 'running'; this.destination = new StubNode(); }
+  constructor() {
+    this.currentTime = 0; this.sampleRate = 44100; this.state = 'running';
+    this.destination = new StubNode('destination');
+    // Every node this context has handed out, in order, for tests that
+    // need to know what a sound is made of rather than only that one
+    // happened. Tests clear it themselves.
+    this.made = [];
+  }
+  make(kind) { const n = new StubNode(kind); this.made.push(n); return n; }
   resume() {}
-  createGain() { return new StubNode(); }
-  createOscillator() { return new StubNode(); }
-  createBiquadFilter() { return new StubNode(); }
-  createDynamicsCompressor() { return new StubNode(); }
-  createBufferSource() { return new StubNode(); }
-  createAnalyser() { return new StubNode(); }
+  createGain() { return this.make('gain'); }
+  createOscillator() { return this.make('osc'); }
+  createBiquadFilter() { return this.make('filter'); }
+  createDynamicsCompressor() { return this.make('comp'); }
+  createBufferSource() { return this.make('noise'); }
+  createAnalyser() { return this.make('analyser'); }
   createPeriodicWave() { return {}; }
   createBuffer(ch, len) { return { getChannelData: () => new Float32Array(len) }; }
 };

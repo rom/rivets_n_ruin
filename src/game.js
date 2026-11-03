@@ -35,6 +35,7 @@ import {
   sfxCoin, sfxGoldBar, sfxCoffin, sfxTreasure,
   sfxPickup, sfxPlayerHit, sfxHullAbsorb, sfxDeath, sfxRespawn,
   sfxArrival, sfxComplete, sfxGameOver, sfxUi, sfxShoot,
+  sfxSnared, sfxHooked,
 } from './sfx.js';
 import { setIntensity, setTune } from './music.js';
 import { submitRun, heartbeat, serverBest, startRun } from './net.js';
@@ -1009,13 +1010,19 @@ function collide(game) {
         // A net, a hook or a flame takes something other than shield.
         // Refreshed rather than stacked: two netters holding the ship
         // still for ever is not a mechanic, it is a death with steps.
+        // Each of the three gets its own sound on landing as well as on
+        // being thrown. The throw is information about the room; this is
+        // information about the ship, and they arrive at different times
+        // from different places, so one cue cannot carry both.
         if (fx === 'net') {
           p.snareT = STATUS.snareTime;
           sparks(p.x, p.y, 0, 0, 8, '#7af0d0');
+          sfxSnared();
         } else if (fx === 'hook' && from && !from.dead) {
           p.towT = STATUS.towTime;
           p.towBy = from;
           sparks(p.x, p.y, 0, 0, 6, '#ffb45c');
+          sfxHooked();
         } else if (fx === 'flame') {
           p.burnT = STATUS.burnTime;
           sparks(p.x, p.y, 0, -1, 5, '#ff7a3a');

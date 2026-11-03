@@ -11,7 +11,8 @@ import { makePool } from './pool.js';
 import { award, hurt } from './score.js';
 import { enemyShots, fire } from './projectiles.js';
 import { explode, sparks } from './particles.js';
-import { sfxTurretShot, sfxEnemyHit, sfxExplode, sfxPlayerHit} from './sfx.js';
+import { sfxTurretShot, sfxEnemyHit, sfxExplode, sfxPlayerHit,
+  sfxNetShot, sfxHookShot, sfxFlame } from './sfx.js';
 import { spoils } from './pickups.js';
 import { kick } from './camera.js';
 
@@ -701,7 +702,7 @@ export function updateFoes(game, dt) {
           fire(enemyShots, f.x, f.y,
             Math.cos(a) * spec.netSpeed, Math.sin(a) * spec.netSpeed,
             4, 3, 7, { fx: 'net' });
-          sfxTurretShot();
+          sfxNetShot();
         }
         break;
       }
@@ -723,7 +724,7 @@ export function updateFoes(game, dt) {
           fire(enemyShots, f.x, f.y,
             Math.cos(a) * spec.hookSpeed, Math.sin(a) * spec.hookSpeed,
             3, 4, 6, { fx: 'hook', fxFrom: f });
-          sfxTurretShot();
+          sfxHookShot();
         }
         break;
       }
@@ -748,7 +749,7 @@ export function updateFoes(game, dt) {
               Math.cos(ang) * sp, Math.sin(ang) * sp,
               spec.flameRange / sp, 4, 6, { fx: 'flame' });
           }
-          sfxTurretShot();
+          sfxFlame();
         }
         break;
       }
