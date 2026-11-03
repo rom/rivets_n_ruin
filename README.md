@@ -1973,6 +1973,10 @@ reports each pilot's progress along the hull.
 | `POST` | `/api/mods` | yes | publish a mod |
 | `GET` | `/api/mods/{id}` | — | one mod, with its config |
 | `GET` | `/api/mods/{id}/top` | — | that mod's leaderboard |
+| `POST` | `/api/coop/open` | yes | open a co-op game; returns the code to share |
+| `GET` | `/api/coop/{code}` | — | what you would be joining: hull, seed, host, whether it is full |
+| `GET` | `/api/coop/{code}/host` | — | the host's socket (WebSocket upgrade) |
+| `GET` | `/api/coop/{code}/guest` | — | the guest's socket (WebSocket upgrade) |
 | `POST` | `/api/presence` | yes | heartbeat while flying |
 | `GET` | `/api/presence` | — | who is flying right now |
 
@@ -2590,6 +2594,7 @@ internal/api/     routing, handlers, auth, rate limiting
 internal/validate/ score plausibility, derived from the game's physics
 internal/hardening/ asks the OS to take privileges away at startup
 internal/adminui/  the operator page, compiled into the binary
+internal/ws/      a WebSocket server, RFC 6455, for co-op
 ```
 
 `make smoke` flies the game in a headless browser and reads pixels, asserting

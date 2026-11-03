@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bufio"
 	"log/slog"
 	"net"
 	"net/http"
@@ -19,6 +20,35 @@ func (w *statusWriter) Write(b []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(b)
 	w.bytes += n
 	return n, err
+}
+
+// Hijack passes through to the real writer.
+//
+// Without this the co-op WebSocket cannot exist: wrapping a
+// ResponseWriter to count bytes hides every other interface it
+// implements, so the handler asks for an http.Hijacker, does not get
+// one, and answers 400. The failure is a long way from its cause —
+// the socket route looks broken and the logging middleware looks
+// innocent — which is why this method is here with a comment on it
+// rather than being rediscovered.
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	// A hijacked connection writes its own status line, so nothing
+	// after this point should log one. 101 is what it will be.
+	w.status = http.StatusSwitchingProtocols
+	return hj.Hijack()
+}
+
+// Flush passes through too, for the same reason: a wrapper that hides
+// http.Flusher turns a streaming response into one that arrives at
+// the end, which is a bug nobody notices until it matters.
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func logging(log *slog.Logger) func(http.Handler) http.Handler {

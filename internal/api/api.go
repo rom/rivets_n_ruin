@@ -90,6 +90,7 @@ type Server struct {
 	build     Build
 	minClient string
 	versions  *versionTally
+	coop      *coopRegistry
 }
 
 // SetHardening records what internal/hardening managed to apply, so the
@@ -117,6 +118,8 @@ func New(s store.Store, log *slog.Logger, cfg Config) *Server {
 	}
 	srv.minClient = cfg.MinClientVersion
 	srv.versions = newVersionTally(srv.now)
+	srv.coop = newCoopRegistry(srv.now)
+	go srv.sweepCoop()
 	return srv
 }
 
@@ -149,6 +152,16 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/mods/{id}/top", s.modTop)
 
 	mux.HandleFunc("POST /api/errors", s.reportErrors)
+
+	// --- co-op
+	//
+	// Two browsers, one scrolling view, a ship each. The server pairs
+	// them and relays bytes; the game's rules stay in the game. See
+	// coop.go for why it is host-authoritative rather than lockstep.
+	mux.HandleFunc("POST /api/coop/open", s.coopOpen)
+	mux.HandleFunc("GET /api/coop/{code}", s.coopPeek)
+	mux.HandleFunc("GET /api/coop/{code}/host", s.coopSocket(sideHost))
+	mux.HandleFunc("GET /api/coop/{code}/guest", s.coopSocket(sideGuest))
 
 	mux.HandleFunc("POST /api/presence", s.heartbeat)
 	mux.HandleFunc("GET /api/presence", s.livePresence)
