@@ -7,8 +7,29 @@ import { ctx, now, musicBus, env, ready } from './audio.js';
 // against ctx.currentTime. Sequencing from requestAnimationFrame instead would
 // jitter audibly — rAF is tied to the display, the audio clock is not.
 
+// How far ahead the scheduler fills, and how often it wakes to do it.
+//
+// TICK is a request, not a promise. setInterval only says "no sooner
+// than": a main thread blocked for longer than the window leaves a hole
+// in the music exactly as long as the block, and a backgrounded tab is
+// throttled to roughly one tick a second whatever this says. Measured on
+// a 25ms tick with a fixed 120ms window: a 400ms stall silenced 10 of the
+// next 63 audio blocks, an 800ms stall 18 of 71, a 1600ms stall 36 of 89.
+// A 100ms and a 200ms stall were inaudible, because the window already
+// covered them.
+//
+// So the window tracks the ticks that actually arrive. A healthy machine
+// keeps the short one, where an intensity or tune change lands promptly;
+// a struggling one widens until it is scheduling further ahead than it is
+// stalling, and narrows again once the ticks come back.
 const LOOKAHEAD = 0.12;
+const MAX_LOOKAHEAD = 2.5;    // rides out a tab throttled to one tick a second
+const WINDOW_SLACK = 2.5;     // fill this much more than the last gap
+const WINDOW_DECAY = 0.92;    // per tick, back towards LOOKAHEAD
 const TICK = 25;
+// A catch-up is cheap arithmetic, but a clock that jumped by an hour
+// should not walk every step of it.
+const CATCHUP_MAX = 2048;
 // Sixteen bars, not four. Four bars of anything repeats forty times across a
 // hull, and no amount of good writing survives that. The form is the thing
 // that was missing:
@@ -283,6 +304,10 @@ const M = {
   intensity: 0,     // 0 title · 1 cruise · 2 combat · 3 boss or failing shield
   target: 0,
   running: false,
+  paused: false,    // hidden tab: the clock is stopped but the place is kept
+  lastTick: null,   // audio-clock time of the previous schedule() call
+  window: LOOKAHEAD,
+  skipped: 0,       // steps stepped over unheard: the silence, counted
   tune: Number(localStorage.getItem('rnr.tune') || 0) % TUNES.length,
   pendingTune: null,
 };
@@ -326,36 +351,100 @@ export const nextTune = () => setTune(selected() + 1);
 export function startMusic() {
   if (!ready() || M.running) return;
   M.running = true;
+  M.paused = false;
   M.step = 0;
   M.nextTime = now() + 0.08;
+  // Dated from here, not left at zero for the first tick to discover. A
+  // throttled tab's very first wakeup is already a second late, and a
+  // scheduler that treats it as the first sample of an unknown rate
+  // spends a second tick finding that out — two holes instead of one.
+  M.lastTick = now();
+  M.window = LOOKAHEAD;
+  M.skipped = 0;
   M.timer = setInterval(schedule, TICK);
 }
 
 export function stopMusic() {
   M.running = false;
+  M.paused = false;
   if (M.timer) { clearInterval(M.timer); M.timer = null; }
 }
 
+// Hidden tab. The game is frozen anyway — requestAnimationFrame does not
+// run — and the timer is throttled to about a tick a second, so leaving
+// the sequencer going means synthesising a stutter for an empty room.
+// Stops the clock without losing the place in the tune.
+export function pauseMusic() {
+  if (!M.running || M.paused) return;
+  M.paused = true;
+  if (M.timer) { clearInterval(M.timer); M.timer = null; }
+}
+
+export function resumeMusic() {
+  if (!M.running || !M.paused) return;
+  // No guard on M.timer here: pauseMusic is the only thing that sets
+  // M.paused, and it always clears the timer in the same breath, so a
+  // paused sequencer never holds one. A second check would be a line no
+  // test could ever reach.
+  M.paused = false;
+  M.nextTime = now() + 0.08;
+  M.lastTick = now();
+  M.window = LOOKAHEAD;
+  M.timer = setInterval(schedule, TICK);
+}
+
 export const musicRunning = () => M.running;
+export const musicPaused = () => M.paused;
 export const musicStep = () => M.step;
+// The window the scheduler is currently filling. Exported so a test can
+// see it widen under a stall and narrow again after one.
+export const musicWindow = () => M.window;
+// Steps the scheduler had to step over because their moment had already
+// passed. This is the dropout, counted: every one of them is a step of
+// the tune that nobody heard.
+export const musicSkipped = () => M.skipped;
+
+// One step forward in the sequence, without sounding it. The bookkeeping
+// has to happen whether or not the step was audible, or a catch-up would
+// leave the form — which bar, which section — out of step with the clock.
+function advance() {
+  M.nextTime += stepDur();
+  M.step = (M.step + 1) % STEPS;
+  // Intensity and tune changes both land on a bar line, so neither a new
+  // layer nor a whole new track ever pops in mid-phrase.
+  if (M.step % 16 === 0) {
+    M.intensity = M.target;
+    if (M.pendingTune !== null) { M.tune = M.pendingTune; M.pendingTune = null; }
+  }
+}
 
 function schedule() {
   const c = ctx();
   if (!c || !M.running) return;
-  // If the tab was backgrounded the audio clock ran on without us; skip
-  // forward rather than frantically scheduling a backlog of stale steps.
-  if (M.nextTime < c.currentTime - 0.25) M.nextTime = c.currentTime + 0.05;
+  const t = c.currentTime;
 
-  while (M.nextTime < c.currentTime + LOOKAHEAD) {
+  // Null, not zero, for "no previous tick": currentTime is legitimately
+  // 0 at the start of a context, and a falsy test threw the first gap
+  // away — which cost a second hole before the window had learnt the
+  // rate, 19 unheard steps against 9.
+  const since = M.lastTick === null ? 0 : Math.max(0, t - M.lastTick);
+  M.lastTick = t;
+  M.window = Math.min(MAX_LOOKAHEAD,
+    Math.max(LOOKAHEAD, since * WINDOW_SLACK, M.window * WINDOW_DECAY));
+
+  // Steps whose moment has already passed cannot be heard. Walk over them
+  // so the sequence stays where the clock says it should be. Scheduling
+  // them anyway would fire the whole backlog at once — the old code's
+  // alternative, jumping nextTime to the present, threw the same stretch
+  // away but also lost the musical position with it.
+  let over = 0;
+  while (M.nextTime < t && over < CATCHUP_MAX) { advance(); over++; }
+  if (M.nextTime < t) M.nextTime = t + 0.02;     // hopelessly behind; resync
+  M.skipped += over;
+
+  while (M.nextTime < t + M.window) {
     playStep(M.step, M.nextTime);
-    M.nextTime += stepDur();
-    M.step = (M.step + 1) % STEPS;
-    // Intensity and tune changes both land on a bar line, so neither a new
-    // layer nor a whole new track ever pops in mid-phrase.
-    if (M.step % 16 === 0) {
-      M.intensity = M.target;
-      if (M.pendingTune !== null) { M.tune = M.pendingTune; M.pendingTune = null; }
-    }
+    advance();
   }
 }
 
