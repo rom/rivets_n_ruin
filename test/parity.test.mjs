@@ -297,9 +297,14 @@ test('the README controls table lists every key the game binds', () => {
 
 test('the README endpoint table lists every route', () => {
   const go = readFileSync(new URL('../internal/api/api.go', import.meta.url), 'utf8');
-  const routes = [...go.matchAll(/mux\.HandleFunc\("([A-Z]+) ([^"]+)"/g)]
+  // Both mux.HandleFunc and mux.Handle: the admin login is registered
+  // with the latter, because it is wrapped in its own rate limiter, and
+  // matching only HandleFunc quietly stopped checking it.
+  const routes = [...go.matchAll(/mux\.Handle(?:Func)?\("([A-Z]+) ([^"]+)"/g)]
     .map((m) => ({ method: m[1], path: m[2] }));
   assert.ok(routes.length > 10, `only found ${routes.length} routes in api.go`);
+  assert.ok(routes.some((r) => r.path === '/api/admin/login'),
+    'the admin login was not found in api.go; the pattern above has stopped matching');
   for (const r of routes) {
     const re = new RegExp(`\\|\\s*\`${r.method}\`\\s*\\|\\s*\`${
       r.path.replace(/[{}]/g, '\\$&')}\`\\s*\\|`);

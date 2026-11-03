@@ -18,7 +18,22 @@ import (
 
 const adminPw = "correct horse battery staple"
 
+// The operator's listener. Not Routes(): since the admin surface moved
+// to its own port, the game's handler has no admin routes registered at
+// all — see TestTheGameListenerHasNoAdminDoor.
+//
+// The login limiter is given a huge rate here. It is 0.2/s in
+// production, which is correct and would make these tests, which log in
+// dozens of times from one address, take minutes. The limiter itself
+// has its own test.
 func adminServer(t *testing.T, localOnly bool) (http.Handler, store.Store) {
+	t.Helper()
+	srv, st := adminSrv(t, localOnly)
+	srv.adminRL = newRateLimiter(1e6, 1e6)
+	return srv.AdminRoutes(nil), st
+}
+
+func adminSrv(t *testing.T, localOnly bool) (*Server, store.Store) {
 	t.Helper()
 	h, err := HashPassword(adminPw)
 	if err != nil {
@@ -29,7 +44,7 @@ func adminServer(t *testing.T, localOnly bool) (http.Handler, store.Store) {
 	return New(st, log, Config{
 		RateLimitPerSec: 1e6, RateBurst: 1e6,
 		AdminPasswordHash: h, AdminAllowRemote: !localOnly,
-	}).Routes(), st
+	}), st
 }
 
 // httptest.NewRequest uses 192.0.2.1, which is not loopback. Most of
@@ -226,7 +241,8 @@ func TestAdminSessionsExpire(t *testing.T) {
 	})
 	at := time.Now()
 	api.SetClock(func() time.Time { return at })
-	srv := api.Routes()
+	api.adminRL = newRateLimiter(1e6, 1e6)
+	srv := api.AdminRoutes(nil)
 
 	tok := adminLoginAs(t, srv)
 	if w, _ := adminDo(t, srv, "GET", "/api/admin/players", tok, nil, true); w.Code != http.StatusOK {
@@ -456,7 +472,7 @@ func TestAdminConfigDefaultsToLoopbackOnly(t *testing.T) {
 	// password gets the restriction.
 	srv := New(store.NewMemory(), log, Config{
 		RateLimitPerSec: 1e6, RateBurst: 1e6, AdminPasswordHash: h,
-	}).Routes()
+	}).AdminRoutes(nil)
 
 	w, _ := adminDo(t, srv, "POST", "/api/admin/login", "", map[string]any{"password": adminPw}, false)
 	if w.Code != http.StatusNotFound {
@@ -483,7 +499,8 @@ func TestExpiredAdminSessionsAreSweptOnLogin(t *testing.T) {
 	})
 	at := time.Now()
 	api.SetClock(func() time.Time { return at })
-	srv := api.Routes()
+	api.adminRL = newRateLimiter(1e6, 1e6)
+	srv := api.AdminRoutes(nil)
 
 	for i := 0; i < 5; i++ {
 		adminLoginAs(t, srv)

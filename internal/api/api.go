@@ -14,6 +14,15 @@ import (
 	"github.com/rom/rivets_n_ruin/internal/store"
 )
 
+// How hard the admin login may be hammered. An operator mistypes a
+// password two or three times and then gets it right; nobody works
+// through a word list at one attempt every five seconds. Deliberately
+// not configurable: a knob here is a knob somebody turns up.
+const (
+	AdminLoginPerSec = 0.2
+	AdminLoginBurst  = 5
+)
+
 // MaxBodyBytes caps every request body. Mod configs are the largest thing
 // anyone legitimately posts and they are small.
 const MaxBodyBytes = 64 << 10
@@ -58,6 +67,8 @@ type Server struct {
 	// A bucket of its own for the name check, far tighter than the rest
 	// of the API. See available.go.
 	nameRL *rateLimiter
+	// And one for the admin login, tighter still. See AdminRoutes.
+	adminRL *rateLimiter
 	// What the OS agreed to take away, for /api/stats. A hardening layer
 	// nobody can see the state of gets quietly broken and stays broken.
 	hardening any
@@ -80,6 +91,7 @@ func New(s store.Store, log *slog.Logger, cfg Config) *Server {
 		adminAllowRemote: cfg.AdminAllowRemote,
 		adminSessions:    map[string]*adminSession{},
 		nameRL:           newRateLimiter(NameCheckPerSec, NameCheckBurst),
+		adminRL:          newRateLimiter(AdminLoginPerSec, AdminLoginBurst),
 	}
 }
 
@@ -113,27 +125,90 @@ func (s *Server) Routes() http.Handler {
 
 	mux.HandleFunc("POST /api/errors", s.reportErrors)
 
-	// --- the operator's door
-	//
-	// Registered only when a password was configured, so an unconfigured
-	// server has no admin surface at all rather than a disabled one.
-	// Everything behind requireAdmin answers 404 when it refuses.
-	if s.adminEnabled() {
-		mux.HandleFunc("POST /api/admin/login", s.adminLogin)
-		mux.HandleFunc("POST /api/admin/logout", s.requireAdmin(s.adminLogout))
-		mux.HandleFunc("GET /api/admin/stats", s.requireAdmin(s.adminStats))
-		mux.HandleFunc("GET /api/admin/players", s.requireAdmin(s.adminListPlayers))
-		mux.HandleFunc("POST /api/admin/players", s.requireAdmin(s.adminCreatePlayer))
-		mux.HandleFunc("GET /api/admin/players/{id}", s.requireAdmin(s.adminGetPlayer))
-		mux.HandleFunc("DELETE /api/admin/players/{id}", s.requireAdmin(s.adminDeletePlayer))
-		mux.HandleFunc("POST /api/admin/players/{id}/reset", s.requireAdmin(s.adminResetPlayer))
-		mux.HandleFunc("POST /api/admin/players/{id}/password", s.requireAdmin(s.adminSetPassword))
-	}
-
 	mux.HandleFunc("POST /api/presence", s.heartbeat)
 	mux.HandleFunc("GET /api/presence", s.livePresence)
 
 	return recoverer(s.log)(logging(s.log)(cors(s.rl.middleware(mux))))
+}
+
+// AdminRoutes is the operator's door, and it is a different door.
+//
+// It used to be eight routes on the public mux, which meant the only
+// thing standing between the internet and DELETE /api/admin/players/{id}
+// was a password check inside the handler — one routing mistake, one
+// middleware ordering change, one proxy rule deep. Now the game's
+// listener does not have these routes at all: a request for one gets
+// the static file handler's 404 because nothing is registered, not
+// because something decided to refuse it.
+//
+// It returns nil when no password is configured, and cmd/server does
+// not open the second listener at all in that case. An unconfigured
+// server has no admin surface rather than a disabled one.
+//
+// `ui` is the operator's page, served at the root of this listener. It
+// is passed in rather than imported so that this package stays free of
+// the UI, and nil is allowed: the API alone is a usable tool with curl.
+func (s *Server) AdminRoutes(ui http.Handler) http.Handler {
+	if !s.adminEnabled() {
+		return nil
+	}
+	mux := http.NewServeMux()
+
+	// Login is the one unauthenticated route here, so it gets a bucket
+	// of its own, far tighter than the API's. The global limiter is
+	// per-IP and this listener is normally loopback-only, which means
+	// every attempt shares one bucket — generous enough for an operator
+	// mistyping a password and useless for working through a list.
+	mux.Handle("POST /api/admin/login", s.adminRL.middleware(http.HandlerFunc(s.adminLogin)))
+	mux.HandleFunc("POST /api/admin/logout", s.requireAdmin(s.adminLogout))
+
+	mux.HandleFunc("GET /api/admin/stats", s.requireAdmin(s.adminStats))
+	mux.HandleFunc("GET /api/admin/errors", s.requireAdmin(s.adminErrors))
+	mux.HandleFunc("GET /api/admin/presence", s.requireAdmin(s.adminPresence))
+
+	mux.HandleFunc("GET /api/admin/players", s.requireAdmin(s.adminListPlayers))
+	mux.HandleFunc("POST /api/admin/players", s.requireAdmin(s.adminCreatePlayer))
+	mux.HandleFunc("GET /api/admin/players/{id}", s.requireAdmin(s.adminGetPlayer))
+	mux.HandleFunc("DELETE /api/admin/players/{id}", s.requireAdmin(s.adminDeletePlayer))
+	mux.HandleFunc("POST /api/admin/players/{id}/reset", s.requireAdmin(s.adminResetPlayer))
+	mux.HandleFunc("POST /api/admin/players/{id}/password", s.requireAdmin(s.adminSetPassword))
+	mux.HandleFunc("POST /api/admin/players/{id}/stats", s.requireAdmin(s.adminSetStats))
+
+	mux.HandleFunc("GET /api/admin/runs", s.requireAdmin(s.adminListRuns))
+	mux.HandleFunc("GET /api/admin/runs/{id}", s.requireAdmin(s.adminGetRun))
+	mux.HandleFunc("DELETE /api/admin/runs/{id}", s.requireAdmin(s.adminDeleteRun))
+	mux.HandleFunc("POST /api/admin/scores/reset", s.requireAdmin(s.adminResetScores))
+
+	if ui != nil {
+		mux.Handle("/", s.adminPage(ui))
+	}
+
+	// No cors(): nothing should be reaching this from a page served
+	// anywhere else, and the operator's own page is same-origin.
+	return recoverer(s.log)(logging(s.log)(mux))
+}
+
+// adminPage serves the operator's UI, with the headers a page holding a
+// session token for a surface that deletes accounts ought to have. The
+// page loads nothing from anywhere, so the policy can say so flatly.
+func (s *Server) adminPage(ui http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Address-checked like everything else on this listener, so a
+		// remote caller cannot even learn that the page exists.
+		if !s.adminAllowRemote && !isLoopback(r.RemoteAddr) {
+			http.NotFound(w, r)
+			return
+		}
+		h := w.Header()
+		h.Set("Content-Security-Policy",
+			"default-src 'none'; script-src 'self'; style-src 'self'; "+
+				"connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Cache-Control", "no-store")
+		ui.ServeHTTP(w, r)
+	})
 }
 
 // ------------------------------------------------------------------ helpers

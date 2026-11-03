@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/rom/rivets_n_ruin/internal/model"
 	"github.com/rom/rivets_n_ruin/internal/validate"
 )
 
@@ -350,4 +351,196 @@ func isLoopback(remoteAddr string) bool {
 		return false
 	}
 	return ip.IsLoopback()
+}
+
+// --- the recorded runs
+//
+// "Information on specific game runs" is the operator question the
+// public API cannot answer at all: /api/scores/top folds to one row per
+// pilot and shows the best, which is the opposite of what someone
+// investigating a suspicious number needs.
+
+func (s *Server) adminListRuns(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	limit := intParam(r, "limit", 50)
+	offset := intParam(r, "offset", 0)
+	runs, total := s.store.ListScores(q, limit, offset)
+	s.audit(r, "list runs", "q", q, "returned", len(runs), "total", total)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"runs": runs, "total": total, "offset": offset, "limit": limit,
+	})
+}
+
+func (s *Server) adminGetRun(w http.ResponseWriter, r *http.Request) {
+	sc, err := s.store.ScoreByID(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, statusFor(err), err.Error())
+		return
+	}
+	// The pilot it belongs to, and where this run sits among their
+	// others — which is most of what makes one run interesting. A
+	// missing player is not an error here: a run can outlive the
+	// account on a store that did not cascade, and an operator looking
+	// at an orphan should see the orphan rather than a 404.
+	var player any
+	var siblings []int
+	if p, err := s.store.PlayerByID(sc.PlayerID); err == nil {
+		player = p
+		if list, err := s.store.PlayerScores(p.ID, 100); err == nil {
+			for _, o := range list {
+				siblings = append(siblings, o.Points)
+			}
+		}
+	}
+	// Points per second, which is the first thing to look at on a run
+	// that does not smell right.
+	rate := 0.0
+	if sc.TimeSec > 0 {
+		rate = float64(sc.Points) / sc.TimeSec
+	}
+	s.audit(r, "read run", "id", sc.ID, "player", sc.PlayerID, "points", sc.Points)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"run":           sc,
+		"player":        player,
+		"otherRuns":     siblings,
+		"pointsPerSec":  rate,
+		"pointsPerHull": perHull(sc),
+	})
+}
+
+func perHull(sc *model.Score) float64 {
+	if sc.Levels <= 0 {
+		return 0
+	}
+	return float64(sc.Points) / float64(sc.Levels)
+}
+
+func (s *Server) adminDeleteRun(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sc, err := s.store.ScoreByID(id)
+	if err != nil {
+		writeErr(w, statusFor(err), err.Error())
+		return
+	}
+	s.audit(r, "delete run", "id", id, "player", sc.PlayerID, "name", sc.Name, "points", sc.Points)
+	if err := s.store.DeleteScore(id); err != nil {
+		writeErr(w, statusFor(err), err.Error())
+		return
+	}
+	// What the pilot's card says now the run is gone. The store
+	// recomputes it; echoing it back is what lets the page update
+	// without a second round trip and lets the operator see that the
+	// number they were removing actually went.
+	var best, runs int
+	if p, err := s.store.PlayerByID(sc.PlayerID); err == nil {
+		best, runs = p.Best, p.Runs
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"deleted": id, "playerId": sc.PlayerID, "best": best, "runs": runs,
+	})
+}
+
+// adminResetScores wipes the board.
+//
+// Guarded by a confirmation in the body rather than by the method,
+// because DELETE on a collection is one mistyped URL away from a
+// DELETE on a row, and this one cannot be undone. The page asks for
+// the word; curl has to send it too.
+func (s *Server) adminResetScores(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Confirm string `json:"confirm"`
+	}
+	if err := readJSON(w, r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "malformed body")
+		return
+	}
+	if req.Confirm != "RESET" {
+		writeErr(w, http.StatusBadRequest, `send {"confirm":"RESET"} to wipe every recorded run`)
+		return
+	}
+	s.audit(r, "reset all scores")
+	n := s.store.ResetScores()
+	s.log.Warn("admin wiped the leaderboard", "from", r.RemoteAddr, "runs", n)
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": n})
+}
+
+// adminSetStats edits a pilot's counters.
+//
+// Runs and Best are a cache maintained by AddScore so that reading a
+// player does not mean walking the score table; the leaderboard itself
+// is computed from the runs. Setting a best here that no recorded run
+// supports makes the card and the board disagree, which is sometimes
+// the point — tidying a counter after removing a run — and sometimes a
+// mistake. So the answer carries both numbers: what the card now says,
+// and what the runs on record actually add up to.
+func (s *Server) adminSetStats(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Runs *int `json:"runs"`
+		Best *int `json:"best"`
+	}
+	if err := readJSON(w, r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "malformed body")
+		return
+	}
+	p, err := s.store.PlayerByID(id)
+	if err != nil {
+		writeErr(w, statusFor(err), err.Error())
+		return
+	}
+	runs, best := p.Runs, p.Best
+	if req.Runs != nil {
+		runs = *req.Runs
+	}
+	if req.Best != nil {
+		best = *req.Best
+	}
+	s.audit(r, "set stats", "id", id, "name", p.Name,
+		"runs", runs, "was", p.Runs, "best", best, "wasBest", p.Best)
+	if err := s.store.SetPlayerStats(id, runs, best); err != nil {
+		writeErr(w, statusFor(err), err.Error())
+		return
+	}
+	after, err := s.store.PlayerByID(id)
+	if err != nil {
+		writeErr(w, statusFor(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"player":   after,
+		"onRecord": recordedStats(s, id),
+	})
+}
+
+// recordedStats is what the runs on record add up to, independent of
+// the counters. The page shows it beside them so a disagreement is
+// visible rather than discovered later from the leaderboard.
+func recordedStats(s *Server, playerID string) map[string]any {
+	list, _ := s.store.PlayerScores(playerID, 1000)
+	best := 0
+	for _, sc := range list {
+		if sc.Points > best {
+			best = sc.Points
+		}
+	}
+	return map[string]any{"runs": len(list), "best": best}
+}
+
+// --- what is going wrong out there
+//
+// The reports themselves, which /api/stats deliberately withholds.
+
+func (s *Server) adminErrors(w http.ResponseWriter, r *http.Request) {
+	limit := intParam(r, "limit", 50)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"summary": s.errs.summary(),
+		"recent":  s.errs.recent(limit),
+	})
+}
+
+// --- who is flying right now
+
+func (s *Server) adminPresence(w http.ResponseWriter, r *http.Request) {
+	live := s.store.LivePresence()
+	writeJSON(w, http.StatusOK, map[string]any{"flying": live, "count": len(live)})
 }

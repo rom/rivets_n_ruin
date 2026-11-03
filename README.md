@@ -36,7 +36,9 @@ backend API, so there is one thing to run and no CORS to think about.
 | `make icons` | Regenerate the favicon |
 
 Server flags: `-addr`, `-dir`, `-data`, `-save-interval`, `-rate-limit`,
-`-rate-burst`, `-require-runs`, `-harden`, `-allow-root`, `-v`.
+`-rate-burst`, `-require-runs`, `-harden`, `-allow-root`, `-v`, and for
+the operator tool `-admin-addr`, `-admin-anywhere`,
+`-admin-password-hash-file`, `-admin-password-file`.
 
 > **A note on `node --check`.** It reports success on a `.js` file containing ES
 > module syntax even when the file is genuinely unparseable — it only diagnoses
@@ -1902,31 +1904,88 @@ reports each pilot's progress along the hull.
 | `POST` | `/api/presence` | yes | heartbeat while flying |
 | `GET` | `/api/presence` | — | who is flying right now |
 
-### The operator's door
+### The operator tool
 
-Registered only when a credential is configured. With none, the routes
-do not exist — there is no default password, nothing to find and nothing
-to brute-force. Everything behind it answers `404` when it refuses,
+A password-protected web page **on its own port**, with its own API
+beside it. Point a browser at `http://127.0.0.1:8001` and sign in.
+
+![The operator tool](docs/admin-overview.png)
+
+It exists only when a credential is configured. With none, no second
+port is opened, the routes are not registered and the page is not
+served — there is no default password, nothing to find and nothing to
+brute-force. Everything behind it answers `404` when it refuses,
 including a wrong token and a request from the wrong address: a surface
 that announces itself is a surface worth attacking.
+
+**A different port, not a different path.** The game's listener does
+not have these routes at all. A request for `/api/admin/players` there
+is answered by the static file handler, which has never heard of it —
+not by a password check inside a handler that one proxy rule, one
+middleware reordering or one mistake in `requireAdmin` stands between
+the internet and `DELETE /api/admin/players/{id}`. The page itself is
+compiled into the binary rather than served from the static root, which
+is reachable from the public port by definition.
+
+Four tabs:
+
+| Tab | What it is for |
+| --- | --- |
+| **Overview** | the board's counters, who is flying right now, what the OS granted the process, and the one button that wipes everything |
+| **Pilots** | search, read one pilot in full, edit their counters, change their password, reset them, delete them |
+| **Runs** | every recorded run newest first, searchable by pilot or by run id; one run in detail with the numbers that say whether it is plausible |
+| **Errors** | the client error reports themselves, which the public `/api/stats` deliberately withholds |
+
+| | |
+| --- | --- |
+| ![One run](docs/admin-run.png) | ![One pilot](docs/admin-pilot.png) |
+| Points a second, points a hull, and how this run compares to the pilot's others — the numbers you reach for when a score does not look right | Their counters, their recent runs, and every irreversible thing you can do to the account, each behind a confirmation that names what it is about to remove |
 
 | | | |
 | --- | --- | --- |
 | `POST` | `/api/admin/login` | password in, short-lived token out |
 | `POST` | `/api/admin/logout` | end the session now |
 | `GET` | `/api/admin/stats` | store counters, live sessions, what the OS granted |
+| `GET` | `/api/admin/errors` | client error reports, contents and all |
+| `GET` | `/api/admin/presence` | who is flying right now |
 | `GET` | `/api/admin/players` | list and search pilots |
 | `POST` | `/api/admin/players` | add one, with or without a password |
 | `GET` | `/api/admin/players/{id}` | everything about one pilot, with statistics |
 | `DELETE` | `/api/admin/players/{id}` | remove the pilot and all of their data |
 | `POST` | `/api/admin/players/{id}/reset` | clear their history, keep the account |
 | `POST` | `/api/admin/players/{id}/password` | set a new password |
+| `POST` | `/api/admin/players/{id}/stats` | edit their runs and best counters |
+| `GET` | `/api/admin/runs` | recorded runs — `?q=`, `?limit=`, `?offset=` |
+| `GET` | `/api/admin/runs/{id}` | one run, its pilot, and how it compares to their others |
+| `DELETE` | `/api/admin/runs/{id}` | remove one run; the pilot's best is recomputed |
+| `POST` | `/api/admin/scores/reset` | wipe every recorded run — needs `{"confirm":"RESET"}` |
 
 **Loopback only**, unless you pass `-admin-anywhere`. Most of what these
 do cannot be undone, and anyone who wants them reachable from elsewhere
 should have to say so and put TLS and an allowlist in front. A token
 minted locally does not work from off-machine either, so a leaked one
-does not travel.
+does not travel. `-admin-addr ''` turns the tool off entirely.
+
+**Login has its own rate limit**, far tighter than the API's: it is the
+one unauthenticated route on that listener, and on a loopback-only
+listener every attempt in the world shares one bucket. Generous enough
+for an operator mistyping a password, useless for working through a
+list.
+
+**Removing one run is usually what you want.** It takes the number with
+it: the pilot's `best` is recomputed from the runs still on record, so
+a cheated score does not stay on their card after the run behind it is
+gone. Wiping the whole board is there too, behind a typed confirmation
+in the request body as well as in the page — `DELETE` on a collection
+is one mistyped URL away from `DELETE` on a row.
+
+**Editing a pilot's counters tells you when they disagree with the
+runs.** `runs` and `best` are a cache maintained on submission so that
+reading a player does not mean walking the score table; the leaderboard
+itself is computed from the runs. Setting a best no recorded run
+supports is sometimes exactly right — tidying up after removing one by
+hand — and sometimes a mistake, so the answer carries both numbers and
+the page colours the difference.
 
 **Changing a password kills the pilot's session token.** Otherwise
 resetting the credential of a compromised account would change nothing
