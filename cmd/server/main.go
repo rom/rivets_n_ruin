@@ -298,7 +298,14 @@ func main() {
 	if h := apiSrv.AdminRoutes(adminui.Handler()); h != nil && *adminAddr != "" {
 		adminLn, err = net.Listen("tcp", *adminAddr)
 		if err != nil {
-			log.Error("cannot bind the operator tool", "addr", *adminAddr, "err", err)
+			// Fatal rather than a warning and carry on: an operator who
+			// configured a credential asked for this tool, and a server
+			// that quietly came up without it would be found out the
+			// first time somebody needed it. The default port is not
+			// something they chose, though, so the message says which
+			// flag moves it.
+			log.Error("cannot bind the operator tool", "addr", *adminAddr, "err", err,
+				"fix", "move it with -admin-addr, or turn it off with -admin-addr ''")
 			os.Exit(1)
 		}
 		adminSrv = &http.Server{
