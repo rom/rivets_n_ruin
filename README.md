@@ -2027,6 +2027,7 @@ Four tabs:
 | `POST` | `/api/admin/players/{id}/reset` | clear their history, keep the account |
 | `POST` | `/api/admin/players/{id}/password` | set a new password |
 | `POST` | `/api/admin/players/{id}/stats` | edit their runs and best counters |
+| `PUT` | `/api/admin/players/{id}/hangar` | set their coins, gold bars and systems |
 | `GET` | `/api/admin/runs` | recorded runs — `?q=`, `?limit=`, `?offset=` |
 | `GET` | `/api/admin/runs/{id}` | one run, its pilot, and how it compares to their others |
 | `DELETE` | `/api/admin/runs/{id}` | remove one run; the pilot's best is recomputed |

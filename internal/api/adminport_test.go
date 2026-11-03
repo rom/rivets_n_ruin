@@ -507,3 +507,129 @@ func TestReadingARunWhosePilotIsGone(t *testing.T) {
 	}
 	_ = p
 }
+
+// --- a pilot's belongings
+
+func TestAdminSetsHangar(t *testing.T) {
+	h, st := adminServer(t, true)
+	p, _ := seedRuns(t, st)
+	st.SetHangar(p.ID, &model.Hangar{Coins: 100, Bars: 1, Mods: map[string]int{"magnet": 1}})
+	tok := adminLoginAs(t, h)
+
+	w, out := adminDo(t, h, "PUT", "/api/admin/players/"+p.ID+"/hangar", tok,
+		map[string]any{"coins": 5000, "bars": 7, "mods": map[string]any{"plating": 1, "mount": 2}}, true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("set hangar: %d %s", w.Code, w.Body)
+	}
+	if c, _ := out["coins"].(float64); c != 5000 {
+		t.Fatalf("coins came back %v", out["coins"])
+	}
+	if b, _ := out["bars"].(float64); b != 7 {
+		t.Fatalf("bars came back %v", out["bars"])
+	}
+	// A whole replace, not a merge: the system they used to own is gone
+	// because the operator did not send it.
+	mods, _ := out["mods"].(map[string]any)
+	if len(mods) != 2 || mods["plating"] == nil || mods["mount"] == nil {
+		t.Fatalf("mods came back %v", mods)
+	}
+	if mods["magnet"] != nil {
+		t.Fatal("a system the operator did not send survived; this is a replace, not a patch")
+	}
+	// ...and it is really in the store, not just in the answer.
+	got := st.Hangar(p.ID)
+	if got.Coins != 5000 || got.Bars != 7 || got.Mods["mount"] != 2 {
+		t.Fatalf("the store has %+v", got)
+	}
+}
+
+func TestAdminHangarIsClampedLikeThePilotsOwn(t *testing.T) {
+	// Straight through store.SetHangar, the same call the pilot's
+	// client uses. An operator must not be able to write a value the
+	// game could not have produced: a hangar that will not render is a
+	// worse outcome than a refused edit.
+	h, st := adminServer(t, true)
+	p, _ := seedRuns(t, st)
+	tok := adminLoginAs(t, h)
+
+	w, out := adminDo(t, h, "PUT", "/api/admin/players/"+p.ID+"/hangar", tok,
+		map[string]any{
+			"coins": store.MaxCoins * 10, "bars": -50,
+			"mods": map[string]any{"magnet": 99, "": 1, "plating": 0},
+		}, true)
+	if w.Code != http.StatusOK {
+		t.Fatalf("set hangar: %d %s", w.Code, w.Body)
+	}
+	if c, _ := out["coins"].(float64); int(c) != store.MaxCoins {
+		t.Fatalf("coins over the cap came back %v, want %d", out["coins"], store.MaxCoins)
+	}
+	if b, _ := out["bars"].(float64); b != 0 {
+		t.Fatalf("negative bars came back %v", out["bars"])
+	}
+	mods, _ := out["mods"].(map[string]any)
+	if lvl, _ := mods["magnet"].(float64); int(lvl) != store.MaxModLevel {
+		t.Fatalf("a level of 99 came back %v, want the cap %d", mods["magnet"], store.MaxModLevel)
+	}
+	if _, bad := mods[""]; bad {
+		t.Fatal("a system with no id was stored")
+	}
+	if _, zero := mods["plating"]; zero {
+		t.Fatal("a level of 0 was stored; that is not owning it")
+	}
+}
+
+func TestAdminHangarRefusesWhatItShould(t *testing.T) {
+	h, st := adminServer(t, true)
+	p, _ := seedRuns(t, st)
+	tok := adminLoginAs(t, h)
+
+	if w, _ := adminDo(t, h, "PUT", "/api/admin/players/nope/hangar", tok,
+		map[string]any{"coins": 1}, true); w.Code != http.StatusNotFound {
+		t.Fatalf("an unknown pilot answered %d", w.Code)
+	}
+	for _, tokn := range []string{"", "not-a-real-token"} {
+		if w, _ := adminDo(t, h, "PUT", "/api/admin/players/"+p.ID+"/hangar", tokn,
+			map[string]any{"coins": 999}, true); w.Code != http.StatusNotFound {
+			t.Fatalf("token %q answered %d, want 404", tokn, w.Code)
+		}
+	}
+	// ...and nothing was written while those were refused.
+	if got := st.Hangar(p.ID); got.Coins != 0 {
+		t.Fatalf("a refused call still wrote %d coins", got.Coins)
+	}
+}
+
+// The page offers a list of systems rather than a text box, so the read
+// has to carry one. An operator who types `platting` grants a system
+// the game will never read, which looks exactly like the grant failing.
+func TestReadingAPilotCarriesTheSystemsList(t *testing.T) {
+	h, st := adminServer(t, true)
+	p, _ := seedRuns(t, st)
+	tok := adminLoginAs(t, h)
+
+	_, out := adminDo(t, h, "GET", "/api/admin/players/"+p.ID, tok, nil, true)
+	list, _ := out["systems"].([]any)
+	if len(list) != len(Systems) {
+		t.Fatalf("the read carried %d systems, the server knows %d", len(list), len(Systems))
+	}
+	first, _ := list[0].(map[string]any)
+	if first["id"] == nil || first["name"] == nil || first["tiers"] == nil {
+		t.Fatalf("a system came back as %v; the page needs id, name and tiers", first)
+	}
+	// Every id is distinct and every tier count is a real one, or the
+	// page builds a picker that cannot express what the game sells.
+	seen := map[string]bool{}
+	for _, sys := range Systems {
+		if seen[sys.ID] {
+			t.Fatalf("%q is listed twice", sys.ID)
+		}
+		seen[sys.ID] = true
+		if sys.Tiers < 1 {
+			t.Fatalf("%q has %d tiers", sys.ID, sys.Tiers)
+		}
+		if sys.Tiers > store.MaxModLevel {
+			t.Fatalf("%q sells %d tiers but the store caps a level at %d",
+				sys.ID, sys.Tiers, store.MaxModLevel)
+		}
+	}
+}

@@ -730,3 +730,23 @@ test('the README layout block names every package and tool', () => {
   }
   assert.deepEqual(missing, [], `missing from the layout block: ${missing.join(', ')}`);
 });
+
+// The permanent systems, in two places on purpose.
+//
+// internal/api/systems.go mirrors src/shop.js so the operator tool can
+// offer a list instead of a text box, the same arrangement
+// internal/validate uses for the physics constants. Two copies of
+// anything drift; this is what stops them.
+test('the server knows the same permanent systems the shop sells', () => {
+  const go = readFileSync(new URL('../internal/api/systems.go', import.meta.url), 'utf8');
+  const rows = [...go.matchAll(/\{"([a-z]+)",\s*"([^"]+)",\s*(\d+)\},/g)]
+    .map((m) => ({ id: m[1], name: m[2], tiers: Number(m[3]) }));
+  assert.ok(rows.length > 5, `only found ${rows.length} systems in systems.go`);
+
+  const want = Object.entries(MODS).map(([id, m]) => ({
+    id, name: m.name, tiers: m.tiers.length,
+  }));
+  assert.deepEqual(rows, want,
+    'internal/api/systems.go and src/shop.js MODS have drifted; the operator '
+    + 'tool would offer a system the game does not have, or miss one it does');
+});

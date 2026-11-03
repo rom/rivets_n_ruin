@@ -173,6 +173,7 @@ func (s *Server) AdminRoutes(ui http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/admin/players/{id}/reset", s.requireAdmin(s.adminResetPlayer))
 	mux.HandleFunc("POST /api/admin/players/{id}/password", s.requireAdmin(s.adminSetPassword))
 	mux.HandleFunc("POST /api/admin/players/{id}/stats", s.requireAdmin(s.adminSetStats))
+	mux.HandleFunc("PUT /api/admin/players/{id}/hangar", s.requireAdmin(s.adminSetHangar))
 
 	mux.HandleFunc("GET /api/admin/runs", s.requireAdmin(s.adminListRuns))
 	mux.HandleFunc("GET /api/admin/runs/{id}", s.requireAdmin(s.adminGetRun))

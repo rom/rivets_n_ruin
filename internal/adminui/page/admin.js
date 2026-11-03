@@ -112,12 +112,15 @@ async function signIn(password) {
 function signOut(why) {
   token = null;
   expiresAt = null;
-  if ($('session')) $('session').textContent = '';
   try {
     sessionStorage.removeItem(TOKEN_KEY);
     sessionStorage.removeItem(TOKEN_KEY + '.exp');
   } catch { /* private mode */ }
-  $('app').hidden = true;
+  // Removed, not hidden. Signing out should leave the same page a
+  // stranger gets, including in view source — and it also throws away
+  // every pilot name and run the session had loaded into the DOM.
+  const app = $('app');
+  if (app) app.remove();
   $('login').hidden = false;
   $('pw').value = '';
   if (why) note($('login-note'), why, 'bad');
@@ -144,9 +147,117 @@ function tickSession() {
 }
 setInterval(tickSession, 1000);
 
+// The tool's own markup, built only once a password has worked.
+//
+// It used to be in index.html under a `hidden` attribute: nothing
+// showed, but everything was served. A login screen that ships the
+// thing it is guarding is a login screen in name only — view source
+// and you had every tab, every button and every route. Built here, the
+// page before sign-in really is a password box and nothing else.
+function buildShell() {
+  if ($('app')) return;
+  const tabButton = (id, label) => el('button', {
+    'data-tab': id,
+    'aria-current': String(id === 'overview'),
+    on: { click: () => openTab(id) },
+  }, label);
+
+  const app = el('div', { id: 'app' },
+    el('header', {},
+      el('h1', {}, "RIVETS 'N RUIN"),
+      el('span', { class: 'sub' }, 'OPERATOR'),
+      el('span', { class: 'spacer' }),
+      el('span', { class: 'sub', id: 'session' }),
+      el('button', {
+        id: 'signout',
+        on: {
+          click: async () => {
+            try { await api('POST', '/api/admin/logout'); } catch { /* going anyway */ }
+            signOut();
+          },
+        },
+      }, 'SIGN OUT')),
+
+    el('nav', {},
+      tabButton('overview', 'OVERVIEW'),
+      tabButton('pilots', 'PILOTS'),
+      tabButton('runs', 'RUNS'),
+      tabButton('errors', 'ERRORS')),
+
+    el('main', {},
+      el('div', { id: 'note' }),
+
+      el('section', { id: 'tab-overview' },
+        el('h2', {}, 'THE BOARD'),
+        el('div', { class: 'tiles', id: 'stat-tiles' }),
+        el('h2', {}, 'THE BACKEND'),
+        el('div', { id: 'server-info' }),
+        el('h2', {}, 'FLYING NOW'),
+        el('div', { id: 'presence' }),
+        el('h2', {}, 'DANGEROUS'),
+        el('p', { class: 'hint' },
+          'Wiping the board removes every recorded run and zeroes every '
+          + "pilot's counters. Accounts, credentials and hangars stay. It "
+          + 'cannot be undone. To remove one run instead, find it under RUNS.'),
+        el('div', { class: 'row' },
+          el('button', { id: 'wipe', class: 'danger', on: { click: wipeScores } },
+            'WIPE EVERY RECORDED RUN'))),
+
+      el('section', { id: 'tab-pilots', hidden: true },
+        el('h2', {}, 'PILOTS'),
+        el('form', {
+          class: 'row',
+          id: 'pilot-search',
+          on: {
+            submit: (e) => {
+              e.preventDefault();
+              clearSay();
+              loadPilots().catch((err) => say(err.message, 'bad'));
+            },
+          },
+        },
+        el('input', { id: 'pilot-q', class: 'grow', placeholder: 'name or id',
+          'aria-label': 'Search pilots' }),
+        el('button', { type: 'submit' }, 'SEARCH')),
+        el('div', { id: 'pilot-list' }),
+        el('div', { id: 'pilot-detail' })),
+
+      el('section', { id: 'tab-runs', hidden: true },
+        el('h2', {}, 'RECORDED RUNS'),
+        el('form', {
+          class: 'row',
+          id: 'run-search',
+          on: {
+            submit: (e) => {
+              e.preventDefault();
+              clearSay();
+              loadRuns().catch((err) => say(err.message, 'bad'));
+            },
+          },
+        },
+        el('input', { id: 'run-q', class: 'grow',
+          placeholder: 'pilot name, pilot id or run id',
+          'aria-label': 'Search runs' }),
+        el('button', { type: 'submit' }, 'SEARCH')),
+        el('div', { id: 'run-list' }),
+        el('div', { id: 'run-detail' })),
+
+      el('section', { id: 'tab-errors', hidden: true },
+        el('h2', {}, 'CLIENT ERRORS'),
+        el('p', { class: 'hint' },
+          "What is going wrong in people's browsers. The game's own "
+          + '/api/stats gives counts only, because these hold stack traces '
+          + "and user agents from other people's machines; behind this door "
+          + 'the contents are the point.'),
+        el('div', { id: 'error-summary' }),
+        el('div', { id: 'error-list' }))));
+
+  document.body.append(app);
+}
+
 async function enter() {
+  buildShell();
   $('login').hidden = true;
-  $('app').hidden = false;
   clear($('login-note'));
   tickSession();
   await loadOverview();
@@ -208,6 +319,7 @@ const LOADERS = {};
 // panel on a tab that was not showing and the button appeared to do
 // nothing.
 function showTab(which) {
+  if (!$('app')) return;
   for (const t of TABS) $('tab-' + t).hidden = t !== which;
   for (const b of document.querySelectorAll('nav button')) {
     b.setAttribute('aria-current', String(b.dataset.tab === which));
@@ -329,6 +441,9 @@ async function openPilot(id) {
     el('h2', {}, 'EDIT'),
     editStats(p),
 
+    el('h2', {}, 'HANGAR'),
+    editHangar(p, hangar, d.systems || []),
+
     el('div', { class: 'actions' },
       el('button', { on: { click: () => setPassword(p) } }, 'CHANGE PASSWORD'),
       el('button', { class: 'danger', on: { click: () => resetPilot(p) } }, 'RESET THIS PILOT'),
@@ -337,10 +452,10 @@ async function openPilot(id) {
 }
 
 function editStats(p) {
-  const runs = el('input', { type: 'number', min: '0', value: p.runs, class: 'w-small',
-    'aria-label': 'Runs' });
-  const best = el('input', { type: 'number', min: '0', value: p.best, class: 'w-mid',
-    'aria-label': 'Best score' });
+  const runs = el('input', { id: 'stats-runs', type: 'number', min: '0', value: p.runs,
+    class: 'w-small', 'aria-label': 'Runs' });
+  const best = el('input', { id: 'stats-best', type: 'number', min: '0', value: p.best,
+    class: 'w-mid', 'aria-label': 'Best score' });
   return el('div', {},
     el('div', { class: 'row' },
       el('label', {}, 'runs '), runs,
@@ -366,6 +481,101 @@ function editStats(p) {
       'The counters are a cache. The leaderboard is computed from the runs '
       + 'themselves, so setting a best no run supports makes the card and the '
       + 'board disagree. Remove the run instead if that is what you meant.'));
+}
+
+// Coins, gold bars and the permanent systems a pilot owns.
+//
+// Systems come from the server rather than being typed: an operator
+// granting one has to name it, and a misspelled id writes a system the
+// game will never read, which looks exactly like the grant not
+// working. The list is mirrored from the shop's own table — see
+// internal/api/systems.go and the parity test that keeps them in step.
+//
+// Sent as a whole hangar rather than a patch, because that is the
+// shape of the thing: mods is a map, and "merge these in" has no
+// answer for a system the operator cleared. What comes back is what
+// the store kept after clamping, so a number over the cap shows as the
+// cap instead of being discovered later.
+function editHangar(p, hangar, systems) {
+  // Ids, not just a width class. The counters above use the same two
+  // classes, so anything selecting by class gets whichever comes
+  // first — which is how the first run of this editor silently typed
+  // coins into the best-score box.
+  const coins = el('input', { id: 'hangar-coins', type: 'number', min: '0',
+    value: hangar.coins || 0, class: 'w-mid', 'aria-label': 'Coins' });
+  const bars = el('input', { id: 'hangar-bars', type: 'number', min: '0',
+    value: hangar.bars || 0, class: 'w-small', 'aria-label': 'Gold bars' });
+
+  const owned = hangar.mods || {};
+  const levels = new Map();
+  const rows = systems.map((sys) => {
+    const at = Number(owned[sys.id] || 0);
+    const sel = el('select', { 'aria-label': sys.name });
+    for (let lvl = 0; lvl <= sys.tiers; lvl++) {
+      sel.append(el('option', { value: String(lvl), selected: lvl === at ? true : null },
+        lvl === 0 ? '—' : `${lvl} of ${sys.tiers}`));
+    }
+    sel.value = String(Math.min(at, sys.tiers));
+    levels.set(sys.id, sel);
+    return el('tr', { class: at ? null : 'dim' },
+      el('td', {}, sys.name),
+      el('td', { class: 'id' }, sys.id),
+      el('td', {}, sel));
+  });
+
+  // Anything the pilot owns that the game no longer sells. Shown
+  // rather than silently dropped: a system left over from an older
+  // build is something an operator wants to know about, and saving
+  // would remove it without this.
+  const unknown = Object.keys(owned).filter((id) => !systems.some((s2) => s2.id === id));
+
+  const save = el('button', {
+    on: {
+      click: async () => {
+        const mods = {};
+        for (const [id, sel] of levels) {
+          const lvl = Number(sel.value);
+          if (lvl > 0) mods[id] = lvl;
+        }
+        try {
+          const got = await api('PUT',
+            `/api/admin/players/${encodeURIComponent(p.id)}/hangar`,
+            { coins: Number(coins.value), bars: Number(bars.value), mods });
+          const kept = Object.keys(got.mods || {}).length;
+          const asked = Object.keys(mods).length;
+          say(`${p.name}'s hangar: ${n(got.coins)}c, ${n(got.bars)} bar(s), `
+            + `${kept} system(s).`
+            + (got.coins !== Number(coins.value) || got.bars !== Number(bars.value)
+              ? ' Clamped to what the game allows.' : '')
+            + (kept !== asked ? ` ${asked - kept} system(s) were not kept.` : ''),
+          'good');
+          await openPilot(p.id);
+        } catch (e) { say(e.message, 'bad'); }
+      },
+    },
+  }, 'SAVE HANGAR');
+
+  return el('div', {},
+    el('div', { class: 'row' },
+      el('label', {}, 'coins '), coins,
+      el('label', {}, 'gold bars '), bars,
+      save),
+    rows.length
+      ? el('div', { class: 'scroller' },
+        el('table', {},
+          el('thead', {}, el('tr', {},
+            el('th', {}, 'SYSTEM'), el('th', {}, 'ID'), el('th', {}, 'LEVEL'))),
+          el('tbody', {}, rows)))
+      : el('div', { class: 'empty' }, 'the server listed no systems'),
+    unknown.length
+      ? el('div', { class: 'note bad' },
+        `This pilot owns ${unknown.length} system(s) the game no longer has: `
+        + `${unknown.join(', ')}. Saving here removes them.`)
+      : null,
+    el('div', { class: 'id footnote' },
+      'Saving replaces the whole hangar. Levels are what the shop sells, so a '
+      + 'system cannot be set past its last tier, and coins and bars are '
+      + 'clamped the same way the pilot\'s own client is.'));
 }
 
 async function setPassword(p) {
@@ -531,26 +741,6 @@ $('login-form').addEventListener('submit', async (ev) => {
     note($('login-note'), e.message, 'bad');
   }
 });
-
-$('signout').addEventListener('click', async () => {
-  try { await api('POST', '/api/admin/logout'); } catch { /* going anyway */ }
-  signOut();
-});
-
-$('wipe').addEventListener('click', wipeScores);
-$('pilot-search').addEventListener('submit', (e) => {
-  e.preventDefault();
-  clearSay();
-  loadPilots().catch((err) => say(err.message, 'bad'));
-});
-$('run-search').addEventListener('submit', (e) => {
-  e.preventDefault();
-  clearSay();
-  loadRuns().catch((err) => say(err.message, 'bad'));
-});
-for (const b of document.querySelectorAll('nav button')) {
-  b.addEventListener('click', () => openTab(b.dataset.tab));
-}
 
 // A token from before a refresh. Checked rather than trusted: a stale
 // one means the login screen, not a page of empty tables and errors.

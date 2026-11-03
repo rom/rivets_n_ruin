@@ -177,6 +177,9 @@ th {
 }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tbody tr:hover { background: #0c1017; }
+/* A system the pilot does not own. Still listed, because granting one
+   is the point, but it should not read as owned at a glance. */
+tr.dim td { color: var(--dim); }
 tr.clickable { cursor: pointer; }
 .id { color: var(--dim); font-size: 11px; }
 
