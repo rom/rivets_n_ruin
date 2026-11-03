@@ -279,7 +279,7 @@ const CORE_LEVELS = [
     gapScale: 0.72, clearChance: 0.06,
     turretHp: 11, turretCooldown: 1.10, turretRange: 380,
     interceptorSpeed: 236, interceptorSpawn: 0.90, interceptorHp: 4,
-    foes: ['mine', 'lancer', 'orbiter', 'weaver', 'gnat', 'dart'],
+    foes: ['mine', 'lancer', 'orbiter', 'weaver', 'gnat', 'dart', 'netter'],
     enemyDmg: 1.16,
     towers: ['gun', 'pop', 'flak', 'lance', 'rocket', 'radar'], lasers: 2, laserHp: 3, press: true, tune: 2 },
 
@@ -288,7 +288,7 @@ const CORE_LEVELS = [
     gapScale: 0.67, clearChance: 0.05,
     turretHp: 13, turretCooldown: 1.00, turretRange: 400,
     interceptorSpeed: 252, interceptorSpawn: 0.82, interceptorHp: 4,
-    foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'dart', 'barge'],
+    foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'dart', 'barge', 'netter'],
     enemyDmg: 1.22,
     towers: ['gun', 'flak', 'lance', 'mortar', 'rocket', 'radar', 'bastion'], lasers: 2, laserHp: 4, press: true, tune: 5 },
 
@@ -297,7 +297,7 @@ const CORE_LEVELS = [
     gapScale: 0.63, clearChance: 0.04,
     turretHp: 15, turretCooldown: 0.92, turretRange: 420,
     interceptorSpeed: 266, interceptorSpawn: 0.75, interceptorHp: 5,
-    foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech', 'mirror', 'barge'],
+    foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech', 'mirror', 'barge', 'grapnel'],
     enemyDmg: 1.28,
     towers: ['gun', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array'], lasers: 3, laserHp: 5, press: true, tune: 3 },
 
@@ -306,7 +306,8 @@ const CORE_LEVELS = [
     gapScale: 0.59, clearChance: 0.035,
     turretHp: 16, turretCooldown: 0.86, turretRange: 440,
     interceptorSpeed: 280, interceptorSpawn: 0.70, interceptorHp: 5,
-    foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech', 'chainer', 'monitor'],
+    foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech', 'chainer', 'monitor',
+      'grapnel', 'scorcher'],
     enemyDmg: 1.34,
     towers: ['gun', 'flak', 'mortar', 'warden', 'rocket', 'array', 'silo'], lasers: 3, laserHp: 6, press: true, tune: 6 },
 
@@ -316,7 +317,7 @@ const CORE_LEVELS = [
     turretHp: 18, turretCooldown: 0.80, turretRange: 460,
     interceptorSpeed: 294, interceptorSpawn: 0.64, interceptorHp: 6,
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech', 'carrier',
-      'gnat', 'dart', 'barge', 'monitor'],
+      'gnat', 'dart', 'barge', 'monitor', 'netter', 'grapnel', 'scorcher'],
     enemyDmg: 1.40,
     towers: ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array', 'silo'], lasers: 4, laserHp: 7, press: true, tune: 7 },
 ];
@@ -332,7 +333,8 @@ const CORE_LEVELS = [
 const THEME_CYCLE = Object.keys(THEMES);
 const ALL_FOES = ['mine', 'lancer', 'orbiter', 'warder', 'weaver', 'splitter',
   'bomber', 'leech', 'mirror', 'carrier', 'chainer',
-  'gnat', 'dart', 'barge', 'monitor'];
+  'gnat', 'dart', 'barge', 'monitor',
+  'netter', 'grapnel', 'scorcher'];
 const ALL_TOWERS = ['gun', 'pop', 'bastion', 'flak', 'lance', 'mortar', 'warden', 'rocket',
   'radar', 'array', 'post', 'silo'];
 
@@ -434,6 +436,27 @@ export const MODIFIERS = [
   { id: 'vacuum', name: 'HARD VACUUM', from: 5,
     blurb: 'Scrapes cost double. Everything you pick up is worth double.' },
 ];
+
+// What the three entangling attackers do to the ship once they connect.
+//
+// None of them is mainly a damage dealer: a net costs you the next few
+// seconds of being able to get out of the way, a hook costs you your
+// line, and a flame keeps costing after the thing that lit you is dead.
+// All three are visible on the hull while they last — an effect the
+// player cannot see is a bug as far as the player is concerned.
+export const STATUS = {
+  snareMul: 0.42,       // of normal thrust and top speed, while netted
+  snareTime: 2.6,       // seconds a net holds
+  towAccel: 260,        // px/s^2 the hook pulls with
+  towSnare: 0.72,       // a hook also drags: thrust while towed
+  towTime: 3.2,         // seconds a hook holds, if its owner lives
+  burnTime: 3.4,        // seconds the hull burns for
+  burnDps: 13,          // shield a second while alight
+  // A second hit refreshes rather than stacks. Stacking lets two of the
+  // same attacker hold the ship still indefinitely, which is not a
+  // mechanic, it is a death with extra steps.
+  refresh: true,
+};
 
 // Whether this hull is being flown under a named rule. Every system that
 // reads a modifier goes through here, so none of them has to know whether

@@ -1048,3 +1048,189 @@ test('a hull with no LIVE HULL rule never rebuilds a gun', () => {
   }
   assert.ok(t.dead, 'a gun came back on a hull with no rule for it');
 });
+
+// ------------------------------------------------- the entangling attackers
+//
+// Three that take control rather than shield: a net that slows the ship,
+// a hook that slows and drags it off its line, and a flame that leaves
+// the hull burning after the thing that lit it is dead.
+
+import { STATUS } from '../src/config.js';
+import { spawnFoe } from '../src/foes.js';
+
+function inFlight(hull = LEVELS.length - 1) {
+  const game = launchAt(hull);
+  for (const t of game.level.turrets) t.dead = true;
+  game.miniPlan = [];
+  return game;
+}
+
+// Everything off the hull except the one attacker under test and what
+// it fires. silence() cannot be used here: it clears the foe pool and
+// the enemy shots, which is exactly the attacker and exactly its net.
+function onlyThis(game) {
+  interceptors.clear();
+}
+
+// Puts one attacker next to the ship and runs the real loop until it
+// fires and connects, or gives up.
+function letItHit(game, kind, frames = 120 * 10) {
+  const p = game.player;
+  resetFoes();
+  const f = spawnFoe(game, kind);
+  assert.ok(f, `could not spawn a ${kind}`);
+  for (let i = 0; i < frames; i++) {
+    onlyThis(game);
+    // hold them a fixed distance apart so the attacker is always in range
+    f.x = p.x + 70;
+    f.baseY = p.y;
+    f.y = p.y;
+    f.dead = false;
+    p.invuln = 0;
+    p.vx = 0; p.vy = 0;
+    update(game, DT);
+    if (p.snareT > 0 || p.burnT > 0 || p.towT > 0) return f;
+  }
+  return null;
+}
+
+test('a netter slows the ship, and it wears off', () => {
+  const game = inFlight();
+  const p = game.player;
+  const f = letItHit(game, 'netter');
+  assert.ok(f, 'a netter never landed a net in ten seconds at point blank');
+  assert.ok(p.snareT > 0, 'the net did not snare');
+  // Bounded by a literal, not by STATUS.snareTime: reading the constant
+  // under test makes both sides move together and any value passes.
+  assert.ok(p.snareT <= 5,
+    `a net holds for ${p.snareT.toFixed(1)}s — long enough to be a death sentence`);
+  assert.ok(STATUS.snareTime > 0.5 && STATUS.snareTime <= 5,
+    `a net set to hold ${STATUS.snareTime}s is not a slow, it is a stop`);
+
+  // It has to actually cost speed, not just set a flag.
+  resetFoes();
+  p.snareT = STATUS.snareTime;
+  const topWhileHeld = reachableSpeed(game, 40);
+  p.snareT = 0;
+  const topFree = reachableSpeed(game, 40);
+  assert.ok(topWhileHeld < topFree * 0.75,
+    `netted the ship reached ${topWhileHeld.toFixed(0)}px/s against`
+    + ` ${topFree.toFixed(0)} free — the snare is not reaching the controls`);
+
+  // ...and it lets go.
+  p.snareT = 0.05;
+  resetFoes();
+  for (let i = 0; i < 30; i++) { onlyThis(game); update(game, DT); }
+  assert.equal(p.snareT <= 0, true, 'the net never let go');
+});
+
+// How fast the ship gets in a short burst, measured from the same spot
+// both times. The first version just accelerated from wherever the ship
+// happened to be, so the netted run flew 150px into a block and the free
+// run was measured against a wall — it reported the netted ship as four
+// times the faster of the two.
+function reachableSpeed(game, frames) {
+  const p = game.player;
+  p.x = 200;                      // inside the launch apron, clear by construction
+  p.y = (FIELD_TOP + FIELD_BOT) / 2;
+  p.vx = 0; p.vy = 0; p.facing = 1;
+  p.invuln = 1e9;
+  try {
+    for (let i = 0; i < frames; i++) {
+      onlyThis(game);
+      setSynthetic(new Set(['right']));
+      update(game, DT);
+    }
+  } finally { setSynthetic(null); }
+  return Math.abs(p.vx);
+}
+
+test('a grapnel tows the ship, and the line drops with it', () => {
+  const game = inFlight();
+  const p = game.player;
+  const f = letItHit(game, 'grapnel');
+  assert.ok(f, 'a grapnel never landed a hook in ten seconds at point blank');
+  assert.ok(p.towT > 0 && p.towBy === f, 'the hook did not attach to its owner');
+
+  // Pulled toward the thing holding the line.
+  p.vx = 0; p.vy = 0;
+  const wasX = p.x;
+  for (let i = 0; i < 20; i++) {
+    onlyThis(game);
+    f.x = p.x + 90; f.y = p.y; f.dead = false;
+    update(game, DT);
+  }
+  assert.ok(p.x > wasX, `being towed from the right moved the ship to ${p.x} from ${wasX}`);
+
+  // Kill the grapnel and the line goes slack.
+  f.dead = true;
+  f.hp = 0;
+  onlyThis(game);
+  update(game, DT);
+  assert.equal(p.towT, 0, 'the line survived the ship holding it');
+  assert.equal(p.towBy, null, 'a dead grapnel is still on the hook');
+});
+
+test('a scorcher sets the hull alight, and it keeps burning', () => {
+  const game = inFlight();
+  const p = game.player;
+  const f = letItHit(game, 'scorcher');
+  assert.ok(f, 'a scorcher never landed a flame in ten seconds at point blank');
+  assert.ok(p.burnT > 0, 'the flame did not light the hull');
+
+  // The fire outlives what lit it — that is the whole of the mechanic.
+  f.dead = true;
+  f.hp = 0;
+  resetFoes();
+  // ...and its flames with it. Puffs already in the air kept landing and
+  // the burn-only measurement read 42.5 shield against the 6.5 the fire
+  // itself costs.
+  enemyShots.clear();
+  p.x = 200;
+  p.y = (FIELD_TOP + FIELD_BOT) / 2;
+  p.vx = 0; p.vy = 0;
+  p.shield = p.shieldMax;
+  p.invuln = 0;
+  const before = p.shield;
+  const held = p.burnT;
+  for (let i = 0; i < 60; i++) { onlyThis(game); update(game, DT); }
+  assert.ok(p.shield < before,
+    'the hull stopped burning the moment the scorcher died');
+  const lost = before - p.shield;
+  const want = STATUS.burnDps * 0.5;
+  assert.ok(Math.abs(lost - want) < want * 0.5,
+    `burned ${lost.toFixed(1)} shield in half a second, expected about ${want.toFixed(1)}`);
+  assert.ok(p.burnT < held, 'the fire never burns out');
+});
+
+test('none of the three carries over to the next ship', () => {
+  const game = inFlight();
+  const p = game.player;
+  p.snareT = 9; p.burnT = 9; p.towT = 9; p.towBy = { x: 0, y: 0, dead: false, hp: 1 };
+  p.shield = 0.0001;
+  p.invuln = 0;
+  onlyThis(game);
+  update(game, DT);
+  assert.equal(game.state, 'dying', 'the ship did not die');
+  const np = game.player;
+  assert.equal(np.snareT, 0, 'the new ship arrived netted');
+  assert.equal(np.burnT, 0, 'the new ship arrived on fire');
+  assert.equal(np.towT, 0, 'the new ship arrived on a hook');
+});
+
+test('a second hit refreshes rather than stacks', () => {
+  assert.equal(STATUS.refresh, true);
+  const game = inFlight();
+  const p = game.player;
+  p.snareT = 1;
+  p.invuln = 0;
+  // two nets in a row
+  for (let k = 0; k < 2; k++) {
+    const s = enemyShots.spawn();
+    Object.assign(s, { x: p.x, y: p.y, vx: 0, vy: 0, life: 1, dmg: 0, r: 6, fx: 'net' });
+    onlyThis(game);
+    update(game, DT);
+  }
+  assert.ok(p.snareT <= STATUS.snareTime + 0.01,
+    `two nets stacked to ${p.snareT.toFixed(2)}s, past the ${STATUS.snareTime}s one lasts`);
+});

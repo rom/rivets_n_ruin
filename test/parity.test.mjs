@@ -643,9 +643,14 @@ test('the README names every formation a squadron can fly', async () => {
 
 test('the README counts the squadrons the table holds', async () => {
   const { SQUADS } = await import('../src/foes.js');
+  // Far enough ahead of the table that adding a squadron does not fail
+  // this with "undefined", which reads as a broken test rather than a
+  // stale README.
   const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
     'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen',
-    'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
+    'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty',
+    'twenty-one', 'twenty-two', 'twenty-three', 'twenty-four', 'twenty-five',
+    'twenty-six', 'twenty-seven', 'twenty-eight', 'twenty-nine', 'thirty'];
   const m = readme.match(/([A-Za-z-]+) of them in `SQUADS`/);
   assert.ok(m, 'the README no longer says how many squadrons there are');
   assert.equal(m[1].toLowerCase(), words[SQUADS.length],

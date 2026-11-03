@@ -155,6 +155,7 @@ export function drawWorld(ctx, game) {
   drawTurrets(ctx, game, camX);
   drawGates(ctx, game, camX);
   drawInterceptors(ctx, game);
+  drawTowLine(ctx, game);
   drawFoes(ctx);
   drawMinis(ctx);
   if (game.boss) drawBoss(ctx, game.boss);
@@ -391,7 +392,75 @@ function drawShip(ctx, p, seqTilt, game) {
 
   if (p.invuln > 0 && Math.floor(p.invuln * 18) % 2 === 0) ctx.globalAlpha = 0.4;
   drawShipBody(ctx, p, game);
+  drawStatus(ctx, p);
   ctx.restore();
+}
+
+// What has hold of the ship, drawn on the ship.
+//
+// A net that only showed up as "the controls feel wrong" would read as
+// the game stuttering, and a fire that only showed up as a falling
+// shield bar would read as damage from something unseen. Each of the
+// three is a thing you can point at, and each fades as its timer runs
+// down so the pilot can see how long is left.
+// The hook's line, from the grapnel to the ship. Drawn in world space
+// rather than on the hull, because the whole of what it tells you is
+// which direction you are being pulled and by what — and so which thing
+// to shoot to make it stop.
+function drawTowLine(ctx, game) {
+  const p = game.player;
+  const f = p.towT > 0 ? p.towBy : null;
+  if (!f || f.dead || f.hp <= 0) return;
+  ctx.save();
+  ctx.strokeStyle = '#ffb45c';
+  ctx.globalAlpha = 0.5 + Math.abs(Math.sin(p.towT * 9)) * 0.35;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(f.x, f.y);
+  ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+  // the claw, closed on the hull
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#c9923f';
+  ctx.fillRect(Math.round(p.x) - 2, Math.round(p.y) - 2, 4, 4);
+  ctx.restore();
+}
+
+function drawStatus(ctx, p) {
+  if (p.snareT > 0) {
+    // mesh clinging to the hull, slack and tangled
+    ctx.globalAlpha = Math.min(1, p.snareT) * 0.85;
+    ctx.strokeStyle = '#7af0d0';
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    for (let i = -12; i <= 12; i += 4) {
+      ctx.moveTo(i, -7);
+      ctx.lineTo(i + 2, 7);
+    }
+    for (let j = -6; j <= 6; j += 4) {
+      ctx.moveTo(-13, j);
+      ctx.lineTo(13, j + 1);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  if (p.burnT > 0) {
+    // flame licking back off the hull, additive so it sits on top of it
+    const was = ctx.globalCompositeOperation;
+    ctx.globalCompositeOperation = 'lighter';
+    const n = 7;
+    for (let i = 0; i < n; i++) {
+      const ph = p.burnT * 11 + i * 1.7;
+      const fy = -6 + (i / (n - 1)) * 12;
+      const len = 4 + Math.abs(Math.sin(ph)) * 7;
+      ctx.globalAlpha = 0.22 + Math.abs(Math.cos(ph)) * 0.3;
+      ctx.fillStyle = i % 2 ? '#ff7a3a' : '#ffd24a';
+      ctx.fillRect(-10 - len, fy - 1, len, 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = was;
+  }
 }
 
 // DRONE WING: escorts holding station off a wing. Small, lit, and plainly

@@ -1,6 +1,6 @@
 import {
   SHIP, PICKUP, ARMORY, FIELD_TOP, FIELD_BOT, clamp, REAR, LANCE,
-  MOD_FORCE, hullRule} from './config.js';
+  MOD_FORCE, hullRule, STATUS} from './config.js';
 
 // Cycles to the next ordnance you actually have, so the key is never a
 // no-op while something else is loaded.
@@ -34,6 +34,11 @@ export function makePlayer() {
     flip: 0,         // >0 while mid-flip
     fireCd: 0,
     scrapeCd: 0,
+    // --- entangling status. See STATUS in config.js.
+    snareT: 0,        // netted: thrust and top speed cut
+    burnT: 0,         // alight: shield draining
+    towT: 0,          // hooked: dragged toward whatever has you
+    towBy: null,      // the attacker holding the line, while it lives
     invuln: SHIP.invuln,
     shield: SHIP.shieldMax,
     shieldMax: SHIP.shieldMax,   // the refit and the upgrades both raise this
@@ -76,6 +81,14 @@ export function updatePlayer(p, game, dt) {
 
   if (p.flip > 0) p.flip -= dt;
   if (p.fireCd > 0) p.fireCd -= dt;
+  if (p.snareT > 0) p.snareT -= dt;
+  if (p.towT > 0) p.towT -= dt;
+  // Burning outlasts the thing that lit you, which is the whole point of
+  // it: killing the scorcher does not put the fire out.
+  if (p.burnT > 0) {
+    p.burnT -= dt;
+    if (p.alive && p.invuln <= 0) p.shield -= STATUS.burnDps * dt;
+  }
   if (p.scrapeCd > 0) p.scrapeCd -= dt;
   if (p.invuln > 0) p.invuln -= dt;
   if (p.secondaryCd > 0) p.secondaryCd -= dt;
@@ -90,12 +103,20 @@ export function updatePlayer(p, game, dt) {
   updateDrones(p, game, dt);
   if (p.pointDefence) pointDefence(p, game);
 
+  // What a net or a hook leaves you with. One multiplier, applied to
+  // thrust and to the ceiling, so being snared costs acceleration *and*
+  // top speed rather than just making you take longer to reach the same
+  // speed. A hook drags less hard than a net because it is already
+  // taking your line.
+  const drag = p.snareT > 0 ? STATUS.snareMul
+    : p.towT > 0 ? STATUS.towSnare : 1;
+
   // --- horizontal: thrust along facing, hard brake into a flip when reversing
   if (ix !== 0) {
     if (ix === p.facing) {
-      p.vx += ix * SHIP.accelX * p.accelMul * dt;
+      p.vx += ix * SHIP.accelX * p.accelMul * drag * dt;
     } else {
-      p.vx += ix * SHIP.brakeX * p.accelMul * dt;
+      p.vx += ix * SHIP.brakeX * p.accelMul * drag * dt;
       if (p.vx * p.facing <= 0 && p.flip <= 0) {
         p.facing = ix;
         p.flip = SHIP.flipTime;
@@ -104,11 +125,11 @@ export function updatePlayer(p, game, dt) {
     }
   }
   p.vx *= Math.exp(-SHIP.dragX * dt);
-  const maxVX = SHIP.maxVX + p.maxVXBonus;
+  const maxVX = (SHIP.maxVX + p.maxVXBonus) * drag;
   p.vx = clamp(p.vx, -maxVX, maxVX);
 
   // --- vertical: snappier, settles quickly
-  p.vy += iy * SHIP.accelY * p.accelMul * dt;
+  p.vy += iy * SHIP.accelY * p.accelMul * drag * dt;
   // GRAVITY WELL: something under the hull pulls. Applied before the drag
   // so it settles to a terminal sink rather than accelerating without
   // limit, and sized against SHIP.accelY so holding the stick up still
@@ -116,8 +137,23 @@ export function updatePlayer(p, game, dt) {
   // a hard one.
   if (hullRule(game, 'gravity')) p.vy += SHIP.accelY * MOD_FORCE.gravity * dt;
   p.vy *= Math.exp(-SHIP.dragY * dt);
-  const maxVY = SHIP.maxVY + p.maxVYBonus;
+  const maxVY = (SHIP.maxVY + p.maxVYBonus) * drag;
   p.vy = clamp(p.vy, -maxVY, maxVY);
+
+  // A hook pulls toward whoever threw it, for as long as they are alive
+  // to hold the line. Acceleration, not teleportation: you can fly
+  // against it, it just costs you the ground you wanted.
+  const tow = p.towT > 0 ? p.towBy : null;
+  if (tow && !tow.dead && tow.hp > 0) {
+    const dx = tow.x - p.x;
+    const dy = tow.y - p.y;
+    const d = Math.hypot(dx, dy) || 1;
+    p.vx += (dx / d) * STATUS.towAccel * dt;
+    p.vy += (dy / d) * STATUS.towAccel * dt;
+  } else if (p.towT > 0) {
+    p.towT = 0;                    // the line went slack with its owner
+    p.towBy = null;
+  }
 
   p.x = clamp(p.x + p.vx * dt, 14, game.level.length - 14);
   p.y += p.vy * dt;

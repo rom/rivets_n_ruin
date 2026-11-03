@@ -1,6 +1,6 @@
 import {
   SHIP, INTERCEPTOR, LEVELS, LEVEL_UP, PICKUP, BOSS, HULL_BONUS, APRON, VIEW_W,
-  FIELD_TOP, FIELD_BOT, clamp, LANCE, FOE_PACE} from './config.js';
+  FIELD_TOP, FIELD_BOT, clamp, LANCE, FOE_PACE, STATUS} from './config.js';
 import { diff, award, hurt } from './score.js';
 import { get as setting, set as setSetting, onChange as onSetting } from './settings.js';
 import {
@@ -893,6 +893,12 @@ function recordBest(game) {
 }
 
 function die(game) {
+  // Whatever had hold of the ship does not get to keep hold of the next
+  // one. dropAttached does the same for a latched leech.
+  game.player.snareT = 0;
+  game.player.burnT = 0;
+  game.player.towT = 0;
+  game.player.towBy = null;
   const p = game.player;
   p.alive = false;
   // Whatever was clamped to the hull is destroyed with it, before the new
@@ -995,9 +1001,25 @@ function collide(game) {
   for (let i = enemyShots.count - 1; i >= 0; i--) {
     const s = enemyShots.items[i];
     if (Math.abs(s.x - p.x) < hw + s.r && Math.abs(s.y - p.y) < hh + s.r) {
+      const fx = s.fx;
+      const from = s.fxFrom;
       enemyShots.kill(i);
       if (p.invuln <= 0) {
         hurt(game, s.dmg);
+        // A net, a hook or a flame takes something other than shield.
+        // Refreshed rather than stacked: two netters holding the ship
+        // still for ever is not a mechanic, it is a death with steps.
+        if (fx === 'net') {
+          p.snareT = STATUS.snareTime;
+          sparks(p.x, p.y, 0, 0, 8, '#7af0d0');
+        } else if (fx === 'hook' && from && !from.dead) {
+          p.towT = STATUS.towTime;
+          p.towBy = from;
+          sparks(p.x, p.y, 0, 0, 6, '#ffb45c');
+        } else if (fx === 'flame') {
+          p.burnT = STATUS.burnTime;
+          sparks(p.x, p.y, 0, -1, 5, '#ff7a3a');
+        }
         game.flash = Math.max(game.flash, 0.3);
         kick(game.cam, 3.5);
         sparks(s.x, s.y, -Math.sign(s.vx), 0, 6, '#e8434f');

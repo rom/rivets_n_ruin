@@ -336,7 +336,7 @@ and checks exactly that.
 ## Attackers
 
 Interceptors teach dodging and turrets teach prioritising.
-Fifteen more types arrive hull by hull, each asking a different question:
+Eighteen more types arrive hull by hull, each asking a different question:
 
 ![The attacker roster](docs/attackers.png)
 
@@ -383,11 +383,24 @@ them.
 | **Chainer** | FERRUM | Spawns as a linked pair with a live tether between them. Go round, or break a link |
 | **Monitor** | FERRUM | The heaviest thing short of a miniboss. Two mounts, so no side is quiet |
 | **Carrier** | AURUM | Launches weavers. Spend the time on the source, or keep swatting what it sends |
+| **Netter** | CUPRUM | Throws a net. Barely scratches you, and takes the next few seconds of being able to dodge |
+| **Grapnel** | WOLFRAM | Hooks you and hauls. Drags you off your line and backs away while it does. Kill it to drop the line |
+| **Scorcher** | FERRUM | A short cone of flame. Being caught in it leaves the hull burning after the scorcher is dead |
 
 Which hull fields which is `LEVELS[].foes` in `src/config.js`. ARGENTUM
 fields none of them — the first hull is turrets and interceptors only.
 
-The last three are deliberately not more of the same. A mirror makes
+The last three in the table take something other than shield, which on a
+hull full of walls is worse. A **netter** costs you the ability to get out
+of the way; a **grapnel** costs you your line and keeps pulling until you
+kill it; a **scorcher** sets the hull alight and the fire outlasts the
+thing that lit it. All three are drawn on the ship while they hold — a net
+clinging to the hull, a line back to whatever is towing you, flame licking
+off the plating — because a loss of control the player cannot see reads as
+the game stuttering. A second hit refreshes rather than stacks: two
+netters holding a ship still for ever is not a mechanic.
+
+The mirror, the carrier and the chainer are deliberately not more of the same. A mirror makes
 shooting the wrong move, which is the one thing a shoot 'em up never asks
 of you — it sends about three quarters of what you fire at it back down
 the line it came from, and the answer is to stop and flank. A chainer is
@@ -445,7 +458,7 @@ as one kind.
 
 A squadron is a composition with a shape. Three gnats in a vee. A barge
 with two darts screening it. A monitor on its own, because that is what a
-monitor is. Seventeen of them in `SQUADS`, plus a singleton for every
+monitor is. Twenty-three of them in `SQUADS`, plus a singleton for every
 roster kind so no attacker stops being its own answer to something — except
 the two that are only half an attacker alone: a chainer has no tether
 without its mate, and one gnat is one hit point and no gun.
@@ -734,7 +747,7 @@ past a plateau rather than wait it out.
 - **Fully procedural audio** — see below.
 
 What shoots back is its own subject, and has grown well past the two kinds
-this list used to describe: fifteen tower types, sixteen attacker types,
+this list used to describe: fifteen tower types, nineteen attacker types,
 four minibosses and twenty-five bosses, each covered in its own section
 above.
 Turret health rises with the hull too — 6 on ARGENTUM, 52 on ORICHALCUM —
@@ -2220,7 +2233,7 @@ src/boss.js       boss arenas, phases, weak points and the wreck window
 src/towerart.js   what each hull installation looks like
 src/bossart.js    the eight boss shapes and their destructible sections
 src/gates.js      laser gates: the wall, the emitter, and what breaks it
-src/foeart.js     the sixteen attacker bodies
+src/foeart.js     the nineteen attacker bodies
 src/shipart.js    the player's ship, as its marks, guns, load and mods make it
 src/demo.js       the attract-mode pilot
 src/score.js      difficulty multipliers, and the one way points are awarded
@@ -2459,7 +2472,7 @@ refused by the server. Both are fixed. Everything below is what one
 playthrough does not settle.
 
 - **Balance is mostly still first guesses, and there is a great deal of
-  it.** Twenty-five hulls, twenty-five bosses, four minibosses, sixteen
+  it.** Twenty-five hulls, twenty-five bosses, four minibosses, nineteen
   attacker types, fifteen tower types, laser gates, deflector shields,
   four treasure tiers, thirteen mods, the coin economy, the refit curve,
   the end-of-hull bonus and the four difficulty settings were picked by

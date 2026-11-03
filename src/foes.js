@@ -77,6 +77,25 @@ export const SPEC = {
   // that alternate, so there is no safe side, and slow enough that
   // going round it is always available and always costs you ground.
   monitor: { hp: 22, speed: 38, score: 760, r: 25, fireEvery: 1.6, mounts: 2, burst: 3 },
+
+  // --- three that take something other than shield
+  //
+  // Everything above costs you health. These cost you control, which on
+  // a hull full of walls is worse, and they are dangerous in proportion
+  // to what else is on screen rather than on their own. All three are
+  // visibly attached while they hold — see STATUS in config.js.
+
+  // Throws a net. Barely damages; what it takes is the next few seconds
+  // of being able to get out of the way, which is the entire threat.
+  netter:   { hp: 4, speed: 150, score: 300, r: 12, fireEvery: 2.6, netSpeed: 185 },
+  // Throws a hook and hauls on it. Slows you less than a net and drags
+  // you off your line, which near a wall is the point. Killing it drops
+  // the line.
+  grapnel:  { hp: 6, speed: 112, score: 400, r: 14, fireEvery: 3.2, hookSpeed: 235, reach: 300 },
+  // A short cone of flame. Standing off it is easy; being caught in it
+  // leaves the hull burning after the scorcher itself is dead.
+  scorcher: { hp: 8, speed: 92, score: 440, r: 15, fireEvery: 2.1, flameSpeed: 120,
+    flameRange: 96, cone: 26, puffs: 5 },
 };
 
 // A deflector bubble, fitted to some attackers on later hulls. Unlike a
@@ -244,6 +263,15 @@ export const SQUADS = [
   { id: 'lances', form: 'line', of: [['lancer', 3]] },
   { id: 'battery', form: 'column', of: [['orbiter', 2]] },
   { id: 'drift', form: 'line', of: [['mine', 4]] },
+
+  // --- the ones that take control. A pair of netters is the problem;
+  // one of them is a nuisance you fly around.
+  { id: 'trawl', form: 'line', of: [['netter', 2]] },
+  { id: 'snare', form: 'screen', of: [['netter', 1], ['lancer', 2]] },
+  { id: 'winch', form: 'echelon', of: [['grapnel', 2]] },
+  { id: 'dragnet', form: 'screen', of: [['grapnel', 1], ['netter', 1]] },
+  { id: 'burners', form: 'line', of: [['scorcher', 2]] },
+  { id: 'firewall', form: 'screen', of: [['scorcher', 1], ['gnat', 3]] },
 
   // --- the heavy end. One of these is the event.
   { id: 'monitor', form: 'column', of: [['monitor', 1]] },
@@ -656,6 +684,71 @@ export function updateFoes(game, dt) {
             fire(enemyShots, f.x, f.y, f.facing * 260, 0, 4, 8, 2);
             sfxTurretShot();
           }
+        }
+        break;
+      }
+
+      case 'netter': {
+        // Keeps its distance and leads the shot. A net that has to be
+        // dodged is a net worth firing.
+        f.x += f.facing * spec.speed * dt;
+        f.baseY += clamp(p.y - f.baseY, -70 * dt, 70 * dt);
+        f.y = f.baseY;
+        f.cd -= dt;
+        if (f.cd <= 0 && game.state === 'play') {
+          f.cd = spec.fireEvery;
+          const a = Math.atan2(p.y - f.y, p.x - f.x);
+          fire(enemyShots, f.x, f.y,
+            Math.cos(a) * spec.netSpeed, Math.sin(a) * spec.netSpeed,
+            4, 3, 7, { fx: 'net' });
+          sfxTurretShot();
+        }
+        break;
+      }
+
+      case 'grapnel': {
+        // Closes to its reach, then throws. While the line holds it
+        // backs off, so the pull is away from wherever you were going.
+        const want = spec.reach * 0.8;
+        const away = Math.hypot(p.x - f.x, p.y - f.y) < want ? -1 : 1;
+        f.x += f.facing * spec.speed * away * dt;
+        f.baseY += clamp(p.y - f.baseY, -52 * dt, 52 * dt);
+        f.y = f.baseY;
+        f.cd -= dt;
+        const holding = p.towT > 0 && p.towBy === f;
+        if (f.cd <= 0 && !holding && game.state === 'play'
+            && Math.hypot(p.x - f.x, p.y - f.y) < spec.reach) {
+          f.cd = spec.fireEvery;
+          const a = Math.atan2(p.y - f.y, p.x - f.x);
+          fire(enemyShots, f.x, f.y,
+            Math.cos(a) * spec.hookSpeed, Math.sin(a) * spec.hookSpeed,
+            3, 4, 6, { fx: 'hook', fxFrom: f });
+          sfxTurretShot();
+        }
+        break;
+      }
+
+      case 'scorcher': {
+        // Has to get close, and telegraphs by doing so. The flame is a
+        // run of short-lived puffs rather than one projectile, so it
+        // reads as a cone and thins out at its edge.
+        f.x += f.facing * spec.speed * dt;
+        f.baseY += clamp(p.y - f.baseY, -44 * dt, 44 * dt);
+        f.y = f.baseY;
+        f.cd -= dt;
+        if (f.cd <= 0 && game.state === 'play'
+            && Math.hypot(p.x - f.x, p.y - f.y) < spec.flameRange * 1.6) {
+          f.cd = spec.fireEvery;
+          const a = Math.atan2(p.y - f.y, p.x - f.x);
+          const spread = spec.cone * Math.PI / 180;
+          for (let k = 0; k < spec.puffs; k++) {
+            const ang = a + (Math.random() - 0.5) * spread;
+            const sp = spec.flameSpeed * (0.7 + Math.random() * 0.6);
+            fire(enemyShots, f.x + Math.cos(a) * 10, f.y + Math.sin(a) * 10,
+              Math.cos(ang) * sp, Math.sin(ang) * sp,
+              spec.flameRange / sp, 4, 6, { fx: 'flame' });
+          }
+          sfxTurretShot();
         }
         break;
       }

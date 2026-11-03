@@ -7,6 +7,11 @@ const shot = () => ({
   // cannon can shoot a missile out of the air, which is the only answer to
   // a weapon that follows you.
   seek: 0, hp: 0, t: 0,
+  // What it does to the ship besides damage. '' for an ordinary shot;
+  // 'net' snares, 'hook' snares and tows, 'flame' sets the hull alight.
+  // Carried on the shot rather than inferred from who fired it, so the
+  // collision code never has to know which attacker a bullet came from.
+  fx: '', fxFrom: null,
 });
 
 export const playerShots = makePool(340, shot);
@@ -19,6 +24,8 @@ export function fire(pool, x, y, vx, vy, life, dmg, r, opts = null) {
   s.life = life; s.dmg = dmg; s.r = r;
   s.seek = opts && opts.seek ? opts.seek : 0;
   s.hp = opts && opts.hp ? opts.hp : 0;
+  s.fx = opts && opts.fx ? opts.fx : '';
+  s.fxFrom = opts && opts.fxFrom ? opts.fxFrom : null;
   s.t = 0;
   return s;
 }

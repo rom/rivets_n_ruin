@@ -14,6 +14,14 @@ worth learning from.
 
 ### Added
 
+- **Three attackers that take control rather than shield.** A **NETTER**
+  throws a net that costs the next few seconds of being able to get out
+  of the way; a **GRAPNEL** hooks the ship and hauls, dragging it off its
+  line while backing away, and drops the line when it dies; a **SCORCHER**
+  burns a short cone of flame, and the fire outlasts the thing that lit
+  it. All three are drawn on the hull while they hold, because a loss of
+  control the player cannot see reads as the game stuttering. A second
+  hit refreshes rather than stacks.
 - **Hull modifiers.** One named rule per hull — PRESSURE, FLAK CURTAIN,
   OVERRUN, GRAVITY WELL, BLACKOUT, LIVE HULL, SALVAGE RUN, HARD VACUUM —
   drawn from the hull's own seed and named on the launch card with a line
@@ -49,6 +57,17 @@ worth learning from.
   both builds and the PNGs compared.
 
 ### Fixed
+
+- **Eighteen of the twenty-five hulls had somewhere the ship could not
+  get through.** Reported from play, with a screenshot. The hull walk
+  checked each vertical slice for a gap tall enough, which says nothing
+  about whether the ship can move *between* two slices: a stub from the
+  roof and one from the floor, nineteen pixels apart, leave every slice
+  half open and no way past for a ship nineteen pixels wide. The chicane
+  was making them — its stubs are capped as a pair now, and the gap
+  between them is clear of the ship's width with room to spare. The check
+  sweeps the hull as a configuration-space problem, so it answers the
+  question that was actually being asked.
 
 - **The sound dropped out whenever the machine was busy.** Reported from
   play. The sequencer filled a fixed 120ms window of the audio timeline,
