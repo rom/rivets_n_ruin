@@ -41,6 +41,17 @@ worth learning from.
 
 ### Changed
 
+- **The armourer stands in a hangar now.** It was a flat black rectangle
+  with two columns of rows floated on it, which read as a settings page
+  that happened to sell things. The bay is drawn around it: a trussed roof
+  with lamps, ribbed wall panels down both sides, a plated deck with
+  hazard chevrons, and your own ship chocked on the deck under the lights
+  — drawn from the live player, so a mod bought on a row above shows up on
+  the hull below it. Titled **HANGAR**, with the armourer named under it.
+  `SHOP_LAYOUT` holds the margins the frame reserves, and a test measures
+  every hull's list against them: the first version fit the list it was
+  built against and ran the blurb and the buy note through the floor on
+  the hulls that sell twenty-two rows.
 - **Ships with several engines draw far more cheaply.** Each engine
   plume switched the canvas composite mode to `lighter` on its own, and
   that switch costs far more than the pixels it blends: eight MONITORs
@@ -50,6 +61,11 @@ worth learning from.
 
 ### Fixed
 
+- **The gallery tool printed `undefined/10` into the README.** It posed
+  the ship's ordnance by replacing the whole ammo object with a literal
+  naming three of the four kinds, so the armourer screenshot showed SPIKE
+  MINES with no count — and a bomb count of 12 against a cap of 9. It
+  merges into the real ammo now, within the caps.
 - **The sound dropped out whenever the machine was busy.** Reported from
   play. The sequencer filled a fixed 120ms window of the audio timeline,
   woken by a 25ms `setInterval` — but `setInterval` only promises "no
