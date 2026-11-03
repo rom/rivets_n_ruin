@@ -12,7 +12,7 @@ import { tuneName, TUNES } from './music.js';
 import { get as setting, DEFS, display } from './settings.js';
 import { BINDABLE, keyFor } from './input.js';
 import { rows as shopRows, MODS, modLevel, modName, maxLevel } from './shop.js';
-import { drawSplash, drawLaunchBanner, drawExitBanner, drawTitleBackdrop,
+import { drawSplash, drawLaunchBanner, drawExitBanner, drawTitleBackdrop, drawTitleFrame,
   SPLASH_TIME, LAUNCH_TIME, EXIT_TIME, ENDING_TIME } from './sequences.js';
 import { VERSION } from './config.js';
 import { livingParts, shellUp } from './boss.js';
@@ -741,6 +741,9 @@ export function drawScreen(ctx, game) {
     // menu, not a paused game, and it should not be showing whatever the
     // last run happened to leave on screen.
     drawTitleBackdrop(ctx, game.stateT);
+    // ...and the gantry it is seen from. After the backdrop, so the
+    // starfield shows through the opening rather than over the frame.
+    drawTitleFrame(ctx, game.stateT);
 
     text(ctx, "RIVETS 'N RUIN", cx, 30, COL.hudBright,
       'bold 32px ui-monospace, Menlo, monospace', 'center');

@@ -14,6 +14,12 @@ worth learning from.
 
 ### Added
 
+- **The title screen is framed as a launch gantry**, and deliberately
+  not as the hangar: an arched mouth in conduit blue with ribs over the
+  opening, cold strip lighting set into the edges and open grating
+  underfoot, against the hangar's flat steel trusses, warm lamps and
+  plated deck. A portal rather than a border, so the starfield and the
+  dreadnought show through the opening.
 - **Key remapping**, on a CONTROLS screen reached with C from settings.
   A rebind takes the key off whatever had it, so one key never does two
   things, and five actions are deliberately fixed: START, the two

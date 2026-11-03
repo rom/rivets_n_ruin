@@ -1174,6 +1174,22 @@ star layers, the dreadnought passing below with its windows lit and masts
 on the skyline, and a patrol crossing in front of it. It is a function of
 one clock, so it holds no state and cannot drift out of step.
 
+### The gantry
+
+The title is framed as the place the ship is sent out from, and built
+deliberately unlike the hangar it is serviced in. The hangar is flat
+trussed roof, ribbed wall panels, plated deck and warm lamps overhead, in
+`THEMES.steel`. This is an arched mouth in `THEMES.conduit` blue: ribs
+running over the opening instead of girders across a ceiling, cold strip
+lighting set into the inside edges instead of lamps hanging above, open
+grating underfoot instead of plate. Two rooms on the same ship, built by
+the same yard, for different jobs.
+
+It is a portal rather than a border — the structure is everything the
+arch does not cut out, and the starfield and the dreadnought show through
+the opening. That is what makes the title a view out of somewhere instead
+of a picture with a frame on it.
+
 ## Attract mode
 
 Leave it alone for two minutes on the title and the game plays itself.
