@@ -2559,6 +2559,7 @@ src/audio.js      Web Audio graph, buses, voice limiting, synthesis primitives
 src/sfx.js        the 33 sound effects
 src/music.js      adaptive sequencer and its instrument voices
 src/net.js        backend client; degrades to offline play
+src/coop.js       two-player co-op: the socket and the wire format
 src/mods.js       mod loading and config overrides
 src/main.js       the one entry point: wiring, input routing, the frame
 src/game.js       state machine, collision pairs, run objective
