@@ -51,3 +51,42 @@ body {
   text-align: center; color: #39424e; font-size: 11px; letter-spacing: .09em;
   pointer-events: none; user-select: none;
 }
+
+/* --- playing it on glass
+   The canvases take pointer events when the on-screen controls are up,
+   so the browser must not take the gesture first: touch-action none
+   stops a drag from scrolling or pinching the page out from under a
+   thumb that was steering. The UI layer is the one the buttons are
+   drawn on, so that is the one that has to stop ignoring pointers.
+
+   body.touch is set by main.js from the ON-SCREEN CONTROLS setting
+   rather than from a media query, so forcing the buttons on from the
+   settings screen reaches the page chrome too. */
+html, body { overscroll-behavior: none; }
+body.touch #hint { display: none; }
+body.touch #stack { box-shadow: none; }
+body.touch #game, body.touch #ui {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+body.touch #ui { pointer-events: auto; }
+body.touch #game { pointer-events: auto; }
+
+/* A phone held upright gets a letterboxed strip in the middle of a tall
+   screen, which is the honest result of a fixed 640x384 playfield. The
+   page says so rather than leaving somebody holding a postage stamp and
+   wondering whether it is broken. */
+#turn {
+  display: none;
+  position: fixed; inset: 0;
+  place-items: center; text-align: center;
+  padding: 0 24px;
+  color: #7d8797; font-size: 13px; letter-spacing: .08em; line-height: 1.8;
+  background: #05070a;
+  pointer-events: none; user-select: none;
+}
+@media (orientation: portrait) and (max-height: 520px) {
+  body.touch #turn { display: grid; }
+}

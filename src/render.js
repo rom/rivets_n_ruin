@@ -1,10 +1,12 @@
 import {
-  VIEW_W, VIEW_H, FIELD_H, FIELD_TOP, FIELD_BOT, SHIP, COL, clamp, LANCE} from './config.js';
+  VIEW_W, VIEW_H, FIELD_H, FIELD_TOP, FIELD_BOT, SHIP, COL, clamp, LANCE,
+  JUMP} from './config.js';
 import { interceptors } from './enemies.js';
 import { playerShots, enemyShots } from './projectiles.js';
 import { particles, lights } from './particles.js';
 import { hash2 } from './rng.js';
-import { hullChunk, warmChunks, drawMovers, CHUNK_W } from './level.js';
+import { hullChunk, warmChunks, drawMovers, drawFields, drawPowerLines, drawBeams,
+  CHUNK_W } from './level.js';
 import { get as setting } from './settings.js';
 import { renderScale, scaleGeneration, hullScale, isStatic } from './display.js';
 import { pickups, tint, isTreasure } from './pickups.js';
@@ -151,10 +153,14 @@ export function drawWorld(ctx, game) {
 
   // Jaws: part of the hull, so they go under everything mounted on it, but
   // they cannot be baked into a cached chunk, so they are drawn here.
+  drawFields(ctx, game.level, camX, VIEW_W, game.time);
   drawMovers(ctx, game.level, camX, VIEW_W);
+  drawPowerLines(ctx, game.level, camX, VIEW_W);
+  drawBeams(ctx, game.level, camX, VIEW_W, game.time);
   drawTurrets(ctx, game, camX);
   drawGates(ctx, game, camX);
   drawInterceptors(ctx, game);
+  drawTowLine(ctx, game);
   drawFoes(ctx);
   drawMinis(ctx);
   if (game.boss) drawBoss(ctx, game.boss);
@@ -162,6 +168,7 @@ export function drawWorld(ctx, game) {
   drawOrdnance(ctx);
   drawShots(ctx);
   drawPad(ctx, camX, camY);
+  drawJumpTrail(ctx, game.player);
   if (game.player.alive) {
     if (setting('aimLine')) drawFiringLine(ctx, game, camX);
     drawLance(ctx, game, camX);
@@ -391,7 +398,147 @@ function drawShip(ctx, p, seqTilt, game) {
 
   if (p.invuln > 0 && Math.floor(p.invuln * 18) % 2 === 0) ctx.globalAlpha = 0.4;
   drawShipBody(ctx, p, game);
+  drawStatus(ctx, p);
+  drawJumpReady(ctx, p);
   ctx.restore();
+}
+
+// What has hold of the ship, drawn on the ship.
+//
+// A net that only showed up as "the controls feel wrong" would read as
+// the game stuttering, and a fire that only showed up as a falling
+// shield bar would read as damage from something unseen. Each of the
+// three is a thing you can point at, and each fades as its timer runs
+// down so the pilot can see how long is left.
+// The streak a jump leaves between where the ship was and where it is.
+//
+// Drawn in world space and behind the ship, so it reads as a thing that
+// happened rather than a thing attached. Without it a jump looks like
+// the ship stuttering across the screen, which is indistinguishable from
+// the game dropping frames.
+function drawJumpTrail(ctx, p) {
+  if (p.jumpT <= 0) return;
+  const k = p.jumpT / JUMP.streak;
+  const was = ctx.globalCompositeOperation;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+
+  // the line itself, thinning as it fades
+  ctx.strokeStyle = COL.coolHi;
+  ctx.globalAlpha = k * 0.6;
+  ctx.lineWidth = 1 + k * 3;
+  ctx.beginPath();
+  ctx.moveTo(p.jumpFromX, p.jumpFromY);
+  ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+
+  // afterimages along it, so the eye follows the direction travelled
+  const n = 5;
+  for (let i = 1; i < n; i++) {
+    const f = i / n;
+    const x = p.jumpFromX + (p.x - p.jumpFromX) * f;
+    const y = p.jumpFromY + (p.y - p.jumpFromY) * f;
+    ctx.globalAlpha = k * 0.4 * (1 - f);
+    ctx.fillStyle = COL.cool;
+    ctx.fillRect(x - 5, y - 2, 10, 4);
+  }
+
+  // a ring at each end: left here, arrived there
+  for (const [cx, cy, grow] of [[p.jumpFromX, p.jumpFromY, 1 - k], [p.x, p.y, k]]) {
+    ctx.globalAlpha = k * 0.7;
+    ctx.strokeStyle = COL.coolHi;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4 + grow * 16, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.globalCompositeOperation = was;
+}
+
+// The hook's line, from the grapnel to the ship. Drawn in world space
+// rather than on the hull, because the whole of what it tells you is
+// which direction you are being pulled and by what — and so which thing
+// to shoot to make it stop.
+function drawTowLine(ctx, game) {
+  const p = game.player;
+  const f = p.towT > 0 ? p.towBy : null;
+  if (!f || f.dead || f.hp <= 0) return;
+  ctx.save();
+  ctx.strokeStyle = '#ffb45c';
+  ctx.globalAlpha = 0.5 + Math.abs(Math.sin(p.towT * 9)) * 0.35;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(f.x, f.y);
+  ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+  // the claw, closed on the hull
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#c9923f';
+  ctx.fillRect(Math.round(p.x) - 2, Math.round(p.y) - 2, 4, 4);
+  ctx.restore();
+}
+
+// The jump's readiness, drawn on the ship rather than on the HUD.
+//
+// There is no room on the HUD row — the armoury slots run to x=386 and
+// the score starts at 402 — and a ten second cooldown is something you
+// check while flying, not something you look away to read. So it is a
+// ring around the hull: filling while it recharges, and a brief bright
+// pulse at the moment it comes back, which is the part a pilot needs to
+// catch out of the corner of an eye.
+function drawJumpReady(ctx, p) {
+  if (!p.alive) return;
+  const k = p.jumpCd > 0 ? 1 - p.jumpCd / JUMP.cooldown : 1;
+  const ready = p.jumpCd <= 0;
+  ctx.save();
+  // Just back from being ready, flash once. 0.35s of the ten seconds.
+  const justBack = ready && p.jumpWasCharging > 0;
+  ctx.globalAlpha = ready ? (justBack ? 0.9 : 0.35) : 0.55;
+  ctx.strokeStyle = ready ? COL.coolHi : COL.hudLine;
+  ctx.lineWidth = ready && justBack ? 2 : 1.2;
+  ctx.beginPath();
+  ctx.arc(0, 0, 17 + (justBack ? (1 - p.jumpWasCharging / 0.35) * 5 : 0),
+    -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawStatus(ctx, p) {
+  if (p.snareT > 0) {
+    // mesh clinging to the hull, slack and tangled
+    ctx.globalAlpha = Math.min(1, p.snareT) * 0.85;
+    ctx.strokeStyle = '#7af0d0';
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    for (let i = -12; i <= 12; i += 4) {
+      ctx.moveTo(i, -7);
+      ctx.lineTo(i + 2, 7);
+    }
+    for (let j = -6; j <= 6; j += 4) {
+      ctx.moveTo(-13, j);
+      ctx.lineTo(13, j + 1);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  if (p.burnT > 0) {
+    // flame licking back off the hull, additive so it sits on top of it
+    const was = ctx.globalCompositeOperation;
+    ctx.globalCompositeOperation = 'lighter';
+    const n = 7;
+    for (let i = 0; i < n; i++) {
+      const ph = p.burnT * 11 + i * 1.7;
+      const fy = -6 + (i / (n - 1)) * 12;
+      const len = 4 + Math.abs(Math.sin(ph)) * 7;
+      ctx.globalAlpha = 0.22 + Math.abs(Math.cos(ph)) * 0.3;
+      ctx.fillStyle = i % 2 ? '#ff7a3a' : '#ffd24a';
+      ctx.fillRect(-10 - len, fy - 1, len, 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = was;
+  }
 }
 
 // DRONE WING: escorts holding station off a wing. Small, lit, and plainly

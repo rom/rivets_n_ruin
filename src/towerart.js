@@ -222,16 +222,211 @@ BODIES.rocket = (ctx, t, d, tw) => {
 
 BODIES.warden = (ctx, t, d, tw) => gunHousing(ctx, d, tw, 7);
 
+// --- the installations
+//
+// Buildings, not weapons. They share the deck and nothing else: no
+// barrel, no mounting trapezoid, and a silhouette that says what the
+// thing is for from across the hull.
+
+BODIES.barracks = (ctx, t, d, tw) => {
+  // A block with a pitched roof and lit windows. People live here, and
+  // that is the whole of why it reads differently from a shed.
+  const top = d === 1 ? 0 : -22;
+  ctx.fillStyle = '#39414e';
+  ctx.fillRect(-15, top + 4, 30, 18);
+  ctx.fillStyle = '#4b5564';
+  ctx.fillRect(-15, top + 4, 30, 3);
+  // roof, pitched away from the deck
+  ctx.fillStyle = '#2b323c';
+  ctx.beginPath();
+  ctx.moveTo(-17, top + 4);
+  ctx.lineTo(0, top - 2);
+  ctx.lineTo(17, top + 4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = tw.colour;
+  for (let i = -10; i <= 8; i += 9) {
+    ctx.globalAlpha = 0.55 + ((i + 10) % 7) * 0.05;
+    ctx.fillRect(i, top + 10, 4, 5);
+  }
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = '#20262e';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(-15, top + 4, 30, 18);
+};
+
+BODIES.depot = (ctx, t, d, tw) => {
+  // A curved-roof store shed with a door at one end.
+  const top = d === 1 ? 0 : -15;
+  ctx.fillStyle = '#434c59';
+  ctx.beginPath();
+  ctx.moveTo(-13, top + 15);
+  ctx.lineTo(-13, top + 6);
+  ctx.quadraticCurveTo(0, top - 3, 13, top + 6);
+  ctx.lineTo(13, top + 15);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#525d6c';
+  for (let i = -11; i < 12; i += 5) ctx.fillRect(i, top + 7, 1, 8);
+  ctx.fillStyle = tw.colour;
+  ctx.globalAlpha = 0.5;
+  ctx.fillRect(7, top + 9, 5, 6);
+  ctx.globalAlpha = 1;
+};
+
+BODIES.cistern = (ctx, t, d, tw) => {
+  // A bulk tank: taller than a fuel drum, banded, and marked up the
+  // way something you should not shoot next to would be.
+  const top = d === 1 ? 0 : -24;
+  ctx.fillStyle = '#4a5160';
+  ctx.fillRect(-13, top + 2, 26, 22);
+  ctx.fillStyle = '#5c6775';
+  ctx.fillRect(-13, top + 2, 26, 3);
+  ctx.fillStyle = '#343c47';
+  for (const by of [top + 9, top + 16]) ctx.fillRect(-13, by, 26, 2);
+  ctx.fillStyle = tw.colour;
+  for (let i = -10; i < 10; i += 7) ctx.fillRect(i, top + 11, 4, 5);
+  // the dome on top
+  ctx.fillStyle = '#525b6a';
+  ctx.beginPath();
+  ctx.arc(0, top + 2, 9, Math.PI, 0);
+  ctx.fill();
+  ctx.strokeStyle = '#20262e';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(-13, top + 2, 26, 22);
+};
+
+BODIES.pump = (ctx, t, d, tw) => {
+  // A pump island: a stubby column with a hose arm off it.
+  const top = d === 1 ? 0 : -14;
+  ctx.fillStyle = '#434c59';
+  ctx.fillRect(-5, top + 2, 10, 12);
+  ctx.fillStyle = tw.colour;
+  ctx.fillRect(-3, top + 4, 6, 4);
+  ctx.strokeStyle = '#596372';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(4, top + 5);
+  ctx.lineTo(10, top + 5);
+  ctx.lineTo(10, top + 12);
+  ctx.stroke();
+};
+
+BODIES.reactor = (ctx, t, d, tw) => {
+  // A containment drum with a lit core and cooling fins. It is the
+  // thing on a power plant worth breaking first, so it is the thing on
+  // a power plant you can see first.
+  const top = d === 1 ? 0 : -26;
+  ctx.fillStyle = '#39414e';
+  ctx.fillRect(-16, top + 6, 32, 20);
+  for (const fx of [-16, 12]) {
+    ctx.fillStyle = '#2b323c';
+    ctx.fillRect(fx, top + 2, 4, 24);
+  }
+  ctx.fillStyle = '#4b5564';
+  ctx.fillRect(-16, top + 6, 32, 3);
+  // the core, pulsing on its own clock
+  const glow = 0.45 + Math.abs(Math.sin((t.t || 0) * 2.2)) * 0.55;
+  ctx.globalAlpha = glow;
+  ctx.fillStyle = tw.colour;
+  ctx.beginPath();
+  ctx.arc(0, top + 16, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#d8fff2';
+  ctx.beginPath();
+  ctx.arc(0, top + 16, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#20262e';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(-16, top + 6, 32, 20);
+};
+
+BODIES.pylon = (ctx, t, d, tw) => {
+  // A lattice mast with cross-arms. The line between them is drawn by
+  // the hull, not by the pylon — see drawPowerLines.
+  const h = 22;
+  const top = d === 1 ? 0 : -h;
+  ctx.strokeStyle = '#6b7682';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(-6, top + h); ctx.lineTo(-2, top);
+  ctx.moveTo(6, top + h); ctx.lineTo(2, top);
+  for (let i = 1; i < 4; i++) {
+    const yy = top + h - (i * h) / 4;
+    const w = 6 - i * 1.1;
+    ctx.moveTo(-w, yy); ctx.lineTo(w, yy);
+  }
+  ctx.stroke();
+  // cross-arms, where the line hangs
+  ctx.strokeStyle = '#8894a2';
+  ctx.beginPath();
+  ctx.moveTo(-8, top + 3); ctx.lineTo(8, top + 3);
+  ctx.stroke();
+  ctx.fillStyle = tw.colour;
+  for (const ix of [-8, 8]) ctx.fillRect(ix - 1, top + 2, 2, 3);
+};
+
+BODIES.watchtower = (ctx, t, d, tw) => {
+  // A legged tower with a glazed cab on top: taller than a post, and
+  // obviously looking at you.
+  const h = 24;
+  const top = d === 1 ? 0 : -h;
+  ctx.strokeStyle = '#596372';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(-7, top + h); ctx.lineTo(-3, top + 8);
+  ctx.moveTo(7, top + h); ctx.lineTo(3, top + 8);
+  ctx.moveTo(-5, top + 15); ctx.lineTo(5, top + 15);
+  ctx.stroke();
+  ctx.fillStyle = '#434c59';
+  ctx.fillRect(-8, top + 1, 16, 8);
+  ctx.fillStyle = tw.colour;
+  ctx.globalAlpha = 0.6 + Math.abs(Math.sin((t.t || 0) * 1.6)) * 0.4;
+  ctx.fillRect(-6, top + 3, 12, 4);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#2b323c';
+  ctx.fillRect(-9, top, 18, 2);
+};
+
+BODIES.searchlight = (ctx, t, d, tw) => {
+  // A lamp in a yoke, pointing wherever it is currently sweeping. The
+  // beam itself is drawn with the hull, because it is long and belongs
+  // in world space — see drawBeams. The angle here is beamAim, the same
+  // number the beam uses: a lamp aimed anywhere else is a lamp that
+  // disagrees with its own light.
+  const top = d === 1 ? 0 : -13;
+  ctx.fillStyle = '#434c59';
+  ctx.fillRect(-7, top + 6, 14, 7);
+  ctx.strokeStyle = '#6b7682';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(-5, top + 6); ctx.lineTo(-5, top + 1);
+  ctx.moveTo(5, top + 6); ctx.lineTo(5, top + 1);
+  ctx.stroke();
+  // the lamp, tilted to where it is looking
+  ctx.save();
+  ctx.translate(0, top + 2);
+  ctx.rotate((t.beamAim || 0) * (d === 1 ? 1 : -1));
+  ctx.fillStyle = '#2b323c';
+  ctx.fillRect(-5, -4, 10, 8);
+  ctx.fillStyle = t.dead ? '#2b323c' : tw.colour;
+  ctx.fillRect(3, -3, 3, 6);
+  ctx.restore();
+};
+
 // Whether this kind carries a barrel. A dish, a tank and a parked
 // lander do not, and drawing one on them was the thing that made every
 // installation look like a gun with a hat on.
 export const hasBarrel = (kind) => !NO_BARREL.has(kind);
-const NO_BARREL = new Set(['radar', 'array', 'post', 'control', 'tank', 'lander', 'silo']);
+const NO_BARREL = new Set(['radar', 'array', 'post', 'control', 'tank', 'lander', 'silo',
+  'barracks', 'depot', 'cistern', 'pump', 'reactor', 'pylon', 'watchtower', 'searchlight']);
 
 // Whether the mounting trapezoid is drawn. The port's structures sit
 // flat on the deck and supply their own footprint.
 export const hasMount = (kind) => !NO_MOUNT.has(kind);
-const NO_MOUNT = new Set(['tank', 'lander', 'silo', 'control']);
+const NO_MOUNT = new Set(['tank', 'lander', 'silo', 'control',
+  'barracks', 'depot', 'cistern', 'reactor', 'pylon', 'watchtower']);
 
 export function drawTowerBody(ctx, t, d) {
   const tw = t.tower || {};

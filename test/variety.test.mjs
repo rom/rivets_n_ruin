@@ -1,7 +1,7 @@
 import './_setup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildLevel, mixSeed, pointBlocked, obstaclesNear } from '../src/level.js';
+import { buildLevel, mixSeed, pointBlocked, obstaclesNear, firstBlockage } from '../src/level.js';
 import { makeGame, update } from '../src/game.js';
 import { setSynthetic } from '../src/input.js';
 import { foes } from '../src/foes.js';
@@ -88,12 +88,14 @@ function widestGapFailure(lv) {
 
 for (const hull of [0, 4, 7, LEVELS.length - 1]) {
   test(`${LEVELS[hull].name}: shuffled layouts stay flyable`, () => {
+    // Measured as clearance for the ship's whole box, not as a gap in a
+    // slice. See firstBlockage: the slice version passed eighteen hulls
+    // the ship could not get through.
     for (const seed of [1, 7, 0x51ed, 0xbeef, 0x7fffffff, 0xffffffff, 12345, 999983]) {
       const lv = buildLevel(LEVELS[hull], seed);
-      const bad = widestGapFailure(lv);
+      const bad = firstBlockage(lv);
       assert.equal(bad, null,
-        bad && `${LEVELS[hull].name} seed ${seed} is impassable at x=${bad.x}`
-          + ` (widest gap ${bad.best}px)`);
+        bad && `${LEVELS[hull].name} seed ${seed} blocked at x=${bad.x}: ${bad.why}`);
     }
   });
 
@@ -251,16 +253,40 @@ test('a press never closes further than the ship can fit through', () => {
 });
 
 test('a press is flyable at every phase', () => {
-  // The full walk, run at sixteen points around the cycle rather than once
-  // at the base position.
+  // The full sweep, run at sixteen points around the cycle rather than
+  // once at the base position, and for the ship's whole box.
   const { lv } = hullWithPress();
   for (let step = 0; step < 16; step++) {
     const t = (step / 16) * 3.4;      // the longest period the band makes
     updateMovers(lv, t);
-    const bad = widestGapFailure(lv);
+    const bad = firstBlockage(lv);
     assert.equal(bad, null,
-      bad && `impassable at x=${bad.x} (widest gap ${bad.best}px) at t=${t.toFixed(2)}`);
+      bad && `blocked at x=${bad.x} (${bad.why}) at t=${t.toFixed(2)}`);
   }
+});
+
+test('a chicane never closes against the width of the ship', () => {
+  // The pattern that was doing it. Consecutive stubs come off opposite
+  // surfaces, and before they were capped as a pair the two free bands
+  // could miss each other entirely — leaving the gap between the stubs as
+  // the only way through, at 18 to 20px for a ship 19px wide.
+  let seen = 0;
+  for (let seed = 1; seed <= 120; seed++) {
+    const lv = buildLevel(LEVELS[6], seed);
+    const bad = firstBlockage(lv);
+    assert.equal(bad, null, bad && `seed ${seed} blocked at x=${bad.x}: ${bad.why}`);
+    // A chicane is a run of stubs alternating top and bottom with small
+    // x gaps; count the hulls that actually contain one so this is not
+    // passing on hulls that never grew the pattern under test.
+    const byX = [...lv.obstacles].sort((a, b) => a.x - b.x);
+    for (let i = 1; i < byX.length; i++) {
+      const a = byX[i - 1];
+      const b = byX[i];
+      const gap = b.x - (a.x + a.w);
+      if (gap > 0 && gap < 60 && a.face !== b.face) { seen++; break; }
+    }
+  }
+  assert.ok(seen > 30, `only ${seen} of 120 seeds grew alternating stubs to test`);
 });
 
 test('jaws stagger, so one altitude does not clear a whole press', () => {
@@ -1021,4 +1047,818 @@ test('a hull with no LIVE HULL rule never rebuilds a gun', () => {
     update(game, DT);
   }
   assert.ok(t.dead, 'a gun came back on a hull with no rule for it');
+});
+
+// ------------------------------------------------- the entangling attackers
+//
+// Three that take control rather than shield: a net that slows the ship,
+// a hook that slows and drags it off its line, and a flame that leaves
+// the hull burning after the thing that lit it is dead.
+
+import { STATUS } from '../src/config.js';
+import { spawnFoe } from '../src/foes.js';
+
+function inFlight(hull = LEVELS.length - 1) {
+  const game = launchAt(hull);
+  for (const t of game.level.turrets) t.dead = true;
+  game.miniPlan = [];
+  return game;
+}
+
+// Everything off the hull except the one attacker under test and what
+// it fires. silence() cannot be used here: it clears the foe pool and
+// the enemy shots, which is exactly the attacker and exactly its net.
+function onlyThis(game) {
+  interceptors.clear();
+}
+
+// Puts one attacker next to the ship and runs the real loop until it
+// fires and connects, or gives up.
+function letItHit(game, kind, frames = 120 * 10) {
+  const p = game.player;
+  resetFoes();
+  const f = spawnFoe(game, kind);
+  assert.ok(f, `could not spawn a ${kind}`);
+  for (let i = 0; i < frames; i++) {
+    onlyThis(game);
+    // hold them a fixed distance apart so the attacker is always in range
+    f.x = p.x + 70;
+    f.baseY = p.y;
+    f.y = p.y;
+    f.dead = false;
+    p.invuln = 0;
+    p.vx = 0; p.vy = 0;
+    update(game, DT);
+    if (p.snareT > 0 || p.burnT > 0 || p.towT > 0) return f;
+  }
+  return null;
+}
+
+test('a netter slows the ship, and it wears off', () => {
+  const game = inFlight();
+  const p = game.player;
+  const f = letItHit(game, 'netter');
+  assert.ok(f, 'a netter never landed a net in ten seconds at point blank');
+  assert.ok(p.snareT > 0, 'the net did not snare');
+  // Bounded by a literal, not by STATUS.snareTime: reading the constant
+  // under test makes both sides move together and any value passes.
+  assert.ok(p.snareT <= 5,
+    `a net holds for ${p.snareT.toFixed(1)}s — long enough to be a death sentence`);
+  assert.ok(STATUS.snareTime > 0.5 && STATUS.snareTime <= 5,
+    `a net set to hold ${STATUS.snareTime}s is not a slow, it is a stop`);
+
+  // It has to actually cost speed, not just set a flag.
+  resetFoes();
+  p.snareT = STATUS.snareTime;
+  const topWhileHeld = reachableSpeed(game, 40);
+  p.snareT = 0;
+  const topFree = reachableSpeed(game, 40);
+  assert.ok(topWhileHeld < topFree * 0.75,
+    `netted the ship reached ${topWhileHeld.toFixed(0)}px/s against`
+    + ` ${topFree.toFixed(0)} free — the snare is not reaching the controls`);
+
+  // ...and it lets go.
+  p.snareT = 0.05;
+  resetFoes();
+  for (let i = 0; i < 30; i++) { onlyThis(game); update(game, DT); }
+  assert.equal(p.snareT <= 0, true, 'the net never let go');
+});
+
+// How fast the ship gets in a short burst, measured from the same spot
+// both times. The first version just accelerated from wherever the ship
+// happened to be, so the netted run flew 150px into a block and the free
+// run was measured against a wall — it reported the netted ship as four
+// times the faster of the two.
+function reachableSpeed(game, frames) {
+  const p = game.player;
+  p.x = 200;                      // inside the launch apron, clear by construction
+  p.y = (FIELD_TOP + FIELD_BOT) / 2;
+  p.vx = 0; p.vy = 0; p.facing = 1;
+  p.invuln = 1e9;
+  try {
+    for (let i = 0; i < frames; i++) {
+      onlyThis(game);
+      setSynthetic(new Set(['right']));
+      update(game, DT);
+    }
+  } finally { setSynthetic(null); }
+  return Math.abs(p.vx);
+}
+
+test('a grapnel tows the ship, and the line drops with it', () => {
+  const game = inFlight();
+  const p = game.player;
+  const f = letItHit(game, 'grapnel');
+  assert.ok(f, 'a grapnel never landed a hook in ten seconds at point blank');
+  assert.ok(p.towT > 0 && p.towBy === f, 'the hook did not attach to its owner');
+
+  // Pulled toward the thing holding the line.
+  p.vx = 0; p.vy = 0;
+  const wasX = p.x;
+  for (let i = 0; i < 20; i++) {
+    onlyThis(game);
+    f.x = p.x + 90; f.y = p.y; f.dead = false;
+    update(game, DT);
+  }
+  assert.ok(p.x > wasX, `being towed from the right moved the ship to ${p.x} from ${wasX}`);
+
+  // Kill the grapnel and the line goes slack.
+  f.dead = true;
+  f.hp = 0;
+  onlyThis(game);
+  update(game, DT);
+  assert.equal(p.towT, 0, 'the line survived the ship holding it');
+  assert.equal(p.towBy, null, 'a dead grapnel is still on the hook');
+});
+
+test('a scorcher sets the hull alight, and it keeps burning', () => {
+  const game = inFlight();
+  const p = game.player;
+  const f = letItHit(game, 'scorcher');
+  assert.ok(f, 'a scorcher never landed a flame in ten seconds at point blank');
+  assert.ok(p.burnT > 0, 'the flame did not light the hull');
+
+  // The fire outlives what lit it — that is the whole of the mechanic.
+  f.dead = true;
+  f.hp = 0;
+  resetFoes();
+  // ...and its flames with it. Puffs already in the air kept landing and
+  // the burn-only measurement read 42.5 shield against the 6.5 the fire
+  // itself costs.
+  enemyShots.clear();
+  p.x = 200;
+  p.y = (FIELD_TOP + FIELD_BOT) / 2;
+  p.vx = 0; p.vy = 0;
+  p.shield = p.shieldMax;
+  p.invuln = 0;
+  const before = p.shield;
+  const held = p.burnT;
+  for (let i = 0; i < 60; i++) { onlyThis(game); update(game, DT); }
+  assert.ok(p.shield < before,
+    'the hull stopped burning the moment the scorcher died');
+  const lost = before - p.shield;
+  const want = STATUS.burnDps * 0.5;
+  assert.ok(Math.abs(lost - want) < want * 0.5,
+    `burned ${lost.toFixed(1)} shield in half a second, expected about ${want.toFixed(1)}`);
+  assert.ok(p.burnT < held, 'the fire never burns out');
+});
+
+test('none of the three carries over to the next ship', () => {
+  const game = inFlight();
+  const p = game.player;
+  p.snareT = 9; p.burnT = 9; p.towT = 9; p.towBy = { x: 0, y: 0, dead: false, hp: 1 };
+  p.shield = 0.0001;
+  p.invuln = 0;
+  onlyThis(game);
+  update(game, DT);
+  assert.equal(game.state, 'dying', 'the ship did not die');
+  const np = game.player;
+  assert.equal(np.snareT, 0, 'the new ship arrived netted');
+  assert.equal(np.burnT, 0, 'the new ship arrived on fire');
+  assert.equal(np.towT, 0, 'the new ship arrived on a hook');
+});
+
+test('a second hit refreshes rather than stacks', () => {
+  assert.equal(STATUS.refresh, true);
+  const game = inFlight();
+  const p = game.player;
+  p.snareT = 1;
+  p.invuln = 0;
+  // two nets in a row
+  for (let k = 0; k < 2; k++) {
+    const s = enemyShots.spawn();
+    Object.assign(s, { x: p.x, y: p.y, vx: 0, vy: 0, life: 1, dmg: 0, r: 6, fx: 'net' });
+    onlyThis(game);
+    update(game, DT);
+  }
+  assert.ok(p.snareT <= STATUS.snareTime + 0.01,
+    `two nets stacked to ${p.snareT.toFixed(2)}s, past the ${STATUS.snareTime}s one lasts`);
+});
+
+// ------------------------------------------------------------ hazard fields
+//
+// Areas rather than objects: nothing solid, nothing to shoot, and a
+// price per second for being inside. The thing that must hold is that
+// they are always avoidable — a field is a question about your line, and
+// a field spanning the corridor would be a wall that cannot be broken.
+
+import { HAZARDS } from '../src/config.js';
+import { hazardAt } from '../src/level.js';
+
+test('every hazard kind is complete and reachable', () => {
+  const kinds = Object.keys(HAZARDS);
+  assert.equal(kinds.length, 4, `${kinds.length} hazard kinds`);
+  for (const [id, h] of Object.entries(HAZARDS)) {
+    assert.ok(h.name && h.name === h.name.toUpperCase(), `${id} has no name`);
+    assert.ok(h.dps > 0, `${id} costs nothing to fly through`);
+    assert.ok(h.dps < 60, `${id} at ${h.dps}/s is not a hazard, it is a wall`);
+    for (const c of ['tint', 'glow', 'dark']) {
+      assert.ok(/^#[0-9a-f]{6}$/i.test(h[c]), `${id}.${c} is not a colour`);
+    }
+  }
+  // Every kind has to actually be fielded somewhere, or it is art nobody
+  // will see.
+  const fielded = new Set();
+  for (const spec of LEVELS) for (const k of spec.hazardKinds || []) fielded.add(k);
+  for (const k of kinds) assert.ok(fielded.has(k), `no hull ever fields a ${k} field`);
+});
+
+test('the tutorial hulls field no hazards', () => {
+  for (const spec of LEVELS.slice(0, 2)) {
+    for (let seed = 0; seed < 30; seed++) {
+      assert.equal(buildLevel(spec, seed).hazards.length, 0,
+        `${spec.name} grew a hazard field and is meant to be the tutorial`);
+    }
+  }
+});
+
+test('a hull only fields the kinds it lists', () => {
+  for (const spec of LEVELS) {
+    const allowed = new Set(spec.hazardKinds || []);
+    for (let seed = 0; seed < 12; seed++) {
+      for (const h of buildLevel(spec, seed).hazards) {
+        assert.ok(allowed.has(h.kind),
+          `${spec.name} grew a ${h.kind} field, which it does not list`);
+      }
+    }
+  }
+});
+
+test('a hazard field always leaves a clear band beside it', () => {
+  // The guarantee the whole category rests on. Fields are invisible to
+  // the clearance sweep — they are not solid — so nothing else would
+  // notice one that spanned the corridor.
+  const need = SHIP.hitH + 20;
+  let seen = 0;
+  for (const spec of LEVELS) {
+    for (let seed = 0; seed < 16; seed++) {
+      const lv = buildLevel(spec, seed);
+      for (const h of lv.hazards) {
+        seen++;
+        const above = h.y - FIELD_TOP;
+        const below = FIELD_BOT - (h.y + h.h);
+        assert.ok(Math.max(above, below) >= need,
+          `${spec.name}: a ${h.kind} field leaves only ${Math.max(above, below).toFixed(0)}px`
+          + ` of clear corridor, and the ship needs ${need}`);
+        assert.ok(h.h > 0 && h.w > 0, 'a field with no area');
+        assert.ok(h.y >= FIELD_TOP - 1 && h.y + h.h <= FIELD_BOT + 1,
+          'a field outside the corridor');
+      }
+    }
+  }
+  assert.ok(seen > 200, `only ${seen} fields generated to check`);
+});
+
+test('a hazard field never blocks the hull', () => {
+  // Belt and braces: fields are not obstacles, so this is really
+  // checking that nothing started adding them to the obstacle list.
+  for (const spec of LEVELS) {
+    const lv = buildLevel(spec, 7);
+    assert.ok(lv.hazards.length === 0 || lv.obstacles.every((o) => !o.kind),
+      'a hazard leaked into the obstacle list');
+    const bad = firstBlockage(lv);
+    assert.equal(bad, null, bad && `${spec.name} blocked at x=${bad.x}: ${bad.why}`);
+  }
+});
+
+test('hazardAt finds the field the ship is standing in, and only that', () => {
+  const lv = { hazards: [{ x: 100, y: 50, w: 60, h: 40, kind: 'fire', phase: 0 }] };
+  const hw = SHIP.hitW / 2;
+  const hh = SHIP.hitH / 2;
+  assert.ok(hazardAt(lv, 130, 70, hw, hh), 'the middle of a field read as clear');
+  assert.equal(hazardAt(lv, 130, 200, hw, hh), null, 'well below a field read as inside it');
+  assert.equal(hazardAt(lv, 400, 70, hw, hh), null, 'well past a field read as inside it');
+  // the ship's box counts, not just its centre
+  assert.ok(hazardAt(lv, 100 - hw + 2, 70, hw, hh), 'a wingtip inside a field read as clear');
+  assert.equal(hazardAt(lv, 100 - hw - 4, 70, hw, hh), null, 'clear of a field read as inside');
+  assert.equal(hazardAt({ hazards: [] }, 0, 0, hw, hh), null);
+  assert.equal(hazardAt({}, 0, 0, hw, hh), null, 'a level with no field list threw');
+});
+
+test('a field costs shield by the second, and only while you are in it', () => {
+  const game = inFlight();
+  const p = game.player;
+  const field = { x: p.x - 200, y: FIELD_TOP, w: 400, h: 120, kind: 'spark', phase: 0 };
+  game.level.hazards = [field];
+  p.y = FIELD_TOP + 40;                 // inside it
+  p.invuln = 0;
+  p.shield = p.shieldMax;
+  const before = p.shield;
+  for (let i = 0; i < 60; i++) {
+    onlyThis(game);
+    p.x = field.x + 200; p.y = FIELD_TOP + 40; p.vx = 0; p.vy = 0;
+    update(game, DT);
+  }
+  const lost = before - p.shield;
+  const want = HAZARDS.spark.dps * 0.5;
+  assert.ok(Math.abs(lost - want) < want * 0.4,
+    `half a second in an arc field cost ${lost.toFixed(1)}, expected about ${want.toFixed(1)}`);
+
+  // The ship's box counts, not its centre. Parked so the centre is clear
+  // of the field and a wingtip is not: a caller that passes a point
+  // instead of the hitbox flies through this for free.
+  const edge = field.y + field.h;
+  p.shield = p.shieldMax;
+  const atEdge = p.shield;
+  for (let i = 0; i < 40; i++) {
+    onlyThis(game);
+    p.x = field.x + 200;
+    p.y = edge + SHIP.hitH / 2 - 2;     // centre below the field, top edge inside
+    p.vx = 0; p.vy = 0;
+    update(game, DT);
+  }
+  assert.ok(p.shield < atEdge,
+    'a wingtip inside the field cost nothing — the hitbox is not being used');
+
+  // ...and nothing once clear of it
+  p.y = FIELD_BOT - 30;
+  p.shield = p.shieldMax;
+  const clear = p.shield;
+  for (let i = 0; i < 60; i++) {
+    onlyThis(game);
+    p.x = field.x + 200; p.y = FIELD_BOT - 30; p.vx = 0; p.vy = 0;
+    update(game, DT);
+  }
+  assert.equal(p.shield, clear, 'the ship paid for a field it was not in');
+});
+
+test('the four fields are told apart by what they cost', () => {
+  // Same shape, same question, different price — otherwise three of them
+  // are reskins.
+  const rates = Object.values(HAZARDS).map((h) => h.dps);
+  assert.equal(new Set(rates).size, rates.length,
+    `two hazard kinds cost the same: ${rates.join(', ')}`);
+});
+
+// --------------------------------------------------------- colour schemes
+//
+// COL is the instrument palette — the HUD, the menus, the frames — and
+// not the hull, which THEMES colours per hull. A scheme rewrites COL in
+// place so the roughly three hundred places that read COL.cool need to
+// know nothing about schemes existing.
+
+import { SCHEMES, applyScheme, COL } from '../src/config.js';
+
+test('every scheme is complete, named, and a real palette', () => {
+  assert.ok(SCHEMES.length >= 5, `${SCHEMES.length} schemes; four alternatives were asked for`);
+  const keys = Object.keys(SCHEMES[0].col);
+  const ids = new Set();
+  for (const s of SCHEMES) {
+    assert.ok(!ids.has(s.id), `two schemes share the id ${s.id}`);
+    ids.add(s.id);
+    assert.ok(s.name && s.name === s.name.toUpperCase(), `${s.id} has no display name`);
+    assert.ok(s.blurb && s.blurb.length > 10, `${s.id} does not say what it is`);
+    assert.deepEqual(Object.keys(s.col).sort(), [...keys].sort(),
+      `${s.id} does not define the same colours as the others`);
+    for (const [k, v] of Object.entries(s.col)) {
+      assert.ok(/^#[0-9a-f]{6}$/i.test(v), `${s.id}.${k} is "${v}", not a colour`);
+    }
+  }
+});
+
+test('the schemes are actually different from each other', () => {
+  // Five names over one palette would be a setting that does nothing.
+  const sigs = SCHEMES.map((s) => Object.values(s.col).join(','));
+  assert.equal(new Set(sigs).size, SCHEMES.length, 'two schemes are the same palette');
+  // and distinguishable where it counts: the accent you read the HUD by
+  const accents = SCHEMES.map((s) => s.col.cool);
+  assert.equal(new Set(accents).size, SCHEMES.length, 'two schemes share an accent');
+});
+
+test('applying a scheme rewrites the palette everyone already holds', () => {
+  const held = COL;                     // what a module captured at import
+  const first = applyScheme(0);
+  assert.equal(COL.cool, SCHEMES[0].col.cool);
+  for (let i = 1; i < SCHEMES.length; i++) {
+    applyScheme(i);
+    assert.equal(COL.cool, SCHEMES[i].col.cool, `scheme ${i} did not take`);
+    assert.equal(held.cool, SCHEMES[i].col.cool,
+      'the palette was replaced rather than rewritten, so held references are stale');
+    assert.equal(held, COL, 'COL is a different object after a scheme change');
+  }
+  applyScheme(0);
+  assert.equal(COL.cool, first.col.cool);
+});
+
+test('a scheme index out of range is clamped, not crashed into', () => {
+  for (const bad of [-5, 99, NaN, 1.7]) {
+    const s = applyScheme(bad);
+    assert.ok(s && s.id, `applyScheme(${bad}) returned nothing`);
+    assert.ok(/^#[0-9a-f]{6}$/i.test(COL.cool), `applyScheme(${bad}) left COL broken`);
+  }
+  applyScheme(0);
+});
+
+test('the scheme setting offers every scheme and wraps', () => {
+  const def = settings.DEFS.find((d) => d.id === 'scheme');
+  assert.ok(def, 'no colour scheme setting');
+  assert.equal(def.def, 0, 'the default must be the palette that shipped');
+  const was = settings.get('scheme');
+  try {
+    settings.set('scheme', SCHEMES.length - 1);
+    settings.nudge('scheme', 1, {});
+    assert.equal(settings.get('scheme'), 0, 'the scheme list does not wrap forward');
+    settings.nudge('scheme', -1, {});
+    assert.equal(settings.get('scheme'), SCHEMES.length - 1, 'the scheme list does not wrap back');
+    // and the display names the scheme rather than printing an index
+    settings.set('scheme', 1);
+    assert.ok(settings.display(def, null).includes(SCHEMES[1].name),
+      `the settings row shows "${settings.display(def, null)}"`);
+  } finally {
+    settings.set('scheme', was);
+  }
+});
+
+test('changing the setting changes the live palette', () => {
+  const was = settings.get('scheme');
+  try {
+    settings.set('scheme', 0);
+    const base = COL.cool;
+    settings.set('scheme', 2);
+    assert.notEqual(COL.cool, base, 'setting a scheme did not reach COL');
+    assert.equal(COL.cool, SCHEMES[2].col.cool);
+  } finally {
+    settings.set('scheme', was);
+  }
+});
+
+// ------------------------------------------------- the on-screen controls
+//
+// A phone has no keyboard. The buttons drive the same input sets the
+// keyboard does, so the only things that can be wrong here are the ones
+// a browser would have to show you: a button you can see and cannot
+// press, two that overlap, or one off the edge of the screen.
+
+import { PADS, MIN_TOUCH, hitBox, padAt, padsFor } from '../src/touch.js';
+import { VIEW_W, VIEW_H, HUD_Y } from '../src/config.js';
+
+test('every on-screen control is big enough for a thumb', () => {
+  for (const b of PADS) {
+    const r = hitBox(b);
+    assert.ok(r.w >= MIN_TOUCH && r.h >= MIN_TOUCH,
+      `${b.id} is ${r.w}x${r.h} logical px, under the ${MIN_TOUCH} floor`);
+  }
+});
+
+test('no two controls on screen at once overlap', () => {
+  // Overlapping hit boxes mean a thumb lands on whichever happens to be
+  // first in the list, which is the kind of bug that only shows up as
+  // "the controls feel wrong".
+  for (const state of ['play', 'title', 'levelclear', 'gameover', 'dying']) {
+    const list = padsFor(state);
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = hitBox(list[i]);
+        const b = hitBox(list[j]);
+        const over = a.x < b.x + b.w && b.x < a.x + a.w
+          && a.y < b.y + b.h && b.y < a.y + a.h;
+        assert.ok(!over,
+          `in ${state}, ${list[i].id} and ${list[j].id} overlap`);
+      }
+    }
+  }
+});
+
+test('every control is on the screen', () => {
+  for (const b of PADS) {
+    const r = hitBox(b);
+    assert.ok(r.x >= 0 && r.y >= 0 && r.x + r.w <= VIEW_W && r.y + r.h <= VIEW_H,
+      `${b.id} sits at ${r.x},${r.y} ${r.w}x${r.h}, off a ${VIEW_W}x${VIEW_H} screen`);
+    // ...and not over the HUD, which is the one thing a player reads
+    // while both thumbs are busy.
+    assert.ok(r.y + r.h <= HUD_Y + 2,
+      `${b.id} reaches ${r.y + r.h}, over the HUD at ${HUD_Y}`);
+  }
+});
+
+test('flying and menus get the controls they need', () => {
+  const flying = padsFor('play').map((b) => b.id);
+  for (const need of ['left', 'right', 'up', 'down', 'fire', 'pause']) {
+    assert.ok(flying.includes(need), `nothing to ${need} with while flying`);
+  }
+  assert.ok(!flying.includes('start'), 'the START button is up during a run');
+
+  for (const state of ['title', 'gameover', 'levelclear']) {
+    const menu = padsFor(state).map((b) => b.id);
+    assert.ok(menu.includes('start'),
+      `no way to start anything from ${state} without a keyboard`);
+    assert.ok(menu.includes('pause'),
+      `no way out of ${state} without a keyboard`);
+    assert.ok(!menu.includes('fire'), `the fire button is up on ${state}`);
+  }
+});
+
+test('hit testing answers the control that was drawn there', () => {
+  for (const state of ['play', 'title']) {
+    for (const b of padsFor(state)) {
+      const r = hitBox(b);
+      // the middle, and just inside each corner
+      assert.equal(padAt(state, b.x, b.y)?.id, b.id, `${b.id} misses at its centre`);
+      for (const [dx, dy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+        const px = r.x + r.w / 2 + dx * (r.w / 2 - 1);
+        const py = r.y + r.h / 2 + dy * (r.h / 2 - 1);
+        assert.equal(padAt(state, px, py)?.id, b.id, `${b.id} misses just inside its corner`);
+      }
+    }
+  }
+  assert.equal(padAt('play', 320, 120), null, 'the open playfield reported a button');
+});
+
+test('a control only answers in the states it belongs to', () => {
+  const fire = PADS.find((b) => b.id === 'fire');
+  assert.ok(padAt('play', fire.x, fire.y), 'the fire button is dead while flying');
+  assert.equal(padAt('title', fire.x, fire.y), null,
+    'the fire button is live on the title, where it is not drawn');
+});
+
+test('the touch setting offers auto, on and off', () => {
+  const def = settings.DEFS.find((d) => d.id === 'touch');
+  assert.ok(def, 'no on-screen controls setting');
+  assert.equal(def.def, 0, 'the default must be AUTO');
+  assert.deepEqual(settings.TOUCH_MODES, ['AUTO', 'ON', 'OFF']);
+});
+
+test('the buttons press and release like keys', async () => {
+  const input = await import('../src/input.js');
+  const { touchDown, touchUp, touchClear, held, touchHeld, endFrame, tapped } = input;
+  touchClear();
+  endFrame();
+
+  touchDown(1, 'fire');
+  assert.equal(held('fire'), true, 'a finger down did not hold the action');
+  assert.equal(touchHeld('fire'), true, 'the button does not know it is lit');
+  assert.equal(tapped('fire'), true, 'a finger down did not register as a press');
+  endFrame();
+  assert.equal(tapped('fire'), false, 'the press repeated on the next frame');
+  assert.equal(held('fire'), true, 'the hold did not survive the frame');
+
+  touchUp(1);
+  assert.equal(held('fire'), false, 'lifting the finger left the gun firing');
+  assert.equal(touchHeld('fire'), false, 'the button is still lit with nothing on it');
+
+  // Two fingers on buttons for the same action: lifting one must not
+  // release it while the other is still down.
+  touchDown(1, 'right');
+  touchDown(2, 'right');
+  touchUp(1);
+  assert.equal(held('right'), true, 'one of two fingers let go of the action');
+  touchUp(2);
+  assert.equal(held('right'), false, 'the last finger up did not release it');
+
+  // Sliding from one button to the next steers rather than sticking.
+  touchDown(3, 'left');
+  touchUp(3);
+  touchDown(3, 'up');
+  assert.equal(held('left'), false, 'sliding off a button left it held');
+  assert.equal(held('up'), true, 'sliding onto a button did not press it');
+
+  // Losing the pointer entirely — the browser taking the gesture, the
+  // tab losing focus — has to let go of everything.
+  touchDown(4, 'down');
+  touchClear();
+  for (const a of ['left', 'right', 'up', 'down', 'fire']) {
+    assert.equal(held(a), false, `${a} survived a touch clear`);
+  }
+  // ...and an unknown pointer id is not an error
+  touchUp(99);
+  endFrame();
+});
+
+// ---------------------------------------------------------- key remapping
+//
+// The live map is the defaults with the player's bindings over the top.
+// What must hold: a rebind takes the key off whatever had it, the keys
+// that must keep working cannot be taken, and nothing a hand-edited
+// store says can break the map.
+
+import {
+  DEFAULT_MAP, MAP, BINDABLE, rebind, resetBindings, keyFor, isBindable, isFixedKey,
+} from '../src/input.js';
+
+test('every bindable action is a real action, and the fixed ones are not listed', () => {
+  const actions = new Set(Object.values(DEFAULT_MAP));
+  for (const [action, label] of BINDABLE) {
+    assert.ok(actions.has(action), `${action} is bindable but nothing maps to it`);
+    assert.ok(label && label === label.toUpperCase(), `${action} has no readable label`);
+  }
+  // start must never be rebindable: it is the way back in when
+  // everything else has been bound to the wrong thing.
+  assert.ok(!isBindable('start'), 'START can be rebound, so it can be lost');
+  assert.ok(isFixedKey('Enter'), 'ENTER is not protected');
+  assert.ok(!isBindable('wipe') && !isBindable('wipeall'),
+    'an irreversible key can be bound to something reached for in flight');
+});
+
+test('a rebind moves the action and takes the key off the old one', () => {
+  resetBindings();
+  try {
+    const wasFire = keyFor('fire');
+    assert.ok(rebind('fire', 'KeyG'), 'a free key was refused');
+    assert.equal(keyFor('fire'), 'KeyG');
+    assert.equal(MAP.KeyG, 'fire', 'the live map did not take the binding');
+    assert.notEqual(MAP[wasFire], 'fire', 'the old key still fires');
+
+    // Binding a key that another action is using takes it away, rather
+    // than leaving one key doing two things.
+    assert.ok(rebind('cycle', 'KeyG'));
+    assert.equal(MAP.KeyG, 'cycle');
+    assert.notEqual(keyFor('fire'), 'KeyG', 'two actions share a key');
+  } finally { resetBindings(); }
+});
+
+test('the keys that must keep working cannot be taken', () => {
+  resetBindings();
+  try {
+    assert.equal(rebind('fire', 'Enter'), false, 'FIRE was bound onto ENTER');
+    assert.equal(MAP.Enter, 'start', 'ENTER stopped starting things');
+    assert.equal(rebind('left', 'KeyK'), false, 'MOVE LEFT was bound onto the hangar wipe');
+    assert.equal(rebind('start', 'KeyG'), false, 'START was rebound');
+    assert.equal(rebind('fire', ''), false, 'an empty key was accepted');
+  } finally { resetBindings(); }
+});
+
+test('resetting puts every default back', () => {
+  rebind('fire', 'KeyG');
+  rebind('up', 'KeyI');
+  resetBindings();
+  assert.deepEqual({ ...MAP }, { ...DEFAULT_MAP },
+    'resetting the controls did not restore the shipped map');
+});
+
+test('a rebind never leaves the map without the action', () => {
+  // Every bindable action must still be reachable by some key after any
+  // sequence of rebinds, or a player can lose the ability to fire.
+  resetBindings();
+  try {
+    for (const [action] of BINDABLE) rebind(action, 'Key' + action[0].toUpperCase());
+    for (const [action] of BINDABLE) {
+      const code = keyFor(action);
+      assert.ok(code, `${action} ended up bound to nothing`);
+      assert.equal(MAP[code], action, `${action} says ${code} but the map disagrees`);
+    }
+  } finally { resetBindings(); }
+});
+
+// -------------------------------------------------------- the hyperspace jump
+//
+// The only move in the game that is not flying. It exists for two
+// situations nothing else answers: wedged where the geometry will not
+// let you fly out, and a volley already in the air with nowhere to go.
+
+import { JUMP } from '../src/config.js';
+import { boxBlocked } from '../src/level.js';
+import { hyperJump } from '../src/player.js';
+
+test('the jump is short, and recharges in ten seconds', () => {
+  assert.equal(JUMP.cooldown, 10, 'the cooldown was asked to be ten seconds');
+  assert.ok(JUMP.distance > 40, `a ${JUMP.distance}px jump is not an escape`);
+  // A jump long enough to skip a stretch of hull would be a way past the
+  // guns rather than a way out of trouble. The shortest hull is 12,000px.
+  assert.ok(JUMP.distance < LEVELS[0].length / 40,
+    `${JUMP.distance}px is far enough to skip hull`);
+  assert.ok(JUMP.invuln > 0 && JUMP.invuln < 1,
+    'arriving must be briefly safe, and not a way to tank');
+});
+
+test('a jump moves the ship, costs the cooldown, and lands it clear', () => {
+  const game = inFlight();
+  const p = game.player;
+  p.x = 400; p.y = (FIELD_TOP + FIELD_BOT) / 2; p.facing = 1;
+  p.jumpCd = 0; p.invuln = 0;
+  const fromX = p.x;
+  assert.equal(hyperJump(p, game), true, 'a clear jump was refused');
+  assert.ok(p.x > fromX, `the ship did not move (${fromX} -> ${p.x})`);
+  assert.ok(p.x - fromX <= JUMP.distance + 1, 'the ship went further than a jump');
+  assert.equal(p.jumpCd, JUMP.cooldown, 'the jump did not start its cooldown');
+  assert.ok(p.invuln >= JUMP.invuln, 'arriving was not briefly safe');
+  assert.equal(p.jumpFromX, fromX, 'the streak does not know where it came from');
+  assert.ok(!boxBlocked(game.level, p.x, p.y, SHIP.hitW / 2, SHIP.hitH / 2),
+    'the jump landed the ship inside the hull');
+});
+
+test('a jump on cooldown does nothing at all', () => {
+  const game = inFlight();
+  const p = game.player;
+  p.x = 400; p.jumpCd = 4;
+  const was = p.x;
+  assert.equal(hyperJump(p, game), false);
+  assert.equal(p.x, was, 'a jump happened while recharging');
+  assert.equal(p.jumpCd, 4, 'a refused jump reset the cooldown');
+});
+
+test('a jump never lands inside the hull, wherever it is aimed', () => {
+  // The guarantee the whole move rests on. Tried from a few hundred
+  // places on a late hull, including right up against blocks.
+  const game = inFlight();
+  const p = game.player;
+  const hw = SHIP.hitW / 2;
+  const hh = SHIP.hitH / 2;
+  let jumps = 0;
+  for (let i = 0; i < 400; i++) {
+    const x = 700 + i * 37;
+    const y = FIELD_TOP + hh + ((i * 53) % (FIELD_BOT - FIELD_TOP - SHIP.hitH));
+    if (x > game.level.length - 400) break;
+    if (boxBlocked(game.level, x, y, hw, hh)) continue;   // start somewhere legal
+    p.x = x; p.y = y; p.jumpCd = 0; p.facing = i % 2 ? 1 : -1;
+    if (!hyperJump(p, game)) continue;
+    jumps++;
+    assert.ok(!boxBlocked(game.level, p.x, p.y, hw, hh),
+      `a jump from ${x},${Math.round(y)} landed in the hull at`
+      + ` ${Math.round(p.x)},${Math.round(p.y)}`);
+    assert.ok(p.y - hh >= FIELD_TOP - 0.01 && p.y + hh <= FIELD_BOT + 0.01,
+      'a jump left the corridor');
+  }
+  assert.ok(jumps > 100, `only ${jumps} jumps were tried`);
+});
+
+test('a jump into a wall becomes a shorter jump, not a jump through it', () => {
+  const game = inFlight();
+  const p = game.player;
+  const hw = SHIP.hitW / 2;
+  // A block squarely in front, closer than the full jump.
+  const bx = 1000;
+  game.level.obstacles = [{ x: bx, y: FIELD_TOP, w: 60, h: FIELD_BOT - FIELD_TOP, face: 1 }];
+  game.level.buckets = new Map();
+  for (let b = Math.floor(bx / 256); b <= Math.floor((bx + 60) / 256); b++) {
+    game.level.buckets.set(b, game.level.obstacles);
+  }
+  p.x = bx - 60; p.y = (FIELD_TOP + FIELD_BOT) / 2; p.facing = 1; p.jumpCd = 0;
+  assert.equal(hyperJump(p, game), true, 'a jump with room in front was refused');
+  assert.ok(p.x + hw <= bx + 0.01,
+    `the jump put the ship at ${p.x.toFixed(1)}, through a wall starting at ${bx}`);
+});
+
+test('a jump with nowhere to go is refused and costs nothing', () => {
+  // Wedged: the hull on every side. Charging ten seconds for a move that
+  // did not happen is the worst thing this could do to the player it
+  // exists to rescue.
+  const game = inFlight();
+  const p = game.player;
+  const span = FIELD_BOT - FIELD_TOP;
+  // Fill the whole corridor around the ship.
+  game.level.obstacles = [{ x: 0, y: FIELD_TOP, w: game.level.length, h: span, face: 1 }];
+  game.level.buckets = new Map();
+  for (let b = 0; b <= Math.floor(game.level.length / 256); b++) {
+    game.level.buckets.set(b, game.level.obstacles);
+  }
+  p.x = 900; p.y = FIELD_TOP + span / 2; p.jumpCd = 0;
+  const was = { x: p.x, y: p.y };
+  assert.equal(hyperJump(p, game), false, 'a jump succeeded with the hull on every side');
+  assert.equal(p.jumpCd, 0, 'a jump that did not happen still cost ten seconds');
+  assert.deepEqual({ x: p.x, y: p.y }, was, 'a refused jump moved the ship');
+});
+
+test('a jump snaps a tow line but carries the net and the fire', () => {
+  const game = inFlight();
+  const p = game.player;
+  p.x = 500; p.y = (FIELD_TOP + FIELD_BOT) / 2; p.jumpCd = 0;
+  p.towT = 3; p.towBy = { x: 0, y: 0, dead: false, hp: 5 };
+  p.snareT = 2; p.burnT = 2;
+  assert.equal(hyperJump(p, game), true);
+  assert.equal(p.towT, 0, 'the ship jumped and stayed on the hook');
+  assert.equal(p.towBy, null);
+  assert.ok(p.snareT > 0, 'the net was left behind, and it is on the hull');
+  assert.ok(p.burnT > 0, 'the fire was left behind, and it is on the hull');
+});
+
+test('the jump is on the keyboard and on the glass', () => {
+  assert.ok(Object.values(DEFAULT_MAP).includes('jump'), 'no key jumps');
+  assert.ok(BINDABLE.some(([a]) => a === 'jump'), 'the jump cannot be rebound');
+  assert.ok(PADS.some((b) => b.action === 'jump' && b.when === 'play'),
+    'there is no way to jump with a thumb');
+});
+
+test('boxBlocked answers for a box, including the corridor edges', () => {
+  // Tested directly. The jump clamps its target into the corridor before
+  // asking, so the edge check here is never the thing that saves it —
+  // which means nothing else in this file would notice it going.
+  const span = FIELD_BOT - FIELD_TOP;
+  const obs = [{ x: 500, y: FIELD_TOP, w: 60, h: span * 0.4, face: 1 }];
+  const buckets = new Map();
+  for (let b = Math.floor(500 / 256); b <= Math.floor(560 / 256); b++) buckets.set(b, obs);
+  const lvl = { obstacles: obs, buckets, length: 2000 };
+  const hw = SHIP.hitW / 2;
+  const hh = SHIP.hitH / 2;
+
+  assert.equal(boxBlocked(lvl, 300, 160, hw, hh), false, 'open hull read as blocked');
+  assert.equal(boxBlocked(lvl, 530, FIELD_TOP + 20, hw, hh), true,
+    'the middle of a block read as clear');
+  // the box counts, not the centre: clear centre, wingtip in the block
+  assert.equal(boxBlocked(lvl, 500 - hw + 2, FIELD_TOP + 20, hw, hh), true,
+    'a wingtip in a block read as clear');
+  assert.equal(boxBlocked(lvl, 500 - hw - 3, FIELD_TOP + 20, hw, hh), false,
+    'clear of a block read as blocked');
+
+  // the corridor edges
+  assert.equal(boxBlocked(lvl, 300, FIELD_TOP + hh - 1, hw, hh), true,
+    'a box poking through the upper girder read as clear');
+  assert.equal(boxBlocked(lvl, 300, FIELD_BOT - hh + 1, hw, hh), true,
+    'a box poking through the lower girder read as clear');
+  assert.equal(boxBlocked(lvl, 300, FIELD_TOP + hh, hw, hh), false,
+    'a box exactly against the girder read as blocked');
+
+  // and the ends of the hull
+  assert.equal(boxBlocked(lvl, hw - 1, 160, hw, hh), true, 'a box off the bow read as clear');
+  assert.equal(boxBlocked(lvl, 2000 - hw + 1, 160, hw, hh), true,
+    'a box off the stern read as clear');
 });

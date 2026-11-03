@@ -160,3 +160,27 @@ func (s *Server) reportErrors(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// recent is what the operator's page shows: the reports themselves,
+// newest first. The public summary above deliberately gives counts and
+// nothing else, because the entries hold stack traces and user agents
+// from other people's browsers. Behind the admin door, on its own port,
+// the contents are the whole point — a count of fourteen "TypeError"
+// tells an operator that something is broken and nothing about what.
+func (r *errorRing) recent(limit int) []clientError {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if limit <= 0 || limit > errorRingSize {
+		limit = errorRingSize
+	}
+	out := []clientError{}
+	n := len(r.entries)
+	for i := 1; i <= n && len(out) < limit; i++ {
+		e := r.entries[(r.next-i+n*2)%n]
+		if e.Message == "" {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}

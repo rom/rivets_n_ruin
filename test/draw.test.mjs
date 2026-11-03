@@ -16,6 +16,7 @@ import { rows as shopRows } from '../src/shop.js';
 import { DEFS, set as setSetting, reset as resetSettings } from '../src/settings.js';
 import { setSynthetic } from '../src/input.js';
 import { DT, LEVELS } from '../src/config.js';
+import { buildLevel } from '../src/level.js';
 
 // What this does and does not prove.
 //
@@ -59,16 +60,115 @@ test('the world draws in every state without throwing', () => {
   }
 });
 
+// Put the game on a given hull, for the draw tests.
+//
+// setStartHull only records which hull the hangar has selected; reaching
+// it means playing the title and launch sequences through, which is
+// minutes of simulation per hull. So the level is built and installed
+// directly. This matters more than it sounds: for as long as these tests
+// called setStartHull and nothing else, all twenty-five of them drew
+// hull 1, and "the world draws on every hull" proved one hull.
+function onHull(i) {
+  const game = makeGame();
+  game.state = 'play';
+  game.levelIndex = i;
+  game.level = buildLevel(LEVELS[i]);
+  game.player.x = 200;
+  game.cam.x = 0;
+  return game;
+}
+
 test('the world draws on every hull without throwing', () => {
   const c = ctx();
   for (let i = 0; i < LEVELS.length; i++) {
-    const game = makeGame();
-    game.unlocked = LEVELS.length - 1;
-    game.setStartHull(i);
-    game.state = 'play';
+    const game = onHull(i);
     assert.doesNotThrow(() => drawWorld(c, game), `drawWorld threw on hull ${i + 1}`);
     assert.doesNotThrow(() => drawRadar(c, game), `drawRadar threw on hull ${i + 1}`);
   }
+});
+
+test('the world draws with the camera parked on every structure', async () => {
+  // The hull tests above draw each hull from its start, where the camera
+  // sits at x=0 and everything further in is culled before it is drawn.
+  // So the whole of the installation art — and the searchlight beams and
+  // the power lines, which are drawn in world space and culled by range
+  // — was never executed in node at all.
+  //
+  // That is how the searchlight shipped broken: TOWERS.array already
+  // owned the name `sweep` for its dish speed, the searchlight's
+  // `sweep` was an object, so `sw.speed` read undefined, every angle
+  // became NaN, and createLinearGradient threw once a frame. The browser
+  // found it. This test and the stricter stub in _setup.mjs are what
+  // make node find the next one.
+  const c = ctx();
+  const kinds = new Set();
+  let parked = 0;
+  for (let i = 0; i < LEVELS.length; i++) {
+    const game = onHull(i);
+    for (const t of game.level.turrets) {
+      kinds.add(t.kind);
+      // Park the camera so the structure is in the middle of the view,
+      // and run the clock on so anything that animates has moved.
+      game.cam.x = t.x - 320;
+      game.player.x = t.x;
+      game.player.y = t.y - t.dir * 60;
+      game.time += 0.37;
+      for (let f = 0; f < 3; f++) update(game, DT);
+      parked++;
+      assert.doesNotThrow(() => drawWorld(c, game),
+        `drawWorld threw with the camera on a ${t.kind} on hull ${i + 1}`);
+    }
+  }
+  assert.ok(parked > 200, `only parked on ${parked} structures; the test proves little`);
+  // Every kind the game defines is built somewhere in the campaign. A
+  // tower with a spec, hit points, art and a score that no hull ever
+  // stands up is dead content, and it is also art nothing draws.
+  const { TOWERS } = await import('../src/config.js');
+  const never = Object.keys(TOWERS).filter((k) => !kinds.has(k));
+  assert.deepEqual(never, [], `${never.length} tower kind(s) are never built by any hull`);
+});
+
+test('every tower kind draws, on both girders, at every phase of its cycle', async () => {
+  // The sweep above covers whatever the default run seed happens to
+  // build, which is most kinds but not all of them: a flak is only ever
+  // the optional gun on a power plant's corner, and at seed 0 that coin
+  // never comes up. A kind that is never drawn is a kind whose art is
+  // not under test, so this one plants the whole roster by hand.
+  const c = ctx();
+  const { TOWERS, FIELD_TOP, FIELD_BOT } = await import('../src/config.js');
+  const kinds = Object.keys(TOWERS);
+  const game = makeGame();
+  game.state = 'play';
+  // Both girders, because every body is drawn mirrored on the lower one
+  // and `dir` is threaded through all of it by hand.
+  game.level.turrets = kinds.flatMap((kind, i) => [1, -1].map((dir, j) => ({
+    x: 420 + (i * 2 + j) * 180,
+    y: dir === 1 ? FIELD_TOP + 30 : FIELD_BOT - 30,
+    dir, kind, tower: TOWERS[kind],
+    angle: dir * Math.PI / 2,
+    hp: Math.round(game.level.spec.turretHp * TOWERS[kind].hpMul), dead: false,
+    charge: 0, shielded: false, painted: null, t: i * 0.7,
+    cd: 0, burstLeft: 0, burstTimer: 0,
+  })));
+
+  for (const t of game.level.turrets) {
+    game.cam.x = t.x - 320;
+    game.player.x = t.x;
+    game.player.y = t.y - t.dir * 70;
+    // Right through a whole beam cycle, so the lamp is tested pointing
+    // at both ends of its arc and straight down the middle rather than
+    // wherever one arbitrary frame leaves it. The searchlight's own
+    // cycle is the slowest thing here at 0.75 rad/s.
+    for (let f = 0; f < 60; f++) {
+      update(game, DT * 8);
+      assert.doesNotThrow(() => drawWorld(c, game),
+        `drawWorld threw on a ${t.kind} facing ${t.dir > 0 ? 'down' : 'up'} at frame ${f}`);
+    }
+  }
+
+  // Half of them broken, which is a different branch in every body.
+  for (const t of game.level.turrets) if (t.x % 360 < 180) { t.dead = true; t.hp = 0; }
+  assert.doesNotThrow(() => drawWorld(c, game), 'drawWorld threw over a half-broken roster');
 });
 
 test('the overlays draw without throwing', () => {

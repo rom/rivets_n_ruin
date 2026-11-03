@@ -1,0 +1,282 @@
+/* The operator's page.
+ *
+ * In a file rather than a <style> block for the same reason the game's
+ * CSS is: the policy on this listener says style-src 'self', and an
+ * inline block would force 'unsafe-inline' and reopen the whole class
+ * of injected-style attacks the policy exists to close. This page shows
+ * pilot names and client error messages written by other people, so
+ * that matters more here than it does on the game.
+ *
+ * Same palette as the game's default scheme, deliberately: the person
+ * looking at this has the game open in another tab, and a tool that
+ * looks like a different product makes them check twice which one they
+ * are about to delete something in.
+ */
+
+:root {
+  color-scheme: dark;
+  --bg: #05070a;
+  --panel: #0a0d13;
+  --line: #232b36;
+  --text: #b8c4d2;
+  --dim: #5d6a7a;
+  --cool: #4fd0e8;
+  --cool-hi: #b4f4ff;
+  --warm: #ff7a2f;
+  --warm-hi: #ffd24a;
+  --danger: #e8434f;
+  --good: #46e07a;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+a { color: var(--cool); }
+
+/* --- the frame */
+
+/* The chrome is a grid row and the content scrolls under it.
+   It was two sticky bars with hand-counted top offsets — nav sat at
+   top: 49px because that happened to be the header's height — and the
+   first thing that went wrong was the status line scrolling underneath
+   them. That line is where "the run is gone" and "the board is empty"
+   appear, so an operator missing it is an operator pressing the button
+   again. A grid needs no offsets to get wrong. */
+#app {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  height: 100vh;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+header h1 {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0.18em;
+  color: var(--cool-hi);
+  font-weight: 700;
+}
+header .sub { color: var(--dim); letter-spacing: 0.08em; }
+header .spacer { flex: 1; }
+
+nav {
+  display: flex;
+  gap: 2px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+nav button {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--dim);
+  font: inherit;
+  letter-spacing: 0.12em;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+nav button:hover { color: var(--text); }
+nav button[aria-current='true'] { color: var(--cool-hi); border-bottom-color: var(--cool); }
+
+main { padding: 20px; max-width: 1200px; overflow-y: auto; }
+
+/* Stays put while the list under it scrolls, because it is the only
+   place the page says what just happened. */
+#note { position: sticky; top: 0; z-index: 1; background: var(--bg); }
+#note:empty { display: none; }
+section[hidden] { display: none; }
+
+h2 {
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  color: var(--warm-hi);
+  margin: 26px 0 10px;
+  font-weight: 700;
+}
+h2:first-child { margin-top: 0; }
+
+/* --- controls */
+
+button, input, select {
+  font: inherit;
+  color: var(--text);
+  background: #11161e;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 6px 10px;
+}
+input:focus-visible, button:focus-visible, select:focus-visible {
+  outline: 2px solid var(--cool);
+  outline-offset: 1px;
+}
+button { cursor: pointer; letter-spacing: 0.08em; }
+button:hover:not(:disabled) { border-color: var(--cool); color: var(--cool-hi); }
+button:disabled { opacity: 0.4; cursor: default; }
+
+/* A destructive button has to look like one before it is pressed, not
+   after. Everything wearing this deletes something that does not come
+   back. */
+button.danger { border-color: #5a2228; color: #ff8d95; }
+button.danger:hover:not(:disabled) { border-color: var(--danger); color: #fff; background: #2a0f12; }
+
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row.tight { gap: 4px; }
+.grow { flex: 1; min-width: 120px; }
+
+/* --- the numbers */
+
+.tiles { display: flex; flex-wrap: wrap; gap: 10px; }
+.tile {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 11px 15px;
+  min-width: 128px;
+}
+.tile .k { color: var(--dim); font-size: 11px; letter-spacing: 0.13em; }
+.tile .v { color: var(--cool-hi); font-size: 21px; line-height: 1.25; }
+.tile .v.small { font-size: 14px; }
+
+/* --- tables */
+
+/* A table of runs has eight columns and will not fit a phone. The
+   table scrolls, not the page: with the page scrolling sideways the
+   header, the tabs and every button went off the left edge as soon as
+   an operator looked at the right-hand columns. Measured at 420px
+   wide, where this was 267px of page overflow. */
+.scroller { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+.scroller table { min-width: 560px; }
+th, td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid #161c25;
+  vertical-align: top;
+}
+th {
+  color: var(--dim);
+  font-weight: 400;
+  font-size: 11px;
+  letter-spacing: 0.13em;
+  border-bottom-color: var(--line);
+}
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tbody tr:hover { background: #0c1017; }
+tr.clickable { cursor: pointer; }
+.id { color: var(--dim); font-size: 11px; }
+
+/* --- detail */
+
+.detail {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 16px;
+  margin-top: 10px;
+}
+.detail h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  color: var(--cool-hi);
+  letter-spacing: 0.06em;
+}
+dl.pairs {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 16px;
+  margin: 10px 0 0;
+}
+dl.pairs dd { overflow-wrap: anywhere; }
+dl.pairs dt { color: var(--dim); }
+dl.pairs dd { margin: 0; }
+
+/* A disagreement between a pilot's counters and the runs on record is
+   the thing an operator most needs to not miss, so it is coloured. */
+.disagrees { color: var(--warm-hi); }
+
+.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+
+/* --- messages */
+
+.note {
+  margin: 12px 0;
+  padding: 9px 12px;
+  border-left: 3px solid var(--cool);
+  background: #0b1219;
+  white-space: pre-wrap;
+}
+.note.bad { border-left-color: var(--danger); background: #170c0e; color: #ffb0b5; }
+.note.good { border-left-color: var(--good); background: #0a1510; color: #a9f0c3; }
+.empty { color: var(--dim); padding: 16px 0; }
+.caption { color: var(--dim); font-size: 11px; letter-spacing: 0.1em; margin-top: 12px; }
+
+/* Classes, not style="..." attributes.
+   The policy on this listener says style-src 'self', and that blocks an
+   inline style attribute exactly as it blocks an inline <style> block —
+   the browser drops the rule and says so in the console and nowhere
+   else. Three width hints written inline is how a page ends up with a
+   number field half a screen wide and no indication why. */
+p.hint, .footnote { color: var(--dim); max-width: 68ch; }
+.footnote { margin-top: 6px; font-size: 11px; }
+input.w-small { width: 7em; }
+input.w-mid { width: 9em; }
+
+/* --- the way in */
+
+#login {
+  max-width: 340px;
+  margin: 14vh auto;
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+#login h1 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  letter-spacing: 0.18em;
+  color: var(--cool-hi);
+}
+#login p { color: var(--dim); margin: 0 0 16px; }
+#login input { width: 100%; margin-bottom: 10px; }
+#login button { width: 100%; }
+
+/* Client error reports are other people's stack traces. They wrap, they
+   do not run off the side, and they are never interpreted as anything
+   but text. */
+.trace {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--dim);
+  font-size: 11px;
+  max-height: 7em;
+  overflow: auto;
+}
+
+/* --- a phone
+   Not the machine this is built for, but an operator reaching for it
+   from one is exactly the moment something is wrong. */
+@media (max-width: 560px) {
+  header, nav, main { padding-left: 12px; padding-right: 12px; }
+  header h1 { font-size: 13px; }
+  nav { overflow-x: auto; }
+  nav button { padding: 9px 10px; }
+  .tile { flex: 1 1 128px; }
+  dl.pairs { grid-template-columns: 1fr; gap: 0 0; }
+  dl.pairs dt { margin-top: 7px; }
+}

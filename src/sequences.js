@@ -6,7 +6,8 @@
 // by accident — but every one can be skipped deliberately, because the
 // fiftieth launch should not cost what the first one did.
 
-import { VERSION, BUILD, VIEW_W, FIELD_H, FIELD_TOP, FIELD_BOT, APRON, COL } from './config.js';
+import { VERSION, BUILD, VIEW_W, FIELD_H, FIELD_TOP, FIELD_BOT, APRON, COL,
+  THEMES } from './config.js';
 
 export const SPLASH_TIME = 3.4;
 export const LAUNCH_TIME = 2.0;
@@ -189,6 +190,147 @@ export function drawPad(ctx, camX, camY) {
 // drift out of step with anything.
 
 const STARS = 110;
+
+// ------------------------------------------------------- the launch gantry
+//
+// The frame around the title screen, and deliberately not the hangar's.
+//
+// The hangar is where the ship is worked on: flat trussed roof, ribbed
+// wall panels, a plated deck, warm lamps overhead, and THEMES.steel
+// throughout. This is where it is sent out from, so it is built the
+// other way — an arched mouth in deep conduit blue, ribs running over
+// the opening instead of girders across a ceiling, cold strip lighting
+// down the inside edges instead of lamps above, and open grating
+// underfoot instead of plate. Two rooms on the same ship, built by the
+// same yard, for different jobs.
+//
+// It is a portal: everything outside the arch is structure, and the
+// starfield and the dreadnought show through the opening, which is what
+// makes the title a view out of somewhere rather than a picture.
+export const GANTRY = {
+  top: 30, bottom: 26, side: 28, radius: 30,
+};
+
+function portalPath(ctx, o) {
+  const H = FIELD_H;
+  const x0 = o.side;
+  const y0 = o.top;
+  const x1 = VIEW_W - o.side;
+  const y1 = H - o.bottom;
+  const r = o.radius;
+  ctx.beginPath();
+  ctx.rect(0, 0, VIEW_W, H);
+  ctx.moveTo(x0 + r, y0);
+  ctx.lineTo(x1 - r, y0);
+  ctx.quadraticCurveTo(x1, y0, x1, y0 + r);
+  ctx.lineTo(x1, y1 - r);
+  ctx.quadraticCurveTo(x1, y1, x1 - r, y1);
+  ctx.lineTo(x0 + r, y1);
+  ctx.quadraticCurveTo(x0, y1, x0, y1 - r);
+  ctx.lineTo(x0, y0 + r);
+  ctx.quadraticCurveTo(x0, y0, x0 + r, y0);
+  ctx.closePath();
+}
+
+export function drawTitleFrame(ctx, t) {
+  const o = GANTRY;
+  const H = FIELD_H;
+  const T = THEMES.conduit;
+  const x0 = o.side;
+  const y0 = o.top;
+  const x1 = VIEW_W - o.side;
+  const y1 = H - o.bottom;
+
+  // the structure: everything the arch does not cut out
+  ctx.save();
+  portalPath(ctx, o);
+  ctx.fillStyle = T.base;
+  ctx.fill('evenodd');
+
+  // Clip to the structure so the ribs and the grating cannot stray over
+  // the opening — the starfield is the point of the opening.
+  ctx.clip('evenodd');
+
+  // ribs running over the mouth, nested, narrowing as they recede
+  ctx.strokeStyle = T.mid;
+  ctx.lineWidth = 3;
+  for (let i = 0; i < 5; i++) {
+    const k = i * 6;
+    ctx.globalAlpha = 0.9 - i * 0.14;
+    ctx.beginPath();
+    ctx.moveTo(x0 - k, H);
+    ctx.lineTo(x0 - k, y0 - k + o.radius);
+    ctx.quadraticCurveTo(x0 - k, y0 - k, x0 - k + o.radius, y0 - k);
+    ctx.lineTo(x1 + k - o.radius, y0 - k);
+    ctx.quadraticCurveTo(x1 + k, y0 - k, x1 + k, y0 - k + o.radius);
+    ctx.lineTo(x1 + k, H);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  // open grating underfoot: slats with the dark between them
+  ctx.fillStyle = T.seam;
+  ctx.fillRect(0, y1, VIEW_W, H - y1);
+  ctx.fillStyle = T.mid;
+  for (let gx = 0; gx < VIEW_W; gx += 9) ctx.fillRect(gx, y1 + 3, 5, H - y1 - 3);
+  ctx.fillStyle = T.hi;
+  ctx.globalAlpha = 0.3;
+  ctx.fillRect(0, y1 + 3, VIEW_W, 1);
+  ctx.globalAlpha = 1;
+
+  // cable runs down the side walls, because a gantry is a thing with
+  // services in it
+  ctx.strokeStyle = T.seam;
+  ctx.lineWidth = 2;
+  for (const cx of [10, 18, VIEW_W - 10, VIEW_W - 18]) {
+    ctx.beginPath();
+    ctx.moveTo(cx, 0);
+    ctx.lineTo(cx, H);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // --- the lip of the opening, and the light coming off it
+  ctx.save();
+  portalPath(ctx, o);
+  ctx.strokeStyle = T.edgeHi;
+  ctx.globalAlpha = 0.6;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // Cold strip lighting down the inside edges. A hangar lamp hangs and
+  // throws a pool; this is set into the structure and reads as a line.
+  const pulse = 0.55 + Math.abs(Math.sin(t * 0.9)) * 0.3;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const sx of [x0 - 6, x1 + 4]) {
+    const g = ctx.createLinearGradient(sx, 0, sx + 2, 0);
+    g.addColorStop(0, 'rgba(63,176,201,0)');
+    g.addColorStop(0.5, `rgba(63,176,201,${0.5 * pulse})`);
+    g.addColorStop(1, 'rgba(63,176,201,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(sx - 3, y0 + 10, 8, y1 - y0 - 20);
+    ctx.fillStyle = T.chevron;
+    ctx.globalAlpha = pulse;
+    ctx.fillRect(sx, y0 + 14, 2, y1 - y0 - 28);
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+
+  // corner brackets, bolted across the arch
+  ctx.fillStyle = T.block;
+  for (const [bx, by, w, h] of [
+    [x0 - 10, y0 - 8, 26, 8], [x1 - 16, y0 - 8, 26, 8],
+    [x0 - 10, y1, 26, 8], [x1 - 16, y1, 26, 8],
+  ]) {
+    ctx.fillRect(bx, by, w, h);
+    ctx.fillStyle = T.rivet;
+    for (let k = 3; k < w - 2; k += 7) ctx.fillRect(bx + k, by + 3, 2, 2);
+    ctx.fillStyle = T.block;
+  }
+}
 
 export function drawTitleBackdrop(ctx, t) {
   const H = FIELD_H;

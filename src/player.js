@@ -1,6 +1,6 @@
 import {
   SHIP, PICKUP, ARMORY, FIELD_TOP, FIELD_BOT, clamp, REAR, LANCE,
-  MOD_FORCE, hullRule} from './config.js';
+  MOD_FORCE, hullRule, STATUS, HAZARDS, JUMP} from './config.js';
 
 // Cycles to the next ordnance you actually have, so the key is never a
 // no-op while something else is loaded.
@@ -13,13 +13,14 @@ function cycleSecondary(p, dir) {
   }
 }
 import { axisX, axisY, held, tapped } from './input.js';
-import { obstaclesNear, pointBlocked } from './level.js';
+import { obstaclesNear, pointBlocked, hazardAt, boxBlocked } from './level.js';
 import { playerShots, enemyShots, fire } from './projectiles.js';
 import { sparks, thrust, addLight } from './particles.js';
 import { fireSecondary } from './armory.js';
 import { diff } from './score.js';
 import { kick } from './camera.js';
-import { sfxShoot, sfxScrape, sfxFlip } from './sfx.js';
+import { sfxShoot, sfxScrape, sfxFlip, sfxJump,
+  sfxBurning, sfxTowStrain, sfxFieldEnter, sfxFieldHold } from './sfx.js';
 import { get as setting } from './settings.js';
 
 // Built from ARMORY.order rather than written out, so adding ordnance
@@ -34,6 +35,20 @@ export function makePlayer() {
     flip: 0,         // >0 while mid-flip
     fireCd: 0,
     scrapeCd: 0,
+    // --- the jump. jumpT runs the streak between where it left and
+    // where it arrived; jumpCd is the ten seconds before the next one.
+    jumpCd: 0,
+    jumpT: 0,
+    jumpFromX: 0,
+    jumpFromY: 0,
+    jumpWasCharging: 0,
+    inField: null,    // the hazard field the ship is standing in
+    fieldT: 0,        // and how long it has been in it
+    // --- entangling status. See STATUS in config.js.
+    snareT: 0,        // netted: thrust and top speed cut
+    burnT: 0,         // alight: shield draining
+    towT: 0,          // hooked: dragged toward whatever has you
+    towBy: null,      // the attacker holding the line, while it lives
     invuln: SHIP.invuln,
     shield: SHIP.shieldMax,
     shieldMax: SHIP.shieldMax,   // the refit and the upgrades both raise this
@@ -76,6 +91,50 @@ export function updatePlayer(p, game, dt) {
 
   if (p.flip > 0) p.flip -= dt;
   if (p.fireCd > 0) p.fireCd -= dt;
+  if (p.snareT > 0) p.snareT -= dt;
+  // The moment the jump comes back, held briefly so the ring can flash
+  // it. Reading "cooldown just ended" off the cooldown alone is not
+  // possible once it has ended.
+  if (p.jumpCd > 0) {
+    p.jumpCd -= dt;
+    if (p.jumpCd <= 0) p.jumpWasCharging = 0.35;
+  } else if (p.jumpWasCharging > 0) {
+    p.jumpWasCharging -= dt;
+  }
+  if (p.jumpT > 0) p.jumpT -= dt;
+  if (p.towT > 0) {
+    p.towT -= dt;
+    // The line creaking, for as long as it holds. Throttled in sfx.js,
+    // so calling it every frame is what it is written for.
+    if (p.alive) sfxTowStrain();
+  }
+  // Burning outlasts the thing that lit you, which is the whole point of
+  // it: killing the scorcher does not put the fire out. Which is also
+  // why it needs a sound of its own — with nothing alight on screen but
+  // your own ship, the shield bar is otherwise the only tell.
+  if (p.burnT > 0) {
+    p.burnT -= dt;
+    if (p.alive && p.invuln <= 0) { p.shield -= STATUS.burnDps * dt; sfxBurning(); }
+  }
+
+  // Standing in a hazard field. Charged by the second rather than on
+  // entry, so crossing a corner is cheap and cutting the long way
+  // through is not — which is the whole of the decision a field offers.
+  const wasField = p.inField && p.inField.kind;
+  p.inField = p.alive
+    ? hazardAt(game.level, p.x, p.y, SHIP.hitW / 2, SHIP.hitH / 2) : null;
+  if (p.inField && p.invuln <= 0) {
+    p.shield -= HAZARDS[p.inField.kind].dps * dt;
+    p.fieldT = (p.fieldT || 0) + dt;
+    // Crossing the edge is louder than being inside, and the four kinds
+    // do not share a voice. Keyed on the kind rather than on being in
+    // something, so flying straight from a vortex into a fire sounds
+    // like what it is rather than like one unbroken field.
+    if (p.inField.kind !== wasField) sfxFieldEnter(p.inField.kind);
+    else sfxFieldHold(p.inField.kind);
+  } else {
+    p.fieldT = 0;
+  }
   if (p.scrapeCd > 0) p.scrapeCd -= dt;
   if (p.invuln > 0) p.invuln -= dt;
   if (p.secondaryCd > 0) p.secondaryCd -= dt;
@@ -89,13 +148,22 @@ export function updatePlayer(p, game, dt) {
 
   updateDrones(p, game, dt);
   if (p.pointDefence) pointDefence(p, game);
+  if (tapped('jump')) hyperJump(p, game);
+
+  // What a net or a hook leaves you with. One multiplier, applied to
+  // thrust and to the ceiling, so being snared costs acceleration *and*
+  // top speed rather than just making you take longer to reach the same
+  // speed. A hook drags less hard than a net because it is already
+  // taking your line.
+  const drag = p.snareT > 0 ? STATUS.snareMul
+    : p.towT > 0 ? STATUS.towSnare : 1;
 
   // --- horizontal: thrust along facing, hard brake into a flip when reversing
   if (ix !== 0) {
     if (ix === p.facing) {
-      p.vx += ix * SHIP.accelX * p.accelMul * dt;
+      p.vx += ix * SHIP.accelX * p.accelMul * drag * dt;
     } else {
-      p.vx += ix * SHIP.brakeX * p.accelMul * dt;
+      p.vx += ix * SHIP.brakeX * p.accelMul * drag * dt;
       if (p.vx * p.facing <= 0 && p.flip <= 0) {
         p.facing = ix;
         p.flip = SHIP.flipTime;
@@ -104,11 +172,11 @@ export function updatePlayer(p, game, dt) {
     }
   }
   p.vx *= Math.exp(-SHIP.dragX * dt);
-  const maxVX = SHIP.maxVX + p.maxVXBonus;
+  const maxVX = (SHIP.maxVX + p.maxVXBonus) * drag;
   p.vx = clamp(p.vx, -maxVX, maxVX);
 
   // --- vertical: snappier, settles quickly
-  p.vy += iy * SHIP.accelY * p.accelMul * dt;
+  p.vy += iy * SHIP.accelY * p.accelMul * drag * dt;
   // GRAVITY WELL: something under the hull pulls. Applied before the drag
   // so it settles to a terminal sink rather than accelerating without
   // limit, and sized against SHIP.accelY so holding the stick up still
@@ -116,8 +184,23 @@ export function updatePlayer(p, game, dt) {
   // a hard one.
   if (hullRule(game, 'gravity')) p.vy += SHIP.accelY * MOD_FORCE.gravity * dt;
   p.vy *= Math.exp(-SHIP.dragY * dt);
-  const maxVY = SHIP.maxVY + p.maxVYBonus;
+  const maxVY = (SHIP.maxVY + p.maxVYBonus) * drag;
   p.vy = clamp(p.vy, -maxVY, maxVY);
+
+  // A hook pulls toward whoever threw it, for as long as they are alive
+  // to hold the line. Acceleration, not teleportation: you can fly
+  // against it, it just costs you the ground you wanted.
+  const tow = p.towT > 0 ? p.towBy : null;
+  if (tow && !tow.dead && tow.hp > 0) {
+    const dx = tow.x - p.x;
+    const dy = tow.y - p.y;
+    const d = Math.hypot(dx, dy) || 1;
+    p.vx += (dx / d) * STATUS.towAccel * dt;
+    p.vy += (dy / d) * STATUS.towAccel * dt;
+  } else if (p.towT > 0) {
+    p.towT = 0;                    // the line went slack with its owner
+    p.towBy = null;
+  }
 
   p.x = clamp(p.x + p.vx * dt, 14, game.level.length - 14);
   p.y += p.vy * dt;
@@ -277,6 +360,53 @@ function resolveHull(p, game) {
       p.vy = -p.vy * 0.25;
     }
   }
+}
+
+// The jump.
+//
+// Where it goes: the direction being asked for, or straight ahead if
+// nothing is. Where it lands: as far along that line as the ship will
+// fit, searched back from the full distance, so a jump into a wall
+// becomes a shorter jump up to the wall rather than a jump through it or
+// into it. If there is nowhere at all — wedged with the hull on every
+// side — nothing happens and the cooldown is not spent, because
+// charging somebody ten seconds for a move that did not occur is the
+// worst thing this could do to the player it exists to rescue.
+export function hyperJump(p, game) {
+  if (p.jumpCd > 0 || !p.alive) return false;
+  const hw = SHIP.hitW / 2;
+  const hh = SHIP.hitH / 2;
+
+  let dx = axisX();
+  let dy = axisY();
+  if (!dx && !dy) { dx = p.facing; dy = 0; }
+  const len = Math.hypot(dx, dy) || 1;
+  dx /= len;
+  dy /= len;
+
+  let found = null;
+  for (let d = JUMP.distance; d >= JUMP.step; d -= JUMP.step) {
+    const tx = clamp(p.x + dx * d, 14, game.level.length - 14);
+    const ty = clamp(p.y + dy * d, FIELD_TOP + hh, FIELD_BOT - hh);
+    if (!boxBlocked(game.level, tx, ty, hw, hh)) { found = { x: tx, y: ty }; break; }
+  }
+  if (!found) return false;
+
+  p.jumpFromX = p.x;
+  p.jumpFromY = p.y;
+  p.x = found.x;
+  p.y = found.y;
+  // Arrives carrying its speed. A jump that stopped the ship dead would
+  // be a brake with a ten second cooldown.
+  p.jumpT = JUMP.streak;
+  p.jumpCd = JUMP.cooldown;
+  p.invuln = Math.max(p.invuln, JUMP.invuln);
+  // A tow line does not survive the ship leaving the end of it. A net
+  // and a fire do: both are on the hull, and they come along.
+  p.towT = 0;
+  p.towBy = null;
+  sfxJump();
+  return true;
 }
 
 // --- DRONE WING

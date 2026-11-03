@@ -310,6 +310,88 @@ const BODIES = {
   splitter(ctx, f, spec, lit) { pod(ctx, f, lit, true); },
   shard(ctx, f, spec, lit) { pod(ctx, f, lit, false); },
 
+  // --- the three that take control rather than shield
+  //
+  // Each carries its weapon where you can see it, because the answer to
+  // all three is standing off and the player has to know which one they
+  // are looking at before it is in range.
+
+  // A launcher with the net already spread across its throwing arms.
+  netter(ctx, f, spec, lit) {
+    engine(ctx, -13, 0, 5, f.t, '#7af0d0', 1);
+    // throwing arms, out front, with the mesh strung between them
+    hull(ctx, [[4, -9], [12, -7], [12, -5], [5, -5]], '#1d2d2b', '#4e8f84', 1);
+    hull(ctx, [[4, 9], [12, 7], [12, 5], [5, 5]], '#1d2d2b', '#4e8f84', 1);
+    ctx.strokeStyle = '#7af0d0';
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    for (let i = -6; i <= 6; i += 3) { ctx.moveTo(6, i); ctx.lineTo(12, i * 0.8); }
+    for (let k = 6; k <= 12; k += 3) { ctx.moveTo(k, -7); ctx.lineTo(k, 7); }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    hull(ctx, [[-12, -5], [2, -6], [8, 0], [2, 6], [-12, 5]],
+      lit ? HOT : '#1b2a28', '#58a093');
+    litTop(ctx, [[-11, -3.6], [1, -4.4], [6, -0.6], [-10, -1]], '#2f4f4a');
+    rivets(ctx, -9, -2, 1, 4, '#7af0d0');
+    canopy(ctx, -1, 0, 2.6, 1.9, '#7af0d0');
+  },
+
+  // A winch ship: a drum of line amidships and the claw hanging ready.
+  grapnel(ctx, f, spec, lit) {
+    engines(ctx, [[-15, -3, 5, f.t, '#ffb45c', 1], [-15, 3, 5, f.t + 1.1, '#ffb45c', 1]]);
+    hull(ctx, [[-14, -7], [4, -8], [12, -2], [12, 2], [4, 8], [-14, 7]],
+      lit ? HOT : '#2b2117', '#9a7340');
+    litTop(ctx, [[-13, -5], [3, -6], [9, -1.6], [-12, -2]], '#4a3a24');
+    // the drum, with line wound on it
+    ctx.fillStyle = '#5a4a2e';
+    ctx.fillRect(-6, -4, 7, 8);
+    ctx.strokeStyle = '#ffb45c';
+    ctx.globalAlpha = 0.7;
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    for (let i = -3; i <= 3; i += 2) { ctx.moveTo(-6, i); ctx.lineTo(1, i); }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    // the claw, stowed at the bow
+    ctx.strokeStyle = '#c9923f';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(12, 0); ctx.lineTo(17, -3);
+    ctx.moveTo(12, 0); ctx.lineTo(17, 3);
+    ctx.moveTo(12, 0); ctx.lineTo(18, 0);
+    ctx.stroke();
+    canopy(ctx, 5, -0.4, 2.6, 1.8, '#ffb45c');
+    rivets(ctx, -12, 5, 2, 4, '#c9923f');
+  },
+
+  // Tanks on its back and a burner where a gun should be. Built heavy
+  // because it has to come close to use it.
+  scorcher(ctx, f, spec, lit) {
+    engines(ctx, [[-17, -5, 6, f.t, '#ff7a3a', 1], [-17, 5, 6, f.t + 1.4, '#ff7a3a', 1]]);
+    hull(ctx, [[-16, -9], [2, -10], [13, -4], [13, 4], [2, 10], [-16, 9]],
+      lit ? HOT : '#2e1a12', '#a85a2c');
+    litTop(ctx, [[-15, -7], [1, -8], [10, -3], [-14, -4]], '#54301d');
+    // fuel tanks, strapped on
+    for (const ty of [-5.5, 5.5]) {
+      ctx.fillStyle = '#6b3a1e';
+      ctx.fillRect(-11, ty - 2.5, 12, 5);
+      ctx.fillStyle = '#d9a62e';
+      ctx.fillRect(-11, ty - 2.5, 12, 1);
+      ctx.fillStyle = '#3a2113';
+      ctx.fillRect(-4, ty - 2.5, 1, 5);
+    }
+    // the burner throat, lit between shots so it reads as live
+    const glow = 0.45 + Math.abs(Math.sin(f.t * 5)) * 0.55;
+    ctx.fillStyle = '#5a3418';
+    ctx.fillRect(12, -3, 6, 6);
+    ctx.globalAlpha = glow;
+    ctx.fillStyle = '#ffb04a';
+    ctx.fillRect(17, -2, 3, 4);
+    ctx.globalAlpha = 1;
+    canopy(ctx, 3, -0.4, 3, 2, '#ff9a4a');
+  },
+
   // A hauler with its bay hanging open and the next mine already in it.
   bomber(ctx, f, spec, lit) {
     engines(ctx, [[-17, -4, 6, f.t, '#ff9a3a', 1.1], [-17, 4, 6, f.t + 1.6, '#ff9a3a', 1.1]]);

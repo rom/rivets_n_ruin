@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rom/rivets_n_ruin/internal/adminui"
 	"github.com/rom/rivets_n_ruin/internal/api"
 	"github.com/rom/rivets_n_ruin/internal/hardening"
 	"github.com/rom/rivets_n_ruin/internal/store"
@@ -47,6 +48,8 @@ func main() {
 			"file holding the admin password in plaintext; prefer -admin-password-hash-file")
 		adminAnywhere = flag.Bool("admin-anywhere", false,
 			"allow the admin routes from any address; they are loopback-only without it")
+		adminAddr = flag.String("admin-addr", "127.0.0.1:8001",
+			"address for the operator tool, on its own listener; empty disables it")
 		hsts       = flag.Bool("hsts", false, "send Strict-Transport-Security on HTTPS requests; only for a TLS deployment")
 		trustProxy = flag.Bool("trust-proxy", false,
 			"believe X-Forwarded-Proto; only when something in front of this sets it")
@@ -224,12 +227,9 @@ func main() {
 				"-admin-password-hash-file avoids that entirely")
 		}
 	}
-	if adminHash != "" {
-		log.Info("admin routes enabled", "loopbackOnly", !*adminAnywhere, "routes", "/api/admin/*")
-		if *adminAnywhere {
-			log.Warn("admin routes are reachable from any address; put TLS and an " +
-				"allowlist in front of this, or drop -admin-anywhere")
-		}
+	if adminHash != "" && *adminAddr == "" {
+		log.Warn("an admin password is configured but -admin-addr is empty, " +
+			"so the operator tool is not served at all")
 	}
 
 	apiSrv := api.New(st, log, api.Config{
@@ -282,6 +282,44 @@ func main() {
 	if err != nil {
 		log.Error("cannot bind", "addr", *addr, "err", err)
 		os.Exit(1)
+	}
+
+	// Bound here, with the other one, because the next thing this
+	// function does is hand its privileges back to the kernel. On a
+	// hardened Linux box a bind after that point fails, and the
+	// operator tool would be missing on exactly the deployments most
+	// likely to want it.
+	//
+	// AdminRoutes returns nil when no password was configured, so an
+	// unconfigured server opens no second port at all. There is no
+	// default credential and nothing listening to guess one against.
+	var adminSrv *http.Server
+	var adminLn net.Listener
+	if h := apiSrv.AdminRoutes(adminui.Handler()); h != nil && *adminAddr != "" {
+		adminLn, err = net.Listen("tcp", *adminAddr)
+		if err != nil {
+			// Fatal rather than a warning and carry on: an operator who
+			// configured a credential asked for this tool, and a server
+			// that quietly came up without it would be found out the
+			// first time somebody needed it. The default port is not
+			// something they chose, though, so the message says which
+			// flag moves it.
+			log.Error("cannot bind the operator tool", "addr", *adminAddr, "err", err,
+				"fix", "move it with -admin-addr, or turn it off with -admin-addr ''")
+			os.Exit(1)
+		}
+		adminSrv = &http.Server{
+			Addr:              *adminAddr,
+			Handler:           h,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       20 * time.Second,
+			WriteTimeout:      20 * time.Second,
+			IdleTimeout:       60 * time.Second,
+		}
+		if *adminAnywhere {
+			log.Warn("the operator tool is reachable from any address; put TLS and an "+
+				"allowlist in front of it, or drop -admin-anywhere", "addr", *adminAddr)
+		}
 	}
 
 	// Give privileges back to the kernel, now that everything needing a
@@ -337,6 +375,30 @@ func main() {
 		}
 	}()
 
+	// The operator tool, on its own listener.
+	//
+	// A separate port rather than a path on the game's, because the
+	// game's listener is the one pointed at the internet and these
+	// routes delete accounts. With them on a port of their own the
+	// public handler does not have them registered at all: a request
+	// for /api/admin/players there is answered by the static file
+	// handler, which has never heard of it. That is a stronger
+	// statement than a password check inside a handler on a mux a
+	// proxy rule could expose.
+	//
+	// The page is compiled into the binary (internal/adminui) rather
+	// than served from the static root, which is reachable from the
+	// public port by definition.
+	if adminSrv != nil {
+		go func() {
+			log.Info("operator tool up", "addr", "http://"+*adminAddr,
+				"loopbackOnly", !*adminAnywhere)
+			if err := adminSrv.Serve(adminLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("serve admin", "err", err)
+			}
+		}()
+	}
+
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	<-sig
@@ -347,6 +409,11 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Error("graceful shutdown failed", "err", err)
+	}
+	if adminSrv != nil {
+		if err := adminSrv.Shutdown(ctx); err != nil {
+			log.Error("graceful shutdown of the operator tool failed", "err", err)
+		}
 	}
 	// Final snapshot after connections are drained, so nothing in flight is lost.
 	if err := saveAll(st, apiSrv, paths); err != nil {

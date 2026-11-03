@@ -278,6 +278,10 @@ test('the README controls table lists every key the game binds', () => {
   const label = (code) => code
     .replace(/^Key/, '').replace(/^Digit/, '').replace(/^Arrow(\w+)/, '$1')
     .replace('Slash', '/').replace('BracketRight', ']').replace('Escape', 'Esc')
+    // ShiftRight before ShiftLeft would be a trap: 'ShiftLeft' does not
+    // contain 'ShiftRight', but writing them the other way round is the
+    // kind of ordering bug that only shows up when a key is added.
+    .replace('ShiftRight', 'Right Shift')
     .replace('ShiftLeft', 'Shift').replace('NumpadEnter', 'Enter');
   const missing = [];
   for (const code of Object.keys(KEYS)) {
@@ -293,9 +297,14 @@ test('the README controls table lists every key the game binds', () => {
 
 test('the README endpoint table lists every route', () => {
   const go = readFileSync(new URL('../internal/api/api.go', import.meta.url), 'utf8');
-  const routes = [...go.matchAll(/mux\.HandleFunc\("([A-Z]+) ([^"]+)"/g)]
+  // Both mux.HandleFunc and mux.Handle: the admin login is registered
+  // with the latter, because it is wrapped in its own rate limiter, and
+  // matching only HandleFunc quietly stopped checking it.
+  const routes = [...go.matchAll(/mux\.Handle(?:Func)?\("([A-Z]+) ([^"]+)"/g)]
     .map((m) => ({ method: m[1], path: m[2] }));
   assert.ok(routes.length > 10, `only found ${routes.length} routes in api.go`);
+  assert.ok(routes.some((r) => r.path === '/api/admin/login'),
+    'the admin login was not found in api.go; the pattern above has stopped matching');
   for (const r of routes) {
     const re = new RegExp(`\\|\\s*\`${r.method}\`\\s*\\|\\s*\`${
       r.path.replace(/[{}]/g, '\\$&')}\`\\s*\\|`);
@@ -643,11 +652,81 @@ test('the README names every formation a squadron can fly', async () => {
 
 test('the README counts the squadrons the table holds', async () => {
   const { SQUADS } = await import('../src/foes.js');
+  // Far enough ahead of the table that adding a squadron does not fail
+  // this with "undefined", which reads as a broken test rather than a
+  // stale README.
   const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
     'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen',
-    'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
+    'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty',
+    'twenty-one', 'twenty-two', 'twenty-three', 'twenty-four', 'twenty-five',
+    'twenty-six', 'twenty-seven', 'twenty-eight', 'twenty-nine', 'thirty'];
   const m = readme.match(/([A-Za-z-]+) of them in `SQUADS`/);
   assert.ok(m, 'the README no longer says how many squadrons there are');
   assert.equal(m[1].toLowerCase(), words[SQUADS.length],
     `the README says ${m[1]} squadrons, foes.js has ${SQUADS.length}`);
+});
+
+// The two numbers in the audio section that drift.
+//
+// "14 effects" was in the README for a long time while there were
+// twenty, and nobody noticed because nothing was counting. The same
+// goes for the line count: it is the kind of claim that is written once
+// and never looked at again, and a README full of numbers that used to
+// be true is worse than one with none.
+test('the README counts the sounds and the audio code correctly', () => {
+  const sfx = readFileSync(new URL('../src/sfx.js', import.meta.url), 'utf8');
+  const effects = [...sfx.matchAll(/^export function (sfx\w+)/gm)].length;
+  assert.ok(effects > 10, `only found ${effects} effects in sfx.js`);
+  const claimed = readme.match(/\*\*(\d+) effects\*\*/);
+  assert.ok(claimed, 'the README no longer states how many effects there are');
+  assert.equal(Number(claimed[1]), effects,
+    `the README claims ${claimed[1]} effects; sfx.js exports ${effects}`);
+
+  const lines = ['sfx.js', 'audio.js', 'music.js'].reduce((n, f) =>
+    n + readFileSync(new URL('../src/' + f, import.meta.url), 'utf8').split('\n').length, 0);
+  const said = readme.match(/whole system is about ([\d,]+) lines/);
+  assert.ok(said, 'the README no longer states the size of the audio system');
+  const stated = Number(said[1].replace(/,/g, ''));
+  // Rounded in the prose, so a window rather than an equality: close
+  // enough that the sentence is true, loose enough that adding one
+  // sound is not a README change.
+  assert.ok(Math.abs(stated - lines) < Math.max(200, lines * 0.2),
+    `the README says about ${stated} lines of audio; there are ${lines}`);
+});
+
+// Every cue the game can make is named in the README's own table, and
+// the table names nothing that does not exist.
+test('the README describes the sounds the new mechanics make', () => {
+  const sfx = readFileSync(new URL('../src/sfx.js', import.meta.url), 'utf8');
+  for (const [fn, phrase] of [
+    ['sfxNetShot', 'A net'],
+    ['sfxHookShot', 'A hook'],
+    ['sfxFlame', 'A flame'],
+    ['sfxFieldEnter', 'The four fields'],
+    ['sfxCistern', 'A cistern'],
+    ['sfxReactor', 'A reactor'],
+    ['sfxPylon', 'A pylon'],
+    ['sfxLit', 'A searchlight'],
+    ['sfxJump', 'The jump'],
+  ]) {
+    assert.ok(sfx.includes(`export function ${fn}`), `${fn} is gone from sfx.js`);
+    assert.ok(readme.includes(`**${phrase}**`),
+      `the README's sound table no longer has a row for ${phrase} (${fn})`);
+  }
+});
+
+// The layout block names every Go package and every tool, not just
+// every client module. It is the map someone reads before touching
+// anything, and a map missing a room is worse than no map.
+test('the README layout block names every package and tool', () => {
+  const listed = readme.slice(readme.indexOf('## Layout'));
+  const missing = [];
+  for (const dir of readdirSync(new URL('../internal', import.meta.url))) {
+    if (!listed.includes(`internal/${dir}/`)) missing.push(`internal/${dir}/`);
+  }
+  for (const f of readdirSync(new URL('../tools', import.meta.url))) {
+    if (f.endsWith('.md')) continue;
+    if (!listed.includes(`tools/${f}`)) missing.push(`tools/${f}`);
+  }
+  assert.deepEqual(missing, [], `missing from the layout block: ${missing.join(', ')}`);
 });

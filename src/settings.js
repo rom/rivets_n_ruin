@@ -5,7 +5,7 @@
 // screen that draws them needs no knowledge of what any particular setting
 // means — adding one is an entry in this list.
 
-import { DIFFICULTY, LEVELS } from './config.js';
+import { DIFFICULTY, LEVELS, SCHEMES, applyScheme } from './config.js';
 
 const KEY = 'rnr.settings';
 
@@ -13,6 +13,7 @@ const KEY = 'rnr.settings';
 // setting existed reads as FIXED rather than silently reshuffling the
 // campaign somebody was learning.
 export const LAYOUTS = ['FIXED', 'SHUFFLED'];
+export const TOUCH_MODES = ['AUTO', 'ON', 'OFF'];
 
 // Grouped only for the heading the screen shows; the list is still flat,
 // because a group is a label and not a structure.
@@ -33,6 +34,12 @@ export const DEFS = [
     help: 'Begin on any hull you have reached. Earlier refits are credited.' },
   { id: 'demo', group: 'GAME', label: 'ATTRACT DEMO', kind: 'bool', def: true,
     help: 'Plays itself after two minutes idle. Any key stops it.' },
+  // AUTO is the honest default: a phone gets the buttons, a desktop does
+  // not, and nobody has to find a setting to play at all. ON is for a
+  // touchscreen laptop, where the browser reports a keyboard and a
+  // player may still want to use the glass.
+  { id: 'touch', group: 'GAME', label: 'ON-SCREEN CONTROLS', kind: 'touch', def: 0,
+    help: 'AUTO shows them on a touchscreen. ON always, OFF never.' },
   // Terrain is generated from a seed per hull, so with this off a hull is
   // the same corridor every time — which is what makes it learnable, and
   // what makes two scores on it comparable. On, each run folds a seed of
@@ -58,6 +65,8 @@ export const DEFS = [
     help: 'Outlines incoming fire and hazards, and brightens the HUD.' },
   { id: 'aimLine', group: 'ACCESSIBILITY', label: 'FIRING LINE', kind: 'bool', def: false,
     help: 'A faint line along the ship\'s line of fire, so aim needs no guessing.' },
+  { id: 'scheme', group: 'PICTURE', label: 'COLOUR SCHEME', kind: 'scheme', def: 0,
+    help: 'The instrument palette: the HUD, the menus and the frames. Not the hull.' },
   { id: 'radar', group: 'PICTURE', label: 'RADAR STRIP', kind: 'bool', def: true,
     help: 'The map across the top: guns, loot, minibosses, the boss.' },
   { id: 'bloom', group: 'PICTURE', label: 'BLOOM', kind: 'bool', def: true,
@@ -98,10 +107,19 @@ function load() {
       if (d.kind === 'layout' && Number.isFinite(saved[d.id])) {
         state[d.id] = Math.max(0, Math.min(LAYOUTS.length - 1, saved[d.id]));
       }
+      if (d.kind === 'scheme' && Number.isFinite(saved[d.id])) {
+        state[d.id] = Math.max(0, Math.min(SCHEMES.length - 1, saved[d.id]));
+      }
+      if (d.kind === 'touch' && Number.isFinite(saved[d.id])) {
+        state[d.id] = Math.max(0, Math.min(TOUCH_MODES.length - 1, saved[d.id]));
+      }
     }
   } catch { /* corrupt or unavailable; defaults stand */ }
 }
 load();
+// The palette is part of the saved state, so it has to be in force before
+// anything draws — not only when somebody changes it.
+applyScheme(state.scheme);
 
 export const get = (id) => state[id];
 export const all = () => ({ ...state });
@@ -110,6 +128,7 @@ export function set(id, value) {
   const d = DEFS.find((x) => x.id === id);
   if (!d) return;
   state[id] = value;
+  if (id === 'scheme') applyScheme(value);
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* private mode */ }
   for (const fn of listeners) fn(id, value);
 }
@@ -135,11 +154,18 @@ export function nudge(id, dir, ctx = {}) {
     set(id, Math.max(0, Math.min(hullMax, state[id] + dir)));
   } else if (d.kind === 'layout') {
     set(id, Math.max(0, Math.min(LAYOUTS.length - 1, state[id] + dir)));
+  } else if (d.kind === 'touch') {
+    set(id, ((state[id] + dir) % TOUCH_MODES.length + TOUCH_MODES.length) % TOUCH_MODES.length);
+  } else if (d.kind === 'scheme') {
+    // Wraps: five schemes behind a left/right pair should not need four
+    // presses to get back to the first.
+    set(id, ((state[id] + dir) % SCHEMES.length + SCHEMES.length) % SCHEMES.length);
   }
 }
 
 export function reset() {
   for (const d of DEFS) state[d.id] = d.def;
+  applyScheme(state.scheme);
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* private mode */ }
   for (const fn of listeners) fn(null, null);
 }
@@ -158,5 +184,12 @@ export function display(d, tuneName) {
     return LEVELS[i].name + '  ' + (i + 1) + '/' + LEVELS.length;
   }
   if (d.kind === 'layout') return LAYOUTS[Math.max(0, Math.min(LAYOUTS.length - 1, state[d.id] | 0))];
+  if (d.kind === 'touch') {
+    return TOUCH_MODES[Math.max(0, Math.min(TOUCH_MODES.length - 1, state[d.id] | 0))];
+  }
+  if (d.kind === 'scheme') {
+    const i = Math.max(0, Math.min(SCHEMES.length - 1, state[d.id] | 0));
+    return `${SCHEMES[i].name}  ${i + 1}/${SCHEMES.length}`;
+  }
   return '';
 }

@@ -103,9 +103,19 @@ export function computeScale(cssW, cssH, dpr = window.devicePixelRatio || 1) {
 }
 
 // Sizes the canvas and returns true if the scale actually changed.
+// Whether the page is showing on-screen controls. Set by main.js, which
+// owns the setting; display only needs to know because the keyboard hint
+// strip under the canvas is not worth 40px on a phone that cannot use it.
+let padded = false;
+export const setPadded = (on) => { padded = !!on; };
+
 export function fitCanvas(canvas, ctx, ui = null) {
   const availW = window.innerWidth;
-  const availH = window.innerHeight - 40;
+  // A phone gives up its whole screen: the hint line below the canvas
+  // names keys a touch device does not have, and the page hides it, so
+  // reserving room for it would be throwing away a sixth of a small
+  // screen for nothing.
+  const availH = window.innerHeight - (padded ? 0 : 40);
   const fit = Math.min(availW / VIEW_W, availH / VIEW_H);
 
   const cssW = Math.round(VIEW_W * fit);

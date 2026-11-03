@@ -1,11 +1,21 @@
 import {
-  FIELD_TOP, FIELD_BOT, FIELD_H, RIM, APRON, THEMES, TOWERS, clamp,
-  MODIFIERS, MODIFIER_CHANCE,
+  FIELD_TOP, FIELD_BOT, FIELD_H, RIM, APRON, THEMES, TOWERS, SHIP, clamp,
+  MODIFIERS, MODIFIER_CHANCE, HAZARDS,
 } from './config.js';
 import { mulberry32, rr, ri, hash2 } from './rng.js';
 import { buildGates } from './gates.js';
 
 const BUCKET = 256;
+
+// What the ship needs to get through, as opposed to what merely looks
+// open. The hull is generated as rectangles and the ship is a rectangle
+// too — 19 by 9 — so a gap has to clear its *width* as well as its
+// height, across every column the ship's box spans at once. Checking one
+// vertical slice at a time cannot see that, and for a long time nothing
+// did. Both carry real margin on top of the hitbox: a corridor the ship
+// passes through by a pixel is one a player reports as a wall.
+const CLEAR_H = SHIP.hitH + 34;      // 43: vertical room for the box
+const CLEAR_W = SHIP.hitW + 13;      // 32: horizontal room to thread a gap
 
 // Folds a run seed into a hull seed. A plain XOR, and deliberately nothing
 // more: mulberry32 avalanches its own seed before its first output, so
@@ -93,12 +103,47 @@ export function specWithModifier(spec, mod) {
 
 // ---------------------------------------------------------------- generation
 
+// A built place: an apron off one girder with structures standing on it.
+// Spaceports, bases, power plants, fuel stations and air-defence posts
+// are all this shape, so they are all laid out by this one function.
+//
+// The works go down along a cursor and the apron is made as wide as
+// whatever ended up on it. The first version of each of these rolled a
+// width and then placed every kind at its own arithmetic inside it,
+// which drew a cistern exactly on top of a depot, stood a lander in a
+// fuel tank, and hung the back three sheds of a base off the end of its
+// own deck. A cursor makes all three impossible to write: each
+// structure gets ground nothing else is standing on, and the deck
+// cannot come out shorter than its contents.
+const PLACE_EDGE = 16;      // bare deck at each end, so nothing sits on the lip
+
+function builtPlace(r, parts, out, fromTop, deck) {
+  const dir = fromTop ? 1 : -1;
+  const y = fromTop ? FIELD_TOP + deck : FIELD_BOT - deck;
+  // One gap for the whole place, so it reads as built to a plan rather
+  // than scattered. Narrow: these are compounds, not suburbs.
+  const gap = rr(r, 6, 14);
+  let cx = PLACE_EDGE;
+  for (const kind of parts) {
+    const rad = TOWERS[kind].r || 8;
+    cx += rad;
+    out.turrets.push({ x: cx, y, dir, kind });
+    cx += rad + gap;
+  }
+  const w = Math.round(cx - gap + PLACE_EDGE);
+  out.obstacles.push({
+    x: 0, y: fromTop ? FIELD_TOP : FIELD_BOT - deck, w, h: deck, face: dir,
+  });
+  return w;
+}
+
 // Obstacle patterns, chosen by a seeded roll. Every pattern leaves a
 // navigable corridor; the x-gap that follows is always wide enough to
 // reposition vertically at cruise speed.
 function layout(r, spec) {
   const obstacles = [];
   const turrets = [];
+  const hazards = [];
   let advance = 0;
 
   const roll = r();
@@ -134,15 +179,33 @@ function layout(r, spec) {
     advance = w;
   } else if (roll < 0.68) {
     // Chicane: stubs from alternating surfaces, never overlapping in x,
-    // so every slice is at least half open and the line through it is a
-    // weave rather than a dodge. The first pattern that asks you to be
-    // somewhere specific *next*, rather than not where you are.
+    // flown as a weave rather than a dodge. The first pattern that asks
+    // you to be somewhere specific *next*, rather than not where you are.
+    //
+    // This used to say "every slice is at least half open", and it was,
+    // which is not the same as being flyable. A stub 50% deep from the
+    // roof followed 19px later by one 50% deep from the floor leaves no
+    // overlap between the two free bands, so the only way through was to
+    // thread the 19px of clear x between them — in a ship 19px wide.
+    // Eighteen of the twenty-five shipped hulls had at least one.
+    //
+    // So consecutive stubs are capped as a pair: whatever the first one
+    // takes, the second can only have what is left over the corridor the
+    // ship needs. A tall stub is still available, it just has to be
+    // followed by a short one, which is a better rhythm than two of the
+    // same anyway.
+    const span = FIELD_BOT - FIELD_TOP;
+    const pairCap = span - CLEAR_H;
     const n = ri(r, 3, 5);
     let sx = 0;
     let fromTop = r() < 0.5;
+    let prev = 0;
     for (let i = 0; i < n; i++) {
       const w = rr(r, 54, 86);
-      const h = rr(r, 0.44, 0.58) * (FIELD_BOT - FIELD_TOP);
+      const want = rr(r, 0.44, 0.58) * span;
+      // Never a nub: a stub too short to mean anything is worse than none.
+      const h = Math.max(span * 0.17, Math.min(want, pairCap - prev));
+      prev = h;
       obstacles.push({
         x: sx, y: fromTop ? FIELD_TOP : FIELD_BOT - h, w, h, face: fromTop ? 1 : -1,
       });
@@ -151,7 +214,9 @@ function layout(r, spec) {
           x: sx + w / 2, y: fromTop ? FIELD_TOP + h : FIELD_BOT - h, dir: fromTop ? 1 : -1,
         });
       }
-      sx += w + rr(r, 18, 40);
+      // Clear of the ship's width with room to spare, so the gap between
+      // two stubs is somewhere to be rather than somewhere to squeeze.
+      sx += w + rr(r, CLEAR_W, CLEAR_W + 24);
       fromTop = !fromTop;
     }
     advance = sx;
@@ -200,7 +265,7 @@ function layout(r, spec) {
     }
     if (r() < 0.5) turrets.push({ x: w / 2, y: firstY, dir: 1 });
     advance = w * 2 + between;
-  } else if (roll < 0.86) {
+  } else if (roll < 0.84) {
     // Islands: free-standing blocks at different heights, spread out. No
     // forced line at all — several work, and picking one is the whole of
     // it. The counterweight to the patterns above, which all insist.
@@ -215,7 +280,7 @@ function layout(r, spec) {
       sx += w + rr(r, 40, 76);
     }
     advance = sx;
-  } else if (roll < 0.895) {
+  } else if (roll < 0.875) {
     // A spaceport: a place rather than a pattern.
     //
     // Everything else on a hull is something to get past. This is
@@ -224,31 +289,79 @@ function layout(r, spec) {
     // parked when the shooting started. The tanks chain, so the whole
     // installation can come apart from one shot in the right place,
     // including around you if you take it at close range.
-    const fromTop = r() < 0.5;
-    const dir = fromTop ? 1 : -1;
-    const deck = rr(r, 26, 40);
-    const y = fromTop ? FIELD_TOP + deck : FIELD_BOT - deck;
-    const w = rr(r, 250, 340);
-    obstacles.push({
-      x: 0, y: fromTop ? FIELD_TOP : FIELD_BOT - deck, w, h: deck,
-      face: dir,
-    });
-    // Control at one end, so the port has a front door.
-    turrets.push({ x: rr(r, 22, 40), y, dir, kind: 'control' });
-    // Tanks in a cluster, close enough that one going up reaches the
-    // next. Spaced by hand rather than randomly: a chain that only
+    // Control at the front door, the fuel farm behind it, and something
+    // parked at the far end — which is the reason to come in rather
+    // than go round. The tanks come out close enough to chain, because
+    // builtPlace packs a place to its own footprint: a chain that only
     // sometimes chains is a mechanic nobody learns.
-    const tanks = ri(r, 2, 3);
-    const t0 = w * 0.34;
-    for (let i = 0; i < tanks; i++) {
-      turrets.push({ x: t0 + i * 54, y, dir, kind: 'tank' });
+    const parts = ['control'];
+    for (let i = ri(r, 2, 3); i > 0; i--) parts.push('tank');
+    if (r() < 0.5) parts.push('post');
+    parts.push('lander');
+    advance = builtPlace(r, parts, { obstacles, turrets }, r() < 0.5, rr(r, 26, 40));
+  } else if (roll < 0.905 && spec.bases) {
+    // An installation. Four of them, and which one you get is rolled
+    // here rather than being four separate bands, because they are the
+    // same idea — a place built on the hull, with things in it worth
+    // breaking and usually one thing worth breaking first.
+    //
+    // All four are an apron off one girder with the works standing on
+    // it, so the corridor beside them stays open: they are somewhere to
+    // go into, not a wall across the hull.
+    const fromTop = r() < 0.5;
+    const deck = rr(r, 22, 34);
+    const pick = r();
+    const build = (parts) =>
+      builtPlace(r, parts, { obstacles, turrets }, fromTop, deck);
+
+    if (pick < 0.34) {
+      // --- a base: barracks, sheds, a gun on the corner and bulk
+      // storage at the back, which is the thing to shoot if you want
+      // all of it at once.
+      const parts = ['gun'];
+      for (let i = ri(r, 2, 3); i > 0; i--) parts.push('barracks');
+      for (let i = ri(r, 2, 3); i > 0; i--) parts.push('depot');
+      for (let i = ri(r, 2, 3); i > 0; i--) parts.push('cistern');
+      if (r() < 0.6) parts.push('watchtower');
+      advance = build(parts);
+    } else if (pick < 0.58) {
+      // --- a power plant: the reactor, and pylons carrying the line
+      // away from it. While the reactor stands every gun on the plant
+      // is quickened, so the order you take it apart in matters.
+      const parts = ['reactor', 'cistern'];
+      for (let i = ri(r, 3, 5); i > 0; i--) parts.push('pylon');
+      if (r() < 0.5) parts.push('flak');
+      advance = build(parts);
+    } else if (pick < 0.80) {
+      // --- a fuel station: pumps between cisterns. Almost all of it is
+      // volatile, and the chain runs the length of the apron.
+      // A watchtower oversees it, not a CONTROL tower: control is air
+      // traffic, and it belongs to a spaceport with craft to talk to.
+      // Reusing it here put an air traffic tower on a filling station
+      // and broke the test that says a port has fuel and something
+      // parked, by inventing a port with neither.
+      const parts = ['watchtower'];
+      // Cisterns at both ends with the pumps between them, so the chain
+      // runs the length of the apron whichever end you light it from.
+      const tanks = ri(r, 3, 4);
+      for (let i = 0; i < tanks; i++) {
+        parts.push('cistern');
+        if (i < tanks - 1) parts.push('pump');
+      }
+      if (r() < 0.5) parts.push('pop');
+      advance = build(parts);
+    } else {
+      // --- an air-defence post: searchlights, and the guns that use
+      // what they find. Breaking the lights first is the whole of the
+      // decision this one offers.
+      const parts = [];
+      for (let i = ri(r, 2, 3); i > 0; i--) parts.push('searchlight');
+      for (let i = ri(r, 1, 2); i > 0; i--) parts.push('depot');
+      parts.push('watchtower');
+      parts.push(r() < 0.5 ? 'flak' : 'gun');
+      advance = build(parts);
     }
-    // ...and something parked at the far end, which is the reason to
-    // come in rather than go round.
-    turrets.push({ x: w - rr(r, 40, 70), y, dir, kind: 'lander' });
-    if (r() < 0.5) turrets.push({ x: w * 0.6, y, dir, kind: 'post' });
-    advance = w;
-  } else if (roll < 0.92) {
+  } else if (roll < 0.93) {
     // A narrows: the corridor itself closes down for a long stretch and
     // opens again. Single obstacles are dodged; this has to be flown.
     const seg = ri(r, 5, 9);
@@ -270,7 +383,31 @@ function layout(r, spec) {
       sx += segW;
     }
     advance = sx;
-  } else if (roll < 0.96 && spec.press) {
+  } else if (roll < 0.955 && spec.hazards) {
+    // A hazard field: an area to go round rather than a thing to shoot.
+    //
+    // Placed against one girder and never more than part of the
+    // corridor, so there is always a clear band beside it the ship can
+    // take. It is not solid and the clearance sweep never sees it, which
+    // means the generator has to keep that band honestly — a field that
+    // filled the corridor would be a wall that cannot be broken.
+    const span = FIELD_BOT - FIELD_TOP;
+    const kinds = spec.hazardKinds && spec.hazardKinds.length
+      ? spec.hazardKinds : ['fire'];
+    const kind = kinds[Math.floor(r() * kinds.length)];
+    const fromTop = r() < 0.5;
+    const w = rr(r, 110, 230);
+    // At most this much of the corridor, so CLEAR_H is always left over
+    // on the other side with room to spare.
+    const h = rr(r, 0.26, Math.min(0.52, (span - CLEAR_H * 1.6) / span)) * span;
+    hazards.push({
+      x: 0, y: fromTop ? FIELD_TOP : FIELD_BOT - h, w, h, kind,
+      // Each field drifts on its own clock, so two of the same kind on
+      // one hull do not pulse in step.
+      phase: r() * 10,
+    });
+    advance = w;
+  } else if (roll < 0.985 && spec.press) {
     // A press: jaws that close and open on a cycle, staggered along the
     // run so flying it is a wave rather than one piece of timing. The
     // 4% this band costs comes out of the two single-block patterns
@@ -321,7 +458,7 @@ function layout(r, spec) {
     }
     advance = sx;
   }
-  return { obstacles, turrets, advance };
+  return { obstacles, turrets, hazards, advance };
 }
 
 // Builds one hull from a level spec (see LEVELS in config.js). Everything
@@ -339,11 +476,13 @@ export function buildLevel(spec, runSeed = 0) {
   const obstacles = [];
   const turretSpots = [];
 
+  const hazards = [];
   let x = APRON;
   while (x < LEN - APRON - 340) {
-    const { obstacles: obs, turrets: tur, advance } = layout(r, spec);
+    const { obstacles: obs, turrets: tur, hazards: haz, advance } = layout(r, spec);
     for (const o of obs) obstacles.push({ ...o, x: o.x + x });
     for (const t of tur) turretSpots.push({ ...t, x: t.x + x });
+    for (const h of haz) hazards.push({ ...h, x: h.x + x });
     x += advance + rr(r, 155, 330) * spec.gapScale;
   }
 
@@ -410,7 +549,7 @@ export function buildLevel(spec, runSeed = 0) {
   }
 
   return {
-    obstacles, turrets, buckets, movers,
+    obstacles, turrets, buckets, movers, hazards,
     // Laser gates, placed from the same rng so a hull always has the same
     // walls in the same places.
     gates: buildGates(r, spec, LEN, obstacles),
@@ -432,6 +571,80 @@ export function obstaclesNear(level, x0, x1) {
     if (list) for (const o of list) out.add(o);
   }
   return out;
+}
+
+// Is a box this size clear of the hull at this point?
+//
+// pointBlocked answers for a point, which is the wrong question for
+// anything the size of a ship — see firstBlockage for how long that
+// distinction went unnoticed. The hyperspace jump asks this one, because
+// a jump that lands the ship a pixel inside a girder is worse than no
+// jump at all.
+export function boxBlocked(level, x, y, hw, hh) {
+  if (y - hh < FIELD_TOP || y + hh > FIELD_BOT) return true;
+  if (x - hw < 0 || x + hw > level.length) return true;
+  for (const o of obstaclesNear(level, x - hw, x + hw)) {
+    if (x + hw > o.x && x - hw < o.x + o.w && y + hh > o.y && y - hh < o.y + o.h) return true;
+  }
+  return false;
+}
+
+// The hazard the ship is standing in, or null. Rectangles, and few
+// enough per hull that walking them beats indexing them.
+export function hazardAt(level, x, y, hw, hh) {
+  const list = level.hazards;
+  if (!list) return null;
+  for (const h of list) {
+    if (x + hw > h.x && x - hw < h.x + h.w && y + hh > h.y && y - hh < h.y + h.h) return h;
+  }
+  return null;
+}
+
+// Can a box the size of the ship actually travel the length of this hull?
+//
+// The question the old walk could not answer. It checked each vertical
+// slice for a gap tall enough, which says nothing about whether the ship
+// can move *between* two slices: a stub from the roof and one from the
+// floor, 19px apart in x, leave every slice half open and the ship no way
+// through, because the ship is 19px wide and has to be somewhere while it
+// crosses. Eighteen of the twenty-five shipped hulls had one.
+//
+// Swept as a configuration-space problem instead. For each column, the
+// y-intervals where the ship's CENTRE can sit — obstacles inflated by half
+// the ship in each direction — and then left to right keeping only the
+// intervals reachable from an interval that was already reachable.
+// Returns null when the hull can be flown, or where and why it cannot.
+export function firstBlockage(level, step = 2) {
+  const hw = SHIP.hitW / 2;
+  const hh = SHIP.hitH / 2;
+  const hi = FIELD_BOT - hh;
+  let reach = null;
+
+  for (let x = hw + 1; x < level.length - hw; x += step) {
+    const blocked = [];
+    for (const o of obstaclesNear(level, x - hw, x + hw)) {
+      if (o.x >= x + hw || o.x + o.w <= x - hw) continue;
+      blocked.push([o.y - hh, o.y + o.h + hh]);
+    }
+    blocked.sort((a, b) => a[0] - b[0]);
+
+    const free = [];
+    let lo = FIELD_TOP + hh;
+    for (const [a, b] of blocked) {
+      if (a > lo) free.push([lo, Math.min(a, hi)]);
+      if (b > lo) lo = b;
+      if (lo >= hi) break;
+    }
+    if (lo < hi) free.push([lo, hi]);
+
+    const open = free.filter(([a, b]) => b - a > 0);
+    if (!open.length) return { x, why: 'no room for the ship at all' };
+    if (reach === null) { reach = open; continue; }
+    const next = open.filter(([a, b]) => reach.some(([c, d]) => a < d && c < b));
+    if (!next.length) return { x, why: 'nothing here connects to where the ship could be' };
+    reach = next;
+  }
+  return null;
 }
 
 export function pointBlocked(level, x, y) {
@@ -1202,6 +1415,188 @@ function drawRam(g, o, t) {
   }
   g.fillStyle = t.chevron;
   g.fillRect(o.x - 1, top ? fy + 6 : fy, o.w + 2, 1);
+}
+
+// A hazard field, drawn live every frame.
+//
+// Each of the four has to be told apart at a glance and from a distance,
+// because the decision a field asks for — go round, or take the short
+// way and pay — is made before you are anywhere near it. So they differ
+// in motion as much as in colour: fire climbs, a vortex turns, ice
+// drifts and settles, an arc field snaps between its posts.
+function drawField(ctx, h, t) {
+  const C = HAZARDS[h.kind];
+  const seed = h.phase;
+  const top = h.y <= FIELD_TOP + 1;
+
+  // the floor of it, so the area reads as an area
+  ctx.fillStyle = C.dark;
+  ctx.globalAlpha = 0.55;
+  ctx.fillRect(h.x, h.y, h.w, h.h);
+  ctx.globalAlpha = 1;
+
+  // the edge that faces the corridor: the line you are deciding about
+  const edgeY = top ? h.y + h.h : h.y;
+  ctx.fillStyle = C.tint;
+  ctx.globalAlpha = 0.5 + Math.abs(Math.sin(t * 2 + seed)) * 0.3;
+  ctx.fillRect(h.x, top ? edgeY - 1 : edgeY, h.w, 1);
+  ctx.globalAlpha = 1;
+
+  const was = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = 'lighter';
+
+  if (h.kind === 'fire') {
+    // tongues climbing off the floor, each on its own clock
+    for (let i = 0; i < h.w; i += 11) {
+      const ph = t * 4 + i * 0.7 + seed;
+      const len = (0.35 + Math.abs(Math.sin(ph)) * 0.55) * h.h;
+      const x = h.x + i + 2;
+      ctx.globalAlpha = 0.16 + Math.abs(Math.cos(ph)) * 0.14;
+      ctx.fillStyle = C.tint;
+      ctx.fillRect(x, top ? h.y : edgeY + h.h - len, 6, len);
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = C.glow;
+      ctx.fillRect(x + 2, top ? h.y : h.y + h.h - len * 0.4, 2, len * 0.4);
+    }
+  } else if (h.kind === 'storm') {
+    // vortices, turning
+    for (let i = 0; i < h.w; i += 34) {
+      const cx = h.x + i + 17;
+      const cy = h.y + h.h * 0.5 + Math.sin(t * 1.3 + i + seed) * h.h * 0.18;
+      const spin = t * 2.4 + i;
+      ctx.strokeStyle = C.tint;
+      ctx.lineWidth = 1;
+      for (let a = 0; a < 3; a++) {
+        ctx.globalAlpha = 0.3 - a * 0.07;
+        ctx.beginPath();
+        const rr0 = 5 + a * 6;
+        ctx.arc(cx, cy, rr0, spin + a, spin + a + 2.1);
+        ctx.stroke();
+      }
+    }
+  } else if (h.kind === 'ice') {
+    // cloud, with crystals turning over inside it
+    for (let i = 0; i < h.w; i += 15) {
+      const ph = t * 0.9 + i * 0.4 + seed;
+      const cx = h.x + i + 7 + Math.sin(ph) * 4;
+      const cy = h.y + h.h * (0.3 + 0.4 * (0.5 + 0.5 * Math.sin(ph * 0.7)));
+      ctx.globalAlpha = 0.12;
+      ctx.fillStyle = C.tint;
+      ctx.fillRect(cx - 7, cy - 6, 15, 13);
+      ctx.globalAlpha = 0.45;
+      ctx.fillStyle = C.glow;
+      const k = 2 + Math.abs(Math.sin(ph * 1.7)) * 2;
+      ctx.fillRect(cx - k / 2, cy - 0.5, k, 1);
+      ctx.fillRect(cx - 0.5, cy - k / 2, 1, k);
+    }
+  } else {
+    // arcs, snapping between posts on the girder
+    ctx.strokeStyle = C.tint;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < h.w; i += 26) {
+      const on = Math.sin(t * 9 + i * 1.3 + seed) > 0.1;
+      if (!on) continue;
+      ctx.globalAlpha = 0.55;
+      ctx.beginPath();
+      const x0 = h.x + i + 4;
+      ctx.moveTo(x0, top ? h.y : h.y + h.h);
+      let yy = top ? h.y : h.y + h.h;
+      const dir = top ? 1 : -1;
+      for (let k = 0; k < 5; k++) {
+        yy += dir * (h.h / 5);
+        ctx.lineTo(x0 + Math.sin(t * 17 + k * 2 + i) * 7, yy);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = C.glow;
+      ctx.fillRect(x0 - 1, (top ? h.y : h.y + h.h - 2), 3, 2);
+    }
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = was;
+}
+
+// The line strung between pylons, and the beams searchlights throw.
+//
+// Both belong to the hull rather than to the thing that owns them: a
+// span runs between two pylons and a beam runs out across the corridor,
+// and neither fits inside a body drawn in its tower's local coordinates.
+// Drawn live, because both move or go out when what holds them is shot.
+export function drawPowerLines(ctx, level, camX, viewW) {
+  const list = level.turrets;
+  let prev = null;
+  ctx.save();
+  ctx.lineWidth = 1;
+  for (const t of list) {
+    if (t.kind !== 'pylon') { continue; }
+    // Only strung to the pylon before it, and only if that one is close
+    // enough to be part of the same run. Breaking either end drops the
+    // span, which is the whole reason to shoot a pylon.
+    if (prev && !prev.dead && !t.dead && t.x - prev.x < 130 && prev.dir === t.dir) {
+      if (t.x + 40 > camX && prev.x - 40 < camX + viewW) {
+        const sag = 5;
+        const y0 = prev.y + prev.dir * 21;
+        const y1 = t.y + t.dir * 21;
+        for (const off of [-8, 8]) {
+          ctx.strokeStyle = '#2b323c';
+          ctx.beginPath();
+          ctx.moveTo(prev.x + off, y0);
+          ctx.quadraticCurveTo((prev.x + t.x) / 2 + off, (y0 + y1) / 2 + prev.dir * sag,
+            t.x + off, y1);
+          ctx.stroke();
+        }
+      }
+    }
+    prev = t;
+  }
+  ctx.restore();
+}
+
+export function drawBeams(ctx, level, camX, viewW, t) {
+  const list = level.turrets;
+  const was = ctx.globalCompositeOperation;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const s of list) {
+    if (!s.tower || !s.tower.beam || s.dead) continue;
+    if (s.x + s.tower.beam.range < camX || s.x - s.tower.beam.range > camX + viewW) continue;
+    const sw = s.tower.beam;
+    const aim = s.beamAim || 0;
+    const reach = sw.range;
+    // A cone out of the lamp, in the direction the lamp is pointing.
+    // Brighter when it has something, which is the tell that it has.
+    const spread = 0.2;
+    const ax = Math.sin(aim);
+    const ay = Math.cos(aim) * s.dir;
+    const lx = s.x;
+    const ly = s.y + s.dir * 10;
+    const g = ctx.createLinearGradient(lx, ly, lx + ax * reach, ly + ay * reach);
+    const lit = s.beamLit ? 0.3 : 0.14;
+    g.addColorStop(0, `rgba(255,240,196,${lit})`);
+    g.addColorStop(1, 'rgba(255,240,196,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(lx, ly);
+    for (const e of [-spread, spread]) {
+      ctx.lineTo(lx + Math.sin(aim + e) * reach, ly + Math.cos(aim + e) * s.dir * reach);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.globalCompositeOperation = was;
+}
+
+// Every hazard field in view. Drawn under the jaws and the guns, over the
+// cached plating, and never baked into a chunk — all four move.
+export function drawFields(ctx, level, camX, viewW, t) {
+  const list = level.hazards;
+  if (!list || !list.length) return;
+  for (const h of list) {
+    if (h.x + h.w < camX - 16 || h.x > camX + viewW + 16) continue;
+    drawField(ctx, h, t);
+  }
 }
 
 // Every jaw in view, after the cached hull and under everything that sits

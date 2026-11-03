@@ -11,8 +11,9 @@ import { radarProfile } from './level.js';
 import { hash2 } from './rng.js';
 import { tuneName, TUNES } from './music.js';
 import { get as setting, DEFS, display } from './settings.js';
+import { BINDABLE, keyFor } from './input.js';
 import { rows as shopRows, MODS, modLevel, modName, maxLevel } from './shop.js';
-import { drawSplash, drawLaunchBanner, drawExitBanner, drawTitleBackdrop,
+import { drawSplash, drawLaunchBanner, drawExitBanner, drawTitleBackdrop, drawTitleFrame,
   SPLASH_TIME, LAUNCH_TIME, EXIT_TIME, ENDING_TIME } from './sequences.js';
 import { VERSION } from './config.js';
 import { livingParts, shellUp } from './boss.js';
@@ -741,6 +742,9 @@ export function drawScreen(ctx, game) {
     // menu, not a paused game, and it should not be showing whatever the
     // last run happened to leave on screen.
     drawTitleBackdrop(ctx, game.stateT);
+    // ...and the gantry it is seen from. After the backdrop, so the
+    // starfield shows through the opening rather than over the frame.
+    drawTitleFrame(ctx, game.stateT);
 
     text(ctx, "RIVETS 'N RUIN", cx, 30, COL.hudBright,
       'bold 32px ui-monospace, Menlo, monospace', 'center');
@@ -1395,6 +1399,69 @@ export function drawShop(ctx, game, sel, note) {
     cx, L.footerY, COL.hudText, FONT, 'center');
 }
 
+// The controls screen: every rebindable action and the key it answers to.
+//
+// Two columns, because nineteen rows down one side of a 348px screen
+// would run off the bottom — the same arithmetic the armourer's list
+// needs, and the same answer.
+export const CONTROLS_LAYOUT = {
+  top: 70, pitch: 15, colX: [54, 346], colW: 250, keyDX: 170,
+  noteY: 310, footerY: 328,
+};
+
+// Key codes are KeyboardEvent.code, which is a position on the keyboard
+// rather than a letter — right for binding, unreadable on a screen.
+export function keyLabel(code) {
+  if (!code) return '—';
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return 'NUM ' + code.slice(6);
+  if (code.startsWith('Arrow')) return code.slice(5).toUpperCase();
+  const named = {
+    Space: 'SPACE', Enter: 'ENTER', Escape: 'ESC', Slash: '/',
+    BracketRight: ']', BracketLeft: '[', ShiftLeft: 'L SHIFT', ShiftRight: 'R SHIFT',
+    ControlLeft: 'L CTRL', ControlRight: 'R CTRL', AltLeft: 'L ALT', AltRight: 'R ALT',
+    Minus: '-', Equal: '=', Comma: ',', Period: '.', Semicolon: ';', Quote: "'",
+    Backquote: '`', Backslash: '\\', Tab: 'TAB', Backspace: 'BKSP',
+  };
+  return named[code] || code.toUpperCase();
+}
+
+export function drawControls(ctx, sel, awaiting, note) {
+  const L = CONTROLS_LAYOUT;
+  ctx.fillStyle = '#04060a';
+  ctx.fillRect(0, 0, VIEW_W, SCREEN_H);
+  const cx = VIEW_W / 2;
+
+  text(ctx, 'CONTROLS', cx, 16, COL.hudBright, FONT_BIG, 'center');
+  text(ctx, 'CHOOSE A ROW, PRESS ENTER, THEN PRESS THE KEY YOU WANT',
+    cx, 44, COL.cool, FONT, 'center');
+
+  const perCol = Math.ceil(BINDABLE.length / 2);
+  BINDABLE.forEach(([action, label], i) => {
+    const col = i < perCol ? 0 : 1;
+    const y = L.top + (i % perCol) * L.pitch;
+    const x = L.colX[col];
+    const on = i === sel;
+    if (on) {
+      ctx.fillStyle = '#131c26';
+      ctx.fillRect(x - 8, y - 3, L.colW, 13);
+      ctx.fillStyle = awaiting ? COL.warmHi : COL.cool;
+      ctx.fillRect(x - 8, y - 3, 2, 13);
+    }
+    text(ctx, label, x, y, on ? COL.hudBright : COL.hudText, FONT);
+    const waiting = awaiting === action;
+    text(ctx, waiting ? 'PRESS A KEY' : keyLabel(keyFor(action)),
+      x + L.keyDX, y, waiting ? COL.warmHi : (on ? COL.coolHi : COL.cool), FONT);
+  });
+
+  if (note) text(ctx, note, cx, L.noteY, COL.warmHi, FONT, 'center');
+  text(ctx, awaiting
+    ? 'PRESS A KEY TO BIND IT        ESC  LEAVE IT ALONE'
+    : 'UP / DOWN  CHOOSE    ENTER  REBIND    R  RESET ALL    O / ESC  BACK',
+  cx, L.footerY, COL.hudText, FONT, 'center');
+}
+
 // The help page. Everything that used to be crammed onto the title, plus
 // the half of it that was never written down anywhere.
 //
@@ -1627,7 +1694,7 @@ export function drawSettings(ctx, game, sel, wipe = {}) {
   } else if (wipe.wipeNote) {
     text(ctx, wipe.wipeNote, cx, SETTINGS_LAYOUT.footer2, COL.warmHi, FONT, 'center');
   } else {
-    text(ctx, 'R  SETTINGS    K  HANGAR    F  START OVER    O / ESC  BACK',
+    text(ctx, 'C  CONTROLS    R  DEFAULTS    K  HANGAR    F  START OVER    O / ESC  BACK',
       cx, SETTINGS_LAYOUT.footer2, COL.hudText, FONT, 'center');
   }
 }

@@ -539,6 +539,187 @@ const OUT = path.join(__dirname, '..', 'docs');
   await page.keyboard.press('KeyH');
   await page.waitForTimeout(250);
 
+  // --- the four hazard fields, side by side on one stretch of hull
+  //
+  // Placed by hand rather than hunted for: the generator puts at most a
+  // couple on a hull and never all four within one screen, so looking
+  // for a frame that happens to hold the set would mean a tool that
+  // sometimes finds nothing.
+  console.log('hazards:');
+  await page.evaluate(async () => {
+    const { buildLevel } = await import('./src/level.js');
+    const { FIELD_TOP, FIELD_BOT } = await import('./src/config.js');
+    const fo = await import('./src/foes.js');
+    const g = window.game;
+    g.levelIndex = 9;
+    g.level = buildLevel(g.specs[9]);
+    fo.resetFoes();
+    g.boss = null;
+    // A clear stretch to stand them on, so the hull's own geometry is
+    // not drawn through the middle of a field.
+    const at = 2600;
+    g.level.obstacles = g.level.obstacles.filter((o) => o.x < at - 200 || o.x > at + 900);
+    g.level.gates = [];
+    g.level.chunks = new Map();
+    const span = FIELD_BOT - FIELD_TOP;
+    g.level.hazards = ['fire', 'storm', 'ice', 'spark'].map((kind, i) => ({
+      kind, x: at + i * 160, w: 130,
+      y: i % 2 ? FIELD_TOP : FIELD_BOT - span * 0.4,
+      h: span * 0.4, phase: i * 2.3,
+    }));
+    g.player.x = at + 250;
+    g.player.y = (FIELD_TOP + FIELD_BOT) / 2;
+    g.player.invuln = 1e9;
+    g.cam.x = at - 70;
+  });
+  await clear();
+  await page.waitForTimeout(420);
+  await shot('hazards.png');
+
+  // --- an installation, with its searchlights lit
+  //
+  // Found rather than built, because the point of the picture is what
+  // the generator makes. Scans the campaign for an air-defence post and
+  // parks on it; the beams only exist while something is standing where
+  // one of them is pointing, so the ship is put in the cone.
+  console.log('installations:');
+  const found = await page.evaluate(async () => {
+    const { buildLevel } = await import('./src/level.js');
+    const fo = await import('./src/foes.js');
+    const g = window.game;
+    for (let i = 0; i < g.specs.length; i++) {
+      const level = buildLevel(g.specs[i]);
+      const light = level.turrets.find((t) => t.kind === 'searchlight');
+      if (!light) continue;
+      g.levelIndex = i;
+      g.level = level;
+      fo.resetFoes();
+      g.boss = null;
+      g.player.x = light.x + 40;
+      g.player.y = light.y + light.dir * 120;
+      g.player.invuln = 1e9;
+      g.cam.x = light.x - 240;
+      return { hull: g.specs[i].name, x: light.x };
+    }
+    return null;
+  });
+  if (!found) throw new Error('no hull in the campaign fields a searchlight');
+  await clear();
+  // Long enough for a lamp to sweep onto the ship, so the beams in the
+  // picture are the mechanic rather than the scenery.
+  await page.waitForTimeout(900);
+  await shot('installations.png');
+
+  // --- a base, which is the biggest of them
+  await page.evaluate(async () => {
+    const { buildLevel } = await import('./src/level.js');
+    const fo = await import('./src/foes.js');
+    const g = window.game;
+    for (let i = 0; i < g.specs.length; i++) {
+      const level = buildLevel(g.specs[i]);
+      const b = level.turrets.find((t) => t.kind === 'barracks');
+      if (!b) continue;
+      g.levelIndex = i; g.level = level; fo.resetFoes(); g.boss = null;
+      g.player.x = b.x + 120;
+      g.player.y = b.y + b.dir * 150;
+      g.player.invuln = 1e9;
+      g.cam.x = b.x - 150;
+      return;
+    }
+  });
+  await clear();
+  await page.waitForTimeout(420);
+  await shot('base.png');
+
+  // --- the hyperspace jump, caught mid-streak
+  //
+  // jumpT runs the streak down over JUMP.streak seconds, so the frame
+  // has to be taken while it is still above zero. Frozen by holding it
+  // there rather than racing the clock.
+  console.log('jump:');
+  await page.evaluate(async () => {
+    const { buildLevel } = await import('./src/level.js');
+    const { JUMP } = await import('./src/config.js');
+    const fo = await import('./src/foes.js');
+    const g = window.game;
+    g.levelIndex = 7;
+    g.level = buildLevel(g.specs[7]);
+    fo.resetFoes();
+    g.boss = null;
+    g.player.x = 2400; g.player.y = 170; g.player.invuln = 1e9;
+    g.cam.x = 2400 - 320;
+    g.player.jumpFromX = 2400 - JUMP.distance;
+    g.player.jumpFromY = 170;
+    g.player.jumpT = JUMP.streak * 0.55;
+    window.__holdJump = setInterval(() => {
+      g.player.jumpT = JUMP.streak * 0.55;
+      g.player.x = 2400; g.player.y = 170;
+      g.cam.x = 2400 - 320;
+    }, 8);
+  });
+  await clear();
+  await page.waitForTimeout(300);
+  await shot('jump.png');
+  await page.evaluate(() => { clearInterval(window.__holdJump); window.game.player.jumpT = 0; });
+
+  // --- the on-screen controls
+  console.log('touch:');
+  await page.evaluate(async () => {
+    const st = await import('./src/settings.js');
+    const { buildLevel } = await import('./src/level.js');
+    const fo = await import('./src/foes.js');
+    const g = window.game;
+    st.set('touch', 1);            // ON, rather than AUTO on a machine with a keyboard
+    g.levelIndex = 2;
+    g.level = buildLevel(g.specs[2]);
+    fo.resetFoes();
+    g.boss = null;
+    g.player.x = 1700; g.player.y = 170; g.player.invuln = 1e9;
+    g.cam.x = 1700 - 320;
+  });
+  await clear();
+  await page.waitForTimeout(400);
+  await shot('touch.png');
+  await page.evaluate(async () => {
+    const st = await import('./src/settings.js');
+    st.set('touch', 0);
+  });
+
+  // --- the colour schemes, the same frame five times
+  //
+  // The same frame on purpose: the whole of what a scheme changes is
+  // the palette, and five different scenes would hide that behind five
+  // different pictures.
+  console.log('schemes:');
+  const schemeNames = await page.evaluate(async () => {
+    const cf = await import('./src/config.js');
+    return cf.SCHEMES.map((s) => s.name);
+  });
+  for (let i = 0; i < schemeNames.length; i++) {
+    await page.evaluate(async (n) => {
+      const cf = await import('./src/config.js');
+      const { buildLevel } = await import('./src/level.js');
+      const fo = await import('./src/foes.js');
+      const g = window.game;
+      cf.applyScheme(n);
+      g.levelIndex = 11;
+      g.level = buildLevel(g.specs[11]);
+      g.level.chunks = new Map();
+      fo.resetFoes();
+      g.boss = null;
+      g.player.x = 3100; g.player.y = 170; g.player.invuln = 1e9;
+      g.cam.x = 3100 - 320;
+    }, i);
+    await clear();
+    await page.waitForTimeout(380);
+    await shot(`scheme-${i + 1}-${schemeNames[i].toLowerCase().replace(/[^a-z]/g, '')}.png`);
+  }
+  await page.evaluate(async () => {
+    const cf = await import('./src/config.js');
+    cf.applyScheme(0);
+    window.game.level.chunks = new Map();
+  });
+
   // --- the title, with the hull selector
   await page.evaluate(() => {
     localStorage.setItem('rnr.unlocked', '5');

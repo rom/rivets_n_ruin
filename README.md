@@ -36,7 +36,9 @@ backend API, so there is one thing to run and no CORS to think about.
 | `make icons` | Regenerate the favicon |
 
 Server flags: `-addr`, `-dir`, `-data`, `-save-interval`, `-rate-limit`,
-`-rate-burst`, `-require-runs`, `-harden`, `-allow-root`, `-v`.
+`-rate-burst`, `-require-runs`, `-harden`, `-allow-root`, `-v`, and for
+the operator tool `-admin-addr`, `-admin-anywhere`,
+`-admin-password-hash-file`, `-admin-password-file`.
 
 > **A note on `node --check`.** It reports success on a `.js` file containing ES
 > module syntax even when the file is genuinely unparseable — it only diagnoses
@@ -62,6 +64,7 @@ backend down**; you lose the leaderboard, not the game.
 | `O` | Settings |
 | `H` / `/` | Help pages |
 | `B` | Switch leaderboard: top pilots / high scores |
+| `V` / `Right Shift` | Hyperspace jump: a short hop, ten second cooldown |
 | `X` / `Shift` | Fire selected ordnance |
 | `C` / `1`–`3` | Cycle / select ordnance |
 | `E` | Armourer (between hulls) |
@@ -75,6 +78,10 @@ backend down**; you lose the leaderboard, not the game.
 
 | | |
 | --- | --- |
+| ![Installations](docs/installations.png) | ![Hazard fields](docs/hazards.png) |
+| An air-defence post, with its searchlights holding the ship | All four hazard fields: flare, vortex, ice cloud, arc |
+| ![Hyperspace jump](docs/jump.png) | ![On-screen controls](docs/touch.png) |
+| The jump, mid-streak: out of a corner, or out of a volley | Flying it on glass, with the pad and the guns under two thumbs |
 | ![Title](docs/scene-title.png) | ![Help](docs/help-1.png) |
 | The title: a backdrop, a hull to pick, and four ways out | Help, on three pages — `H` from anywhere that is not flight |
 | ![Refit](docs/scene-refit.png) | ![Settings](docs/settings.png) |
@@ -311,6 +318,76 @@ Homing is implemented as a turn rate on the shot itself (`seek` in
 that accelerated while turning would be unavoidable, and a test asserts its
 speed never changes.
 
+## Hazard fields
+
+![All four hazard fields](docs/hazards.png)
+
+Areas rather than objects. Nothing in one is solid and nothing in one can
+be shot: you fly around it, or you fly through and pay for every second
+you are inside. That makes them the only threat on a hull that is purely a
+question about your line — there is no version where killing it is an
+option.
+
+| Field | From | Costs |
+| --- | --- | --- |
+| **FLARE FIELD** | TANTALUM | 26 shield a second. Tongues of flame climbing off the plating |
+| **VORTEX** | CUPRUM | 20 a second. Turning cells that drag at the hull |
+| **ICE CLOUD** | WOLFRAM | 16 a second, the cheapest, and the hardest to see the far side of |
+| **ARC FIELD** | FERRUM | 30 a second, the dearest. Arcs snapping between posts on the girder |
+
+They differ in motion as much as in colour, because the decision a field
+asks for is made from a distance: fire climbs, a vortex turns, ice drifts
+and settles, an arc field snaps.
+
+Charged by the second rather than on entry, so clipping a corner is cheap
+and cutting the long way through is not. The ship's box counts, not its
+centre — a wingtip in a flare field is still in it.
+
+Because a field is not solid, the clearance sweep never sees one, which
+means the generator has to keep the corridor honest by itself: a field
+takes at most about half the corridor and always leaves a clear band
+beside it. A field that spanned the hull would be a wall that cannot be
+broken, and a test holds every hull's fields to that.
+
+## Installations
+
+| | |
+| --- | --- |
+| ![An air-defence post](docs/installations.png) | ![A base](docs/base.png) |
+| An air-defence post: three lights, and the gun that uses what they find. A beam is drawn only while it is holding something | A base: barracks, store sheds, a gun on the corner, and the cisterns at the back that take the rest of it with them |
+
+Things built on the hull rather than bolted to it. Each one is an apron
+off a girder with its works standing on it, so the corridor beside it
+stays open: somewhere to go into, not a wall across the hull.
+
+| Installation | What is in it |
+| --- | --- |
+| **Base** | Barracks, store sheds, a gun on the corner, and bulk cisterns at the back |
+| **Power plant** | A reactor, a cistern, and a run of pylons carrying the line away |
+| **Fuel station** | Pumps between cisterns, overseen by a watchtower. Almost all of it goes up |
+| **Air-defence post** | Searchlights, a watchtower, and the gun that uses what they find |
+
+Most of the parts do something beyond having hit points, because an inert
+tower that only stands there is scenery with a score attached:
+
+| Part | |
+| --- | --- |
+| **BARRACKS** | The crews live here, so while it stands the interceptors keep coming |
+| **DEPOT** | Munitions: a small blast, so a base comes apart in stages |
+| **CISTERN** | Bulk storage, and a big enough blast to take the next one with it |
+| **PUMP** | Small, volatile, and standing next to things that are more so |
+| **REACTOR** | While it stands, every gun on the plant wakes earlier and tracks faster |
+| **PYLON** | Carries the line, and the power: guns near a standing pylon wake earlier |
+| **WATCHTOWER** | A post with a longer reach. Leave it and the stream never thins |
+| **SEARCHLIGHT** | Sweeps. Anything it catches is lit for every gun in reach |
+
+A searchlight is the clearest case of the idea. It has no gun at all —
+the whole of its threat is what it does for the guns around it, so
+breaking the lights before anything else is a real decision rather than a
+detour. The beam swings between the ends of an arc rather than spinning,
+because a light that went all the way round would spend half its time
+pointed into the hull it is bolted to.
+
 ## Laser gates
 
 ![A laser gate](docs/laser.png)
@@ -336,7 +413,7 @@ and checks exactly that.
 ## Attackers
 
 Interceptors teach dodging and turrets teach prioritising.
-Fifteen more types arrive hull by hull, each asking a different question:
+Eighteen more types arrive hull by hull, each asking a different question:
 
 ![The attacker roster](docs/attackers.png)
 
@@ -383,11 +460,24 @@ them.
 | **Chainer** | FERRUM | Spawns as a linked pair with a live tether between them. Go round, or break a link |
 | **Monitor** | FERRUM | The heaviest thing short of a miniboss. Two mounts, so no side is quiet |
 | **Carrier** | AURUM | Launches weavers. Spend the time on the source, or keep swatting what it sends |
+| **Netter** | CUPRUM | Throws a net. Barely scratches you, and takes the next few seconds of being able to dodge |
+| **Grapnel** | WOLFRAM | Hooks you and hauls. Drags you off your line and backs away while it does. Kill it to drop the line |
+| **Scorcher** | FERRUM | A short cone of flame. Being caught in it leaves the hull burning after the scorcher is dead |
 
 Which hull fields which is `LEVELS[].foes` in `src/config.js`. ARGENTUM
 fields none of them — the first hull is turrets and interceptors only.
 
-The last three are deliberately not more of the same. A mirror makes
+The last three in the table take something other than shield, which on a
+hull full of walls is worse. A **netter** costs you the ability to get out
+of the way; a **grapnel** costs you your line and keeps pulling until you
+kill it; a **scorcher** sets the hull alight and the fire outlasts the
+thing that lit it. All three are drawn on the ship while they hold — a net
+clinging to the hull, a line back to whatever is towing you, flame licking
+off the plating — because a loss of control the player cannot see reads as
+the game stuttering. A second hit refreshes rather than stacks: two
+netters holding a ship still for ever is not a mechanic.
+
+The mirror, the carrier and the chainer are deliberately not more of the same. A mirror makes
 shooting the wrong move, which is the one thing a shoot 'em up never asks
 of you — it sends about three quarters of what you fire at it back down
 the line it came from, and the answer is to stop and flank. A chainer is
@@ -445,7 +535,7 @@ as one kind.
 
 A squadron is a composition with a shape. Three gnats in a vee. A barge
 with two darts screening it. A monitor on its own, because that is what a
-monitor is. Seventeen of them in `SQUADS`, plus a singleton for every
+monitor is. Twenty-three of them in `SQUADS`, plus a singleton for every
 roster kind so no attacker stops being its own answer to something — except
 the two that are only half an attacker alone: a chainer has no tether
 without its mate, and one gnat is one hit point and no gun.
@@ -714,7 +804,7 @@ past a plateau rather than wait it out.
   | **press** | jaws that close and open on a cycle: the only pattern whose geometry moves, and a rhythm to arrive on rather than a shape to dodge |
   | stepped stack | climbs, so you commit to a line early |
 
-  The narrowest gap anywhere in the twenty-five hulls is 39px against a
+  The narrowest gap anywhere in the twenty-five hulls is 40px against a
   ship that is 9 tall, and a test walks every hull at 17px intervals to
   keep it that way — an unflyable hull is not a hard hull, it is a broken
   one. A press closes tighter than any static geometry, to 34px at its
@@ -734,12 +824,50 @@ past a plateau rather than wait it out.
 - **Fully procedural audio** — see below.
 
 What shoots back is its own subject, and has grown well past the two kinds
-this list used to describe: fifteen tower types, sixteen attacker types,
+this list used to describe: twenty-three tower types, nineteen attacker types,
 four minibosses and twenty-five bosses, each covered in its own section
 above.
 Turret health rises with the hull too — 6 on ARGENTUM, 52 on ORICHALCUM —
 because a gun that dies to a sneeze makes breaking them a formality rather
 than the thing the end-of-hull bonus is paid on.
+
+## The hyperspace jump
+
+![The jump, mid-streak](docs/jump.png)
+
+`V` or right shift, ten second cooldown. The only move in the game that
+is not flying.
+
+It answers two situations nothing else does. Being wedged somewhere the
+geometry will not let you fly out of — the hull is generated, and a
+corner you cannot thrust out of is a corner you are stuck in. And a
+volley already in the air with nowhere to go, where the right play is to
+not be where it is aimed.
+
+Short on purpose: 120px against a shortest hull of 12,000. Far enough to
+cross a corridor or leave a salvo behind, nowhere near far enough to skip
+a stretch of hull and the guns on it.
+
+It goes wherever you are asking to go, or straight ahead if you are not
+asking for anything. Where it lands is searched back from the full
+distance until the ship fits, so a jump into a wall is a shorter jump up
+to the wall rather than a jump through it. If there is nowhere at all —
+hull on every side — nothing happens and **the cooldown is not spent**,
+because charging ten seconds for a move that did not occur is the worst
+thing it could do to the player it exists to rescue.
+
+Arriving is briefly safe, four tenths of a second, which is the point of
+jumping out of a volley: the shots already aimed at where you were should
+miss. Short enough that it cannot be used to tank.
+
+A tow line does not survive the ship leaving the end of it. A net and a
+fire do — both are on the hull, and they come along.
+
+The cooldown is a ring around the ship rather than a HUD readout: there
+is no room on the HUD row, and a ten second wait is something you check
+while flying rather than look away to read. It pulses once at the moment
+it comes back, which is the part worth catching out of the corner of an
+eye.
 
 ## The armory
 
@@ -1152,6 +1280,22 @@ star layers, the dreadnought passing below with its windows lit and masts
 on the skyline, and a patrol crossing in front of it. It is a function of
 one clock, so it holds no state and cannot drift out of step.
 
+### The gantry
+
+The title is framed as the place the ship is sent out from, and built
+deliberately unlike the hangar it is serviced in. The hangar is flat
+trussed roof, ribbed wall panels, plated deck and warm lamps overhead, in
+`THEMES.steel`. This is an arched mouth in `THEMES.conduit` blue: ribs
+running over the opening instead of girders across a ceiling, cold strip
+lighting set into the inside edges instead of lamps hanging above, open
+grating underfoot instead of plate. Two rooms on the same ship, built by
+the same yard, for different jobs.
+
+It is a portal rather than a border — the structure is everything the
+arch does not cut out, and the starfield and the dreadnought show through
+the opening. That is what makes the title a view out of somewhere instead
+of a picture with a frame on it.
+
 ## Attract mode
 
 Leave it alone for two minutes on the title and the game plays itself.
@@ -1220,6 +1364,46 @@ every setting added pushed that line one notch nearer the footer and the
 twelfth put it through. Widening the gap only moved the cliff; a fixed
 window has no cliff, and the screen now lays out identically whether there
 are five settings or fifty.
+
+### Controls, and playing it on glass
+
+![The on-screen controls](docs/touch.png)
+
+`CONTROLS` — reached with **C** from the settings screen — lists every
+rebindable action and the key it answers to. Choose a row, press ENTER,
+press the key you want. **R** puts every default back.
+
+A rebind takes the key off whatever had it, so one key never does two
+things. Five actions are deliberately fixed: START, the two answers to a
+yes/no prompt, and the two irreversible wipes. START is fixed for the
+same reason a lift has a door button — it has to work when everything
+else has been bound to the wrong thing — and binding a hangar wipe onto
+something you reach for in flight is a way to lose a campaign to a typo.
+
+`ON-SCREEN CONTROLS` is AUTO, ON or OFF. AUTO asks the browser whether
+this is a touchscreen, so a phone gets buttons and a desktop does not
+without anybody finding a setting. ON is for the machines it gets wrong,
+mostly touchscreen laptops.
+
+The buttons drive the same two input sets the keyboard drives, so nothing
+downstream knows which one is being used: a run flown with a thumb goes
+through the identical update path as one flown with a hand on the arrows.
+A four-way pad sits under the left thumb and FIRE, ORDNANCE and CYCLE
+under the right; PAUSE is on every screen, because a phone has no Escape
+key. Sliding a thumb from one button to the next steers rather than
+sticking on the one it started on.
+
+The layout is data in the same logical 640×384 the HUD uses, and tested
+as data: nothing overlaps, nothing covers the HUD, nothing leaves the
+screen, and every target clears a 48-logical-pixel floor. That floor is
+in logical pixels and not a promise in CSS ones — the playfield is a
+fixed shape letterboxed into whatever screen it gets, so on an iPhone 13
+held sideways the buttons measure about 46×43 CSS px, just under the 44pt
+platform guidance and about as large as this layout allows without the
+controls covering the hull you are flying along.
+
+Held upright, a phone gets a letterboxed strip and the page says to turn
+it sideways rather than leaving somebody with a postage stamp.
 
 ### Accessibility
 
@@ -1341,6 +1525,37 @@ the title screen offers with its arrows, in the place people look for
 settings. It is bounded by how far you have actually got, because a start
 hull past that is not a setting. Earlier refits are credited, so arriving
 on PYRITE in a factory-standard ship is not a thing that can happen.
+
+### Colour schemes
+
+`COLOUR SCHEME` repaints the instrument panel — the HUD, the menus and
+the frames around them. Not the hull: `THEMES` colours that, and each hull
+has its own.
+
+| Scheme | |
+| --- | --- |
+| **GANTRY** | The issue panel: cold cyan on gunmetal. What shipped |
+| **AMBER CRT** | One phosphor, the way a terminal of the period had it |
+| **PHOSPHOR** | Green screen. Everything legible, nothing pretty |
+| **DEEP ICE** | Blue-white, and colder than the hull it is bolted to |
+| **OXIDE** | Warm metal and verdigris. The oldest ship in the fleet |
+
+The same frame five times, because the whole of what a scheme changes is
+the palette and five different scenes would hide that behind five
+different pictures:
+
+| | |
+| --- | --- |
+| ![GANTRY](docs/scheme-1-gantry.png) | ![AMBER CRT](docs/scheme-2-ambercrt.png) |
+| GANTRY | AMBER CRT |
+| ![PHOSPHOR](docs/scheme-3-phosphor.png) | ![DEEP ICE](docs/scheme-4-deepice.png) |
+| PHOSPHOR | DEEP ICE |
+| ![OXIDE](docs/scheme-5-oxide.png) | |
+| OXIDE | |
+
+`COL` is a live object and a scheme rewrites its fields in place. Three
+hundred-odd places read `COL.cool`; none of them has to know schemes
+exist, and a scheme reaches code written before they did.
 
 ### Hull layouts
 
@@ -1525,14 +1740,38 @@ pixel checks.
 ## Audio
 
 Every sound is synthesised at runtime from oscillators and noise. There are no
-audio files to load, nothing to license, and the whole system is about 400 lines.
+audio files to load, nothing to license, and the whole system is about 1,300 lines
+across `sfx.js`, `audio.js` and `music.js`.
 It also happens to be the right register: both reference games came out of an era
 when the music *was* the synthesiser.
 
-**14 effects**, each built from a pitch sweep plus a filtered noise burst. Hull
+**33 effects**, each built from a pitch sweep plus a filtered noise burst. Hull
 contact is the one worth calling out — its brightness and pitch track impact
 speed, so a graze and a full-tilt slam are audibly different and you learn the
 damage model through your ears before you read the shield bar.
+
+Every mechanic that takes something from you has a cue of its own, which
+sounds obvious and was not: the netter, the grapnel and the scorcher all
+played the ordinary gun sound when they were written, so the three
+attackers that cost you something other than shield were audibly
+identical to the thing you had been dodging since hull one.
+
+| | |
+| --- | --- |
+| **A net** | Cloth and air, falling. Then the drive bogging down, which is the speed bar arriving early |
+| **A hook** | A launcher clank and a line paying out, rising. Then the bite, and a creak every third of a second for as long as it holds |
+| **A flame** | All breath and no pitch — anything tonal reads as a gun again. Then crackle, for as long as you are alight |
+| **The four fields** | Four voices, not one: fire roars, a vortex buffets, ice rings, arcs snap. The only decision a field offers is whether the way round is worth it, and that depends on which one it is |
+| **A cistern** | The ordinary blast with a sub under it and a long roll after. Its reach is four times a fuel tank's and the sound is the only warning anyone beside it gets |
+| **A reactor** | A long spin-down, and the floor going out from under every gun it was quickening |
+| **A pylon** | The twang first, the arc after |
+| **A searchlight** | Two notes, rising, on the edge — being lit is not damage, it is the guns around you getting better |
+| **The jump** | A charge that climbs and vanishes, then the hull arriving somewhere else. Two halves, so the ear hears a departure and a landing |
+
+Throttling matters more than the synthesis. Burning, being towed and
+standing in a field are all called from the 120Hz update loop, and any
+one of them unthrottled fills the voice pool on its own and silences
+everything else in the game.
 
 **An adaptive score** in D phrygian at 152 BPM — galloping bass, kick/snare/hats,
 an arpeggio lead and a detuned pad, sequenced on a 16th grid over a four-bar
@@ -1737,31 +1976,95 @@ reports each pilot's progress along the hull.
 | `POST` | `/api/presence` | yes | heartbeat while flying |
 | `GET` | `/api/presence` | — | who is flying right now |
 
-### The operator's door
+### The operator tool
 
-Registered only when a credential is configured. With none, the routes
-do not exist — there is no default password, nothing to find and nothing
-to brute-force. Everything behind it answers `404` when it refuses,
+A password-protected web page **on its own port**, with its own API
+beside it. Point a browser at `http://127.0.0.1:8001` and sign in.
+
+![The operator tool](docs/admin-overview.png)
+
+It exists only when a credential is configured. With none, no second
+port is opened, the routes are not registered and the page is not
+served — there is no default password, nothing to find and nothing to
+brute-force. Everything behind it answers `404` when it refuses,
 including a wrong token and a request from the wrong address: a surface
 that announces itself is a surface worth attacking.
+
+**A different port, not a different path.** The game's listener does
+not have these routes at all. A request for `/api/admin/players` there
+is answered by the static file handler, which has never heard of it —
+not by a password check inside a handler that one proxy rule, one
+middleware reordering or one mistake in `requireAdmin` stands between
+the internet and `DELETE /api/admin/players/{id}`. The page itself is
+compiled into the binary rather than served from the static root, which
+is reachable from the public port by definition.
+
+Four tabs:
+
+| Tab | What it is for |
+| --- | --- |
+| **Overview** | the board's counters, who is flying right now, what the OS granted the process, and the one button that wipes everything |
+| **Pilots** | search, read one pilot in full, edit their counters, change their password, reset them, delete them |
+| **Runs** | every recorded run newest first, searchable by pilot or by run id; one run in detail with the numbers that say whether it is plausible |
+| **Errors** | the client error reports themselves, which the public `/api/stats` deliberately withholds |
+
+| | |
+| --- | --- |
+| ![One run](docs/admin-run.png) | ![One pilot](docs/admin-pilot.png) |
+| Points a second, points a hull, and how this run compares to the pilot's others — the numbers you reach for when a score does not look right | Their counters, their recent runs, and every irreversible thing you can do to the account, each behind a confirmation that names what it is about to remove |
 
 | | | |
 | --- | --- | --- |
 | `POST` | `/api/admin/login` | password in, short-lived token out |
 | `POST` | `/api/admin/logout` | end the session now |
 | `GET` | `/api/admin/stats` | store counters, live sessions, what the OS granted |
+| `GET` | `/api/admin/errors` | client error reports, contents and all |
+| `GET` | `/api/admin/presence` | who is flying right now |
 | `GET` | `/api/admin/players` | list and search pilots |
 | `POST` | `/api/admin/players` | add one, with or without a password |
 | `GET` | `/api/admin/players/{id}` | everything about one pilot, with statistics |
 | `DELETE` | `/api/admin/players/{id}` | remove the pilot and all of their data |
 | `POST` | `/api/admin/players/{id}/reset` | clear their history, keep the account |
 | `POST` | `/api/admin/players/{id}/password` | set a new password |
+| `POST` | `/api/admin/players/{id}/stats` | edit their runs and best counters |
+| `GET` | `/api/admin/runs` | recorded runs — `?q=`, `?limit=`, `?offset=` |
+| `GET` | `/api/admin/runs/{id}` | one run, its pilot, and how it compares to their others |
+| `DELETE` | `/api/admin/runs/{id}` | remove one run; the pilot's best is recomputed |
+| `POST` | `/api/admin/scores/reset` | wipe every recorded run — needs `{"confirm":"RESET"}` |
 
 **Loopback only**, unless you pass `-admin-anywhere`. Most of what these
 do cannot be undone, and anyone who wants them reachable from elsewhere
 should have to say so and put TLS and an allowlist in front. A token
 minted locally does not work from off-machine either, so a leaked one
-does not travel.
+does not travel. `-admin-addr ''` turns the tool off entirely.
+
+**Searching runs matches a name anywhere and an id from the start.** An
+id is pasted, not remembered, so a prefix is what a truncated one needs;
+matching ids anywhere means a two-letter query lands in random hex, and
+ids here are 32 hex characters. Searching for the pilot `ada` returned
+her runs plus a scattering of other people's whose id happened to
+contain `ad`.
+
+**Login has its own rate limit**, far tighter than the API's: it is the
+one unauthenticated route on that listener, and on a loopback-only
+listener every attempt in the world shares one bucket. Generous enough
+for an operator mistyping a password, useless for working through a
+list.
+
+**Removing one run is usually what you want.** It takes the number with
+it: the pilot's `best` is recomputed from the runs still on record, so
+a cheated score does not stay on their card after the run behind it is
+gone. Wiping the whole board is there too, behind a typed confirmation
+in the request body as well as in the page — `DELETE` on a collection
+is one mistyped URL away from `DELETE` on a row.
+
+**Editing a pilot's counters tells you when they disagree with the
+runs.** `runs` and `best` are a cache maintained on submission so that
+reading a player does not mean walking the score table; the leaderboard
+itself is computed from the runs. Setting a best no recorded run
+supports is sometimes exactly right — tidying up after removing one by
+hand — and sometimes a mistake, so the answer carries both numbers and
+the page colours the difference.
 
 **Changing a password kills the pilot's session token.** Otherwise
 resetting the credential of a compromised account would change nothing
@@ -2240,7 +2543,7 @@ src/boss.js       boss arenas, phases, weak points and the wreck window
 src/towerart.js   what each hull installation looks like
 src/bossart.js    the eight boss shapes and their destructible sections
 src/gates.js      laser gates: the wall, the emitter, and what breaks it
-src/foeart.js     the sixteen attacker bodies
+src/foeart.js     the nineteen attacker bodies
 src/shipart.js    the player's ship, as its marks, guns, load and mods make it
 src/demo.js       the attract-mode pilot
 src/score.js      difficulty multipliers, and the one way points are awarded
@@ -2248,7 +2551,7 @@ src/render.js     world drawing
 src/hud.js        HUD and the title / game-over / complete screens
 src/pool.js       fixed-capacity object pools (no allocation during play)
 src/audio.js      Web Audio graph, buses, voice limiting, synthesis primitives
-src/sfx.js        the 19 sound effects
+src/sfx.js        the 33 sound effects
 src/music.js      adaptive sequencer and its instrument voices
 src/net.js        backend client; degrades to offline play
 src/mods.js       mod loading and config overrides
@@ -2262,6 +2565,7 @@ src/hangar.js     what survives a closed tab: coins banked and mods owned
 src/settings.js   settings as data, validated on the way back in
 src/sequences.js  the splash, the launch, the landing, the title backdrop
 src/display.js    adaptive render scale, static mode for menus
+src/touch.js      the on-screen controls: layout, hit testing, drawing
 src/errors.js     client error reporting; see below
 src/projectiles.js src/particles.js src/camera.js src/rng.js src/input.js
 
@@ -2272,6 +2576,7 @@ Makefile          make, for the list of targets
 tools/smoke.cjs   the browser smoke test: flies the game and reads pixels
 tools/coverage.sh the coverage gate, so CI and your machine agree
 tools/make_gallery.cjs  regenerates the README images from the live game
+tools/make_admin_shot.cjs  the same, for the operator tool's pages
 tools/make_icons.py     regenerates favicon.ico
 tools/release.sh        builds, attacks and publishes a release
 test/             the client tests; see below
@@ -2283,6 +2588,7 @@ internal/store/   Store interface, in-memory implementation, snapshots
 internal/api/     routing, handlers, auth, rate limiting
 internal/validate/ score plausibility, derived from the game's physics
 internal/hardening/ asks the OS to take privileges away at startup
+internal/adminui/  the operator page, compiled into the binary
 ```
 
 `make smoke` flies the game in a headless browser and reads pixels, asserting
@@ -2479,8 +2785,8 @@ refused by the server. Both are fixed. Everything below is what one
 playthrough does not settle.
 
 - **Balance is mostly still first guesses, and there is a great deal of
-  it.** Twenty-five hulls, twenty-five bosses, four minibosses, sixteen
-  attacker types, fifteen tower types, laser gates, deflector shields,
+  it.** Twenty-five hulls, twenty-five bosses, four minibosses, nineteen
+  attacker types, twenty-three tower types, laser gates, deflector shields,
   four treasure tiers, thirteen mods, the coin economy, the refit curve,
   the end-of-hull bonus and the four difficulty settings were picked by
   reasoning about them. Only the opening hulls have actually been flown.

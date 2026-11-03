@@ -11,7 +11,17 @@ STATE       ?= data/state
 ACCOUNTS    ?= data/accounts
 ADDR        ?= 127.0.0.1:8000
 GOFILES     := $(shell find . -name '*.go' -not -path './$(BUILD_DIR)/*')
-JSFILES     := $(wildcard src/*.js)
+# The operator page is compiled into the binary with //go:embed, so
+# editing it has to rebuild the binary. Without these the Go sources
+# were the only prerequisite, make called the binary up to date, and a
+# changed admin page did not reach the running server — which presents
+# as an edit that silently does nothing.
+EMBEDDED    := $(wildcard internal/adminui/page/*)
+# The game's modules and the operator page's. The admin page is
+# compiled into the binary, which checks that it EXISTS and nothing
+# about whether it parses — so it has to be in here, or a syntax error
+# in it ships and is found by whoever opens the tool.
+JSFILES     := $(wildcard src/*.js) $(wildcard internal/adminui/page/*.js)
 GO          ?= go
 NODE        ?= node
 
@@ -31,7 +41,7 @@ LDFLAGS     := -s -w
 NOCGO       := CGO_ENABLED=0
 
 .DEFAULT_GOAL := help
-.PHONY: help run build test test-race test-js coverage coverage-gate bench fmt vet check js-check smoke tidy clean dist icons gallery stats
+.PHONY: help run build test test-race test-js coverage coverage-gate bench fmt vet check js-check smoke tidy clean dist icons gallery gallery-admin stats
 
 help: ## Show this help
 	@echo "Rivets 'n Ruin"
@@ -46,7 +56,7 @@ run: ## Build and run the game + backend (ADDR to override the bind address)
 
 build: $(BUILD_DIR)/$(BINARY) ## Compile the server binary
 
-$(BUILD_DIR)/$(BINARY): $(GOFILES)
+$(BUILD_DIR)/$(BINARY): $(GOFILES) $(EMBEDDED)
 	@mkdir -p $(BUILD_DIR)
 	$(NOCGO) $(GO) build -ldflags '$(LDFLAGS)' -o $@ ./cmd/server
 	@echo "built $@"
@@ -121,6 +131,9 @@ check: ## Everything CI would run: format check, vet, race tests, JS syntax
 	@echo "all checks passed"
 
 SMOKE_PORT ?= 8399
+GALLERY_ADMIN_UI_PORT ?= 8397
+# Thrown away with the server that used it; never a real credential.
+GALLERY_ADMIN_PW := gallery-only-$(shell date +%s)
 
 # Wait until the server is actually listening, rather than assuming a fixed
 # number of seconds is enough. It was not: under load the binary took longer
@@ -145,7 +158,7 @@ smoke: build ## Launch the game and assert it actually renders and scrolls
 tidy: ## Tidy go.mod
 	$(GO) mod tidy
 
-gallery: build ## Regenerate the README images from the live game
+gallery: build gallery-admin ## Regenerate the README images from the live game
 	@./$(BUILD_DIR)/$(BINARY) -addr 127.0.0.1:$(SMOKE_PORT) \
 	    -state $(BUILD_DIR)/gallery-state -accounts $(BUILD_DIR)/gallery-accounts & \
 	pid=$$!; \
@@ -153,6 +166,32 @@ gallery: build ## Regenerate the README images from the live game
 	$(call wait_for,$(SMOKE_PORT)); \
 	$(NODE) tools/make_gallery.cjs http://127.0.0.1:$(SMOKE_PORT)/
 	@python3 tools/optimise_gallery.py
+
+# The operator tool's pictures, which need a server that has an admin
+# credential and a database with something in it. A throwaway password
+# and a state directory under build/, which `make clean` takes: the
+# alternative is asking whoever regenerates the README to have an admin
+# server already running, which means the pictures stop being
+# regenerated.
+#
+# The tool clears what it is about to create through the admin API
+# rather than this recipe deleting a directory, so it can be run twice.
+# The pilot and run cards still differ byte-for-byte between runs —
+# they show a generated run id and a timestamp — so `make gallery`
+# leaves those two in the diff and that is expected.
+GALLERY_ADMIN_PORT ?= 8398
+gallery-admin: build ## Regenerate the operator tool's README images
+	@RNR_ADMIN_PASSWORD=$(GALLERY_ADMIN_PW) ./$(BUILD_DIR)/$(BINARY) \
+	    -addr 127.0.0.1:$(GALLERY_ADMIN_PORT) \
+	    -admin-addr 127.0.0.1:$(GALLERY_ADMIN_UI_PORT) \
+	    -state $(BUILD_DIR)/gallery-admin-state \
+	    -accounts $(BUILD_DIR)/gallery-admin-state & \
+	pid=$$!; \
+	trap "kill $$pid 2>/dev/null" EXIT; \
+	$(call wait_for,$(GALLERY_ADMIN_PORT)); \
+	$(NODE) tools/make_admin_shot.cjs \
+	    http://127.0.0.1:$(GALLERY_ADMIN_UI_PORT) \
+	    http://127.0.0.1:$(GALLERY_ADMIN_PORT) $(GALLERY_ADMIN_PW)
 
 icons: ## Regenerate favicon.ico and apple-touch-icon.png
 	python3 tools/make_icons.py

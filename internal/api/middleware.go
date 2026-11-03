@@ -86,6 +86,20 @@ type rateLimiter struct {
 	buckets map[string]*bucket
 	rate    float64
 	burst   float64
+	// The clock, injectable for tests. A bucket refills against wall
+	// time, so a test that spends real seconds in the handler it is
+	// limiting is testing the machine it runs on: the admin login
+	// verifies a pbkdf2 hash on every attempt, and under coverage
+	// instrumentation on a loaded CI runner that is slow enough for a
+	// 0.2/s bucket to refill underneath the test.
+	now func() time.Time
+}
+
+// SetClock freezes or drives a limiter's sense of time. Tests only.
+func (rl *rateLimiter) setClock(fn func() time.Time) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	rl.now = fn
 }
 
 const (
@@ -100,7 +114,9 @@ func newRateLimiter(rate, burst float64) *rateLimiter {
 	if burst <= 0 {
 		burst = 40
 	}
-	rl := &rateLimiter{buckets: map[string]*bucket{}, rate: rate, burst: burst}
+	rl := &rateLimiter{
+		buckets: map[string]*bucket{}, rate: rate, burst: burst, now: time.Now,
+	}
 	go rl.sweep()
 	return rl
 }
@@ -133,7 +149,7 @@ func (rl *rateLimiter) sweepOnce(cutoff time.Time) int {
 func (rl *rateLimiter) allow(ip string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-	now := time.Now()
+	now := rl.now()
 	b, ok := rl.buckets[ip]
 	if !ok {
 		rl.buckets[ip] = &bucket{tokens: rl.burst - 1, last: now}

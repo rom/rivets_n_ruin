@@ -1,16 +1,19 @@
 import { VIEW_W, VIEW_H } from './config.js';
 import { fitCanvas, applyTransform, applyUiTransform, reportFrame,
-  setStatic } from './display.js';
+  setStatic, setPadded } from './display.js';
 import {
   initInput, tapped, endFrame, setSynthetic, realAnyTapped,
+  touchDown, touchUp, touchClear, rebind, resetBindings, keyFor, BINDABLE,
 } from './input.js';
+import { padAt, drawPads } from './touch.js';
 import { demoActions, IDLE_BEFORE_DEMO } from './demo.js';
 import { startLoop } from './loop.js';
 import { installErrorReporting, report } from './errors.js';
 import { makeGame, update, syncBest, wipeProgress } from './game.js';
 import { drawWorld } from './render.js';
 import {
-  drawHud, drawPaused, drawQuitPrompt, drawSettings, drawShop, drawHelp, HELP_PAGES,
+  drawHud, drawPaused, drawQuitPrompt, drawSettings, drawShop, drawHelp, drawControls,
+  HELP_PAGES,
   drawDemoBadge,
 } from './hud.js';
 import { rows as shopRows, buy as shopBuy, applyMods, resetShop } from './shop.js';
@@ -68,13 +71,122 @@ const SCREEN_STATES = new Set([
   'splash', 'title', 'levelclear', 'gameover', 'ending', 'victory',
 ]);
 function isOverlay() {
-  return shopOpen || settingsOpen || helpOpen || paused || game.quitting
+  return shopOpen || settingsOpen || helpOpen || controlsOpen || paused || game.quitting
     || SCREEN_STATES.has(game.state);
 }
 window.addEventListener('resize', fit);
 fit();
 
 initInput(window);
+
+// --- on-screen controls
+//
+// AUTO asks the browser whether this is a touchscreen; ON and OFF are
+// for the machines it gets wrong, which is mostly touchscreen laptops.
+// The buttons feed the same input sets the keyboard does, so everything
+// downstream — the demo, the menus, the player — stays unaware.
+function touchWanted() {
+  const mode = Number(settings.get('touch')) || 0;
+  if (mode === 1) return true;
+  if (mode === 2) return false;
+  try {
+    return window.matchMedia('(any-pointer: coarse)').matches
+      || navigator.maxTouchPoints > 0;
+  } catch {
+    return 'ontouchstart' in window;
+  }
+}
+let padsOn = touchWanted();
+function syncPads() {
+  const want = touchWanted();
+  if (want === padsOn) return;
+  padsOn = want;
+  if (!want) touchClear();
+  setPadded(want);
+  document.body.classList.toggle('touch', want);
+  fit();
+}
+setPadded(padsOn);
+document.body.classList.toggle('touch', padsOn);
+settings.onChange((id) => { if (id === 'touch' || id === null) syncPads(); });
+export const padsVisible = () => padsOn;
+
+// Pointer to logical coordinates. The UI canvas is laid out by CSS at
+// cssW x cssH and drawn in the same 640x384 the HUD is, so the mapping
+// is the box, not the backing store — getBoundingClientRect is what
+// survives a device pixel ratio, a zoom and a CSS transform alike.
+function toLogical(e, rect) {
+  return {
+    x: ((e.clientX - rect.left) / rect.width) * VIEW_W,
+    y: ((e.clientY - rect.top) / rect.height) * VIEW_H,
+  };
+}
+
+function padState() {
+  if (shopOpen || settingsOpen || helpOpen || controlsOpen || paused || game.quitting) return 'menu';
+  return game.state;
+}
+
+function onPointerDown(e) {
+  if (!padsOn) return;
+  wakeAudio();
+  const rect = canvas.getBoundingClientRect();
+  const { x, y } = toLogical(e, rect);
+  const b = padAt(padState(), x, y);
+  if (!b) return;
+  e.preventDefault();
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* not capturable */ }
+  touchDown(e.pointerId, b.action);
+}
+
+function onPointerMove(e) {
+  if (!padsOn || !e.buttons) return;
+  const rect = canvas.getBoundingClientRect();
+  const { x, y } = toLogical(e, rect);
+  const b = padAt(padState(), x, y);
+  // Sliding from one button to another re-presses: a thumb crossing the
+  // pad should steer rather than stick on whichever one it started on.
+  touchUp(e.pointerId);
+  if (b) touchDown(e.pointerId, b.action);
+}
+
+const onPointerUp = (e) => touchUp(e.pointerId);
+
+for (const el of [canvas, document.getElementById('ui')]) {
+  if (!el) continue;
+  el.addEventListener('pointerdown', onPointerDown);
+  el.addEventListener('pointermove', onPointerMove);
+  el.addEventListener('pointerup', onPointerUp);
+  el.addEventListener('pointercancel', onPointerUp);
+  el.addEventListener('contextmenu', (e) => { if (padsOn) e.preventDefault(); });
+}
+// A finger lifted outside the canvas still has to let go of the button.
+window.addEventListener('pointerup', onPointerUp);
+window.addEventListener('blur', touchClear);
+
+// Rebinding listens to the keyboard directly, ahead of the action map.
+//
+// It has to: the key being captured may not mean anything yet, and if it
+// does mean something, acting on the old meaning on the way past is how
+// binding MOVE LEFT onto the key that currently means QUIT ends a run.
+// Capture phase, so this sees the keystroke before initInput's listener
+// turns it into an action.
+window.addEventListener('keydown', (e) => {
+  if (awaitingKey === null) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.code === 'Escape') {
+    awaitingKey = null;
+    controlsNote = 'LEFT AS IT WAS';
+  } else if (rebind(awaitingKey, e.code)) {
+    controlsNote = '';
+    awaitingKey = null;
+  } else {
+    controlsNote = 'THAT KEY IS SPOKEN FOR';
+    awaitingKey = null;
+  }
+  sfxUi();
+}, true);
 
 // Browsers will not start audio outside a user gesture, so the context is
 // created on the first key or pointer event and the score starts with it.
@@ -90,6 +202,13 @@ settings.onChange(() => applySettings(settings.all()));
 
 // The settings screen is modal and owns the keyboard while it is open.
 let settingsOpen = false;
+// The controls screen: which row is selected, and which action is
+// waiting for a key. null means "not listening"; anything else is the
+// action the next keystroke binds.
+let controlsOpen = false;
+let controlsSel = 0;
+let awaitingKey = null;
+let controlsNote = '';
 // Attract mode. demoT counts seconds since anybody touched a key; demoOn
 // says the machine is flying itself.
 let demoT = 0;
@@ -281,8 +400,40 @@ startLoop(
     if (tapped('help') && game.state !== 'play' && game.state !== 'dying') {
       helpOpen = true; helpPage = 0; sfxUi(); endFrame(); return;
     }
+    // --- the controls screen, reached from settings
+    //
+    // It takes the keyboard raw rather than through the action map,
+    // because the whole job is catching a key that may not be bound to
+    // anything yet — and because a player rebinding MOVE LEFT onto the
+    // key that currently means MOVE RIGHT must not have the screen act
+    // on the old meaning on the way past.
+    if (controlsOpen) {
+      const n = BINDABLE.length;
+      if (awaitingKey === null) {
+        if (tapped('up')) { controlsSel = (controlsSel - 1 + n) % n; sfxUi(); }
+        if (tapped('down')) { controlsSel = (controlsSel + 1) % n; sfxUi(); }
+        if (tapped('start') || tapped('fire')) {
+          awaitingKey = BINDABLE[controlsSel][0];
+          controlsNote = '';
+          sfxUi();
+        }
+        if (tapped('restart')) { resetBindings(); controlsNote = 'CONTROLS RESET'; sfxUi(); }
+        if (tapped('options') || tapped('pause') || tapped('quit')) {
+          controlsOpen = false; settingsOpen = true; sfxUi();
+        }
+      }
+      endFrame();
+      return;
+    }
+
     if (settingsOpen) {
       const n = settings.DEFS.length;
+      if (tapped('cycle')) {
+        controlsOpen = true; settingsOpen = false; controlsSel = 0;
+        awaitingKey = null; controlsNote = ''; sfxUi();
+        endFrame();
+        return;
+      }
       if (tapped('up')) { settingsSel = (settingsSel - 1 + n) % n; sfxUi(); }
       if (tapped('down')) { settingsSel = (settingsSel + 1) % n; sfxUi(); }
       const bounds = { tuneCount: TUNES.length, hullMax: game.unlocked };
@@ -399,8 +550,15 @@ startLoop(
     }
     drawHud(hudCtx, game, { muted: isMuted(), audio: ready() });
     if (demoOn) drawDemoBadge(hudCtx, game);
+    // The buttons go on last, over everything, because they are the only
+    // thing on a phone that can get you out of whatever is on screen.
+    if (padsOn) {
+      drawPads(hudCtx, padState(),
+        game.player.jumpCd > 0 ? new Set(['jump']) : null);
+    }
     if (shopOpen) drawShop(hudCtx, game, shopSel, shopNote);
     else if (helpOpen) drawHelp(hudCtx, helpPage);
+    else if (controlsOpen) drawControls(hudCtx, controlsSel, awaitingKey, controlsNote);
     else if (settingsOpen) drawSettings(hudCtx, game, settingsSel, { wipeArmed, wipeNote });
     else if (game.quitting) drawQuitPrompt(hudCtx, game);
     else if (paused) drawPaused(hudCtx);
