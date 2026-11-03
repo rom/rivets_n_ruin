@@ -777,9 +777,7 @@ func (m *Memory) ListScores(query string, limit, offset int) ([]model.Score, int
 	total := 0
 	for i := len(m.scores) - 1; i >= 0; i-- {
 		s := m.scores[i]
-		if q != "" && !strings.Contains(strings.ToLower(s.Name), q) &&
-			!strings.Contains(strings.ToLower(s.PlayerID), q) &&
-			!strings.Contains(strings.ToLower(s.ID), q) {
+		if q != "" && !matchesScore(s, q) {
 			continue
 		}
 		total++
@@ -789,6 +787,21 @@ func (m *Memory) ListScores(query string, limit, offset int) ([]model.Score, int
 		out = append(out, *s)
 	}
 	return out, total
+}
+
+// Does this run answer an operator's search?
+//
+// A name matches anywhere inside it, because an operator types a
+// fragment of a name. An id matches only from the start, because an id
+// is pasted, not remembered — and matching ids anywhere means a
+// two-letter query lands on random hex. Ids here are 32 hex characters,
+// so "ad" is in a good fraction of them: searching for the pilot "ada"
+// returned her runs and a scattering of other people's whose id happened
+// to contain those letters. Found by a test that passed most of the time.
+func matchesScore(s *model.Score, q string) bool {
+	return strings.Contains(strings.ToLower(s.Name), q) ||
+		strings.HasPrefix(strings.ToLower(s.PlayerID), q) ||
+		strings.HasPrefix(strings.ToLower(s.ID), q)
 }
 
 func (m *Memory) ScoreByID(id string) (*model.Score, error) {

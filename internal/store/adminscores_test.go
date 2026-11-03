@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/rom/rivets_n_ruin/internal/model"
@@ -71,6 +72,11 @@ func TestListScoresFiltersByNameAndID(t *testing.T) {
 	if len(byRun) != 1 || byRun[0].ID != target.ID {
 		t.Fatalf("a run id did not find its own run")
 	}
+	// A truncated id, the way one arrives from a copy out of the page.
+	byPrefix, _ := m.ListScores(target.ID[:10], 50, 0)
+	if len(byPrefix) != 1 || byPrefix[0].ID != target.ID {
+		t.Fatalf("the first ten characters of a run id did not find it")
+	}
 
 	byPlayer, _ := m.ListScores(ada.ID, 50, 0)
 	if len(byPlayer) != 1 || byPlayer[0].PlayerID != ada.ID {
@@ -79,6 +85,40 @@ func TestListScoresFiltersByNameAndID(t *testing.T) {
 
 	if _, total := m.ListScores("nobody", 50, 0); total != 0 {
 		t.Fatalf("a query matching nothing returned %d", total)
+	}
+}
+
+// Ids are 32 hex characters, so a short query lands inside a good
+// fraction of them by chance. Matching ids anywhere meant searching for
+// the pilot "ada" returned her runs plus a scattering of other people's
+// whose id happened to contain "ad" — and the test that found it passed
+// most of the time, which is how it reached CI.
+//
+// Ids match from the start only. This drives the ids rather than hoping
+// for a collision, so it fails every time if that changes back.
+func TestAShortNameSearchDoesNotMatchRandomIDs(t *testing.T) {
+	m := NewMemory()
+	other := mustPlayer(t, m, "zz")
+	wanted := mustPlayer(t, m, "ada")
+	// Give the other pilot's run an id that CONTAINS the query and does
+	// not start with it, which is exactly the case that was wrong.
+	noise := &model.Score{PlayerID: other.ID, Points: 1, ID: "99ad99" + strings.Repeat("0", 26)}
+	if err := m.AddScore(noise); err != nil {
+		t.Fatal(err)
+	}
+	hit := &model.Score{PlayerID: wanted.ID, Points: 2}
+	if err := m.AddScore(hit); err != nil {
+		t.Fatal(err)
+	}
+
+	got, total := m.ListScores("ad", 50, 0)
+	if total != 1 || len(got) != 1 || got[0].Name != "ada" {
+		t.Fatalf("searching \"ad\" returned %d runs (total %d); a two-letter name "+
+			"must not match the middle of somebody else's id", len(got), total)
+	}
+	// ...and the id is still findable from its own start.
+	if _, n := m.ListScores("99ad", 50, 0); n != 1 {
+		t.Fatalf("an id prefix found %d runs, want 1", n)
 	}
 }
 

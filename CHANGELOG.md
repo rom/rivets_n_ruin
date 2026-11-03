@@ -159,6 +159,13 @@ worth learning from.
 - **A searchlight's lamp disagreed with its own beam**, drawn at the
   raw phase accumulator while the beam used the sine of it, so the lamp
   span while the light swung.
+- **Searching the operator tool's runs for a short name matched random
+  ids.** Ids are 32 hex characters, so a two-letter query lands inside
+  a good fraction of them: searching for the pilot `ada` returned her
+  runs plus a scattering of other people's whose id happened to contain
+  `ad`. Names match anywhere, ids from the start — an id is pasted, not
+  remembered. Found by a test that passed most of the time, which is
+  how it reached CI.
 - **Eighteen of the twenty-five hulls had somewhere the ship could not
   get through.** Reported from play, with a screenshot. The hull walk
   checked each vertical slice for a gap tall enough, which says nothing

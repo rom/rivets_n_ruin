@@ -2018,6 +2018,13 @@ should have to say so and put TLS and an allowlist in front. A token
 minted locally does not work from off-machine either, so a leaked one
 does not travel. `-admin-addr ''` turns the tool off entirely.
 
+**Searching runs matches a name anywhere and an id from the start.** An
+id is pasted, not remembered, so a prefix is what a truncated one needs;
+matching ids anywhere means a two-letter query lands in random hex, and
+ids here are 32 hex characters. Searching for the pilot `ada` returned
+her runs plus a scattering of other people's whose id happened to
+contain `ad`.
+
 **Login has its own rate limit**, far tighter than the API's: it is the
 one unauthenticated route on that listener, and on a loopback-only
 listener every attempt in the world shares one bucket. Generous enough
