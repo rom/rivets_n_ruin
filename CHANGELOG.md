@@ -50,6 +50,29 @@ worth learning from.
 
 ### Fixed
 
+- **The sound dropped out whenever the machine was busy.** Reported from
+  play. The sequencer filled a fixed 120ms window of the audio timeline,
+  woken by a 25ms `setInterval` — but `setInterval` only promises "no
+  sooner than", and a main thread blocked for longer than the window
+  leaves a hole exactly as long as the block. A tab the browser has
+  backgrounded is throttled to roughly one tick a second whatever the
+  interval asks for, which meant 120ms of music per second and 880ms of
+  nothing. Measured in a browser against the master tap, with the thread
+  blocked for 850ms of every second: **91.8% of the output was silence.
+  It is now 5.2%**, all of it in the single tick where the slowdown
+  begins, because the scheduler cannot know the machine is slow until it
+  has been slow once. The window now tracks the ticks that actually
+  arrive, so a healthy machine keeps the short one and an intensity or
+  tune change still lands promptly.
+- **A stall used to lose the place in the tune.** The old scheduler jumped
+  its clock to the present, throwing the stalled stretch away and the
+  musical position with it. It steps over the missed steps now, so the
+  form — which bar, which section — stays where the clock says it should
+  be.
+- **A hidden tab kept synthesising.** `requestAnimationFrame` stops when a
+  tab is hidden, so the game is frozen, but the sequencer's timer keeps
+  going throttled: a stutter played over a frozen game for nobody. The
+  music stops on `visibilitychange` and picks up where it left off.
 - **A ship deep inside a girder-anchored block could be pushed through
   the girder.** Collision resolved out the shortest side, which for a
   block hanging off the rim is the rim itself. It could not happen while

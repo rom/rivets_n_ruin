@@ -75,6 +75,8 @@ class StubNode {
   start() {}
   stop() {}
   getFloatTimeDomainData() {}
+  // The sequencer builds its lead voice from a custom waveform.
+  setPeriodicWave() {}
 }
 globalThis.AudioContext = class {
   constructor() { this.currentTime = 0; this.sampleRate = 44100; this.state = 'running'; this.destination = new StubNode(); }
@@ -85,6 +87,7 @@ globalThis.AudioContext = class {
   createDynamicsCompressor() { return new StubNode(); }
   createBufferSource() { return new StubNode(); }
   createAnalyser() { return new StubNode(); }
+  createPeriodicWave() { return {}; }
   createBuffer(ch, len) { return { getChannelData: () => new Float32Array(len) }; }
 };
 

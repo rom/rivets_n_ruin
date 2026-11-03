@@ -66,6 +66,11 @@ export const now = () => (S.ctx ? S.ctx.currentTime : 0);
 // sees exactly what the speakers get, which is also the only correct place
 // to assert that mute works.
 export const masterOut = () => S.master;
+// How many sfx voices are live, and the ceiling. Exported for the same
+// reason masterOut is: the only way to assert that the cap releases what
+// it takes is to be able to see the count.
+export const voiceCount = () => S.voices;
+export const voiceCap = () => MAX_VOICES;
 export const sfxBus = () => S.sfxBus;
 export const musicBus = () => S.musicBus;
 export const ready = () => S.ctx !== null;
