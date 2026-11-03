@@ -269,11 +269,41 @@ import { FIELD_VOICE } from '../src/sfx.js';
 // What a sound is made of: each oscillator and noise source, with the
 // filter in front of it. Enough to tell two sounds apart, loose enough
 // to survive the jitter every one of them puts on its frequencies.
+// Every cue jitters its frequencies on purpose, and some jitter hard: a
+// crackle picks anywhere from 1300 to 2900Hz, because fire that picks
+// the same frequency every time sounds like a machine.
+//
+// That makes "is this the same sound twice" unanswerable by measurement.
+// The first version of this file averaged nine takes and compared within
+// a major third, and failed about one run in fourteen — a flaky test is
+// worse than no test, because the next person to see it red assumes it
+// is flaky again. Averaging more takes narrows the spread without
+// bounding the tail, so there is no number of takes that fixes it.
+//
+// So the randomness is pinned instead. Each capture runs the cue with
+// the same deterministic sequence in place of Math.random, which makes
+// a cue byte-identical to itself and lets the comparison below be exact
+// rather than approximate. The jitter in the shipping game is untouched;
+// what is removed is the test's dependence on it.
+function seeded(seed) {
+  let x = seed >>> 0;
+  return () => {
+    x = (x * 1664525 + 1013904223) >>> 0;
+    return x / 4294967296;
+  };
+}
+
+function withPinnedRandom(fn) {
+  const real = Math.random;
+  Math.random = seeded(0x5eed1e);
+  try { return fn(); } finally { Math.random = real; }
+}
+
 function capture(fn) {
   unlock();
   const c = ctx();
   c.made.length = 0;
-  fn();
+  withPinnedRandom(fn);
   const made = c.made.slice();
   // Hand every voice back, or the cap fills and later calls in this
   // file silently make nothing. Nothing in the stub ever ends on its own.
@@ -292,39 +322,17 @@ function capture(fn) {
   return parts;
 }
 
-// What a cue sounds like on average.
-//
-// Every one of these jitters its frequencies on purpose, and some of
-// them jitter hard: a crackle picks anywhere from 1300 to 2900Hz,
-// because fire that picks the same frequency every time sounds like a
-// machine. So a single take is not the sound, it is one draw from it,
-// and comparing single takes would call a cue different from itself.
-// Averaging a handful of takes gives something stable to compare while
-// leaving the jitter alone.
-function profile(fire, takes = 9) {
-  let acc = null;
-  for (let i = 0; i < takes; i++) {
-    const parts = atFreshClock(() => capture(fire));
-    if (!acc) { acc = parts.map((p) => ({ ...p })); continue; }
-    assert.equal(parts.length, acc.length, 'a cue changed shape between takes');
-    parts.forEach((p, k) => {
-      assert.equal(p.kind + p.type, acc[k].kind + acc[k].type,
-        'a cue changed its wave or filter type between takes');
-      acc[k].hz += p.hz;
-    });
-  }
-  for (const p of acc) p.hz /= takes;
-  return acc;
-}
+// With the randomness pinned, one take is the sound.
+const profile = (fire) => atFreshClock(() => capture(fire));
 
 // Are these two the same sound? Same shape, same wave and filter types,
-// and every average frequency within a major third.
+// and the same frequencies — exactly, because both sides were drawn
+// from the same pinned sequence.
 function sameSound(a, b) {
   if (a.length !== b.length || !a.length) return false;
   return a.every((pa, i) => {
     const pb = b[i];
-    return pa.kind === pb.kind && pa.type === pb.type
-      && Math.max(pa.hz, pb.hz) / Math.max(1, Math.min(pa.hz, pb.hz)) < 1.26;
+    return pa.kind === pb.kind && pa.type === pb.type && pa.hz === pb.hz;
   });
 }
 
@@ -374,11 +382,11 @@ test('every new mechanic makes a sound', () => {
 });
 
 test('a sound is recognisably itself twice running', () => {
-  // The control for the test below. Every cue jitters its frequencies,
-  // so if sameSound were too strict nothing would ever match and "no
-  // two are alike" would pass without testing anything. Each cue has to
-  // match itself across repeats before a mismatch between two of them
-  // means anything.
+  // The control for the test below. If sameSound were too strict
+  // nothing would ever match and "no two are alike" would pass without
+  // testing anything. Each cue has to match itself across repeats
+  // before a mismatch between two of them means anything — and this is
+  // also what proves the pinned sequence really is pinned.
   for (const [what, fire] of Object.entries(CUES)) {
     const a = profile(fire);
     for (let i = 0; i < 4; i++) {
@@ -475,7 +483,7 @@ async function attackerShot(kind) {
     game.player.y = f.y;
     c.currentTime += DT;
     c.made.length = 0;
-    updateFoes(game, DT);
+    withPinnedRandom(() => updateFoes(game, DT));
     const made = c.made.slice();
     for (const n of made) if (n.onended) n.onended();
     const parts = [];
@@ -491,17 +499,10 @@ async function attackerShot(kind) {
   return [];
 }
 
-async function attackerProfile(kind, takes = 7) {
-  let acc = null;
-  for (let i = 0; i < takes; i++) {
-    const parts = await attackerShot(kind);
-    assert.ok(parts.length, `a ${kind} fired without making any sound`);
-    if (!acc) { acc = parts.map((p) => ({ ...p })); continue; }
-    assert.equal(parts.length, acc.length, `a ${kind} changed shape between shots`);
-    parts.forEach((p, k) => { acc[k].hz += p.hz; });
-  }
-  for (const p of acc) p.hz /= takes;
-  return acc;
+async function attackerProfile(kind) {
+  const parts = await attackerShot(kind);
+  assert.ok(parts.length, `a ${kind} fired without making any sound`);
+  return parts;
 }
 
 test('a net, a hook and a flame do not sound like each other or like a gun', async () => {

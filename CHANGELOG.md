@@ -84,6 +84,35 @@ worth learning from.
 - **HULL LAYOUTS** in settings. FIXED is the historical behaviour and the
   default, bit for bit; SHUFFLED folds a per-run seed into every hull so
   the campaign is new each run.
+- **Installations: bases, power plants, fuel stations and air-defence
+  posts**, beside the spaceports that were already there. Each is an
+  apron off one girder with its works standing on it, so the corridor
+  beside it stays open — somewhere to go into, not a wall across the
+  hull. Nine new structures: barracks, store sheds, bulk cisterns whose
+  blast reaches four times a fuel tank's, pumps, a reactor that quickens
+  every gun on its plant while it stands, pylons with the line strung
+  between them, watchtowers, and **searchlights that sweep the corridor
+  and light the ship up for every gun in reach**. Breaking the lights
+  first is the whole of the decision an air-defence post offers.
+- **Sounds for everything that had none.** The netter, the grapnel and
+  the scorcher all played the ordinary gun sound, so the three attackers
+  that cost something other than shield were audibly identical to the
+  thing you had been dodging since hull one. Thirteen new cues: a throw
+  and a landing for each of the three, a creak while a hook holds, a
+  crackle while you are alight, a distinct voice for each of the four
+  hazard fields, a cistern, a reactor, a pylon and a searchlight finding
+  you. The ones called from the 120Hz update are throttled, because any
+  one of them unthrottled fills the voice pool and silences the rest of
+  the game.
+- **An operator tool: a password-protected web page on its own port**,
+  default `127.0.0.1:8001`, with its own API beside it. Statistics, one
+  pilot in full, one run in full, reset a high score, remove a pilot,
+  change a pilot's password, edit their counters. The admin routes are
+  no longer registered on the game's listener at all, so a request for
+  one there is answered by the static file handler rather than by a
+  password check inside a handler. The page is compiled into the binary
+  rather than served from the static root, which is reachable from the
+  public port by definition.
 
 ### Changed
 
@@ -96,6 +125,40 @@ worth learning from.
 
 ### Fixed
 
+- **The searchlights threw a NaN into the renderer once a frame, and
+  every test passed.** `TOWERS.array` has carried `sweep: 1.1` — radians
+  a second for its dish — since the spaceports went in; the searchlight
+  arrived with `sweep: { arc, speed, range }`. Every guard that asks
+  only whether `sweep` is truthy let the array into the searchlight
+  path, `sw.speed` read `undefined`, every angle downstream became NaN,
+  and `createLinearGradient` threw once a frame. Found in a browser, in
+  one screenshot. Three things changed so node finds the next one: the
+  canvas stub rejects a non-finite number handed to any drawing call
+  (it was a Proxy returning a no-op for everything, which is exactly why
+  it caught nothing) and starts in the state a real context starts in;
+  the draw tests park the camera on every structure of every hull and
+  separately plant one of every tower kind on both girders; and a test
+  asserts no two tower kinds give one property name two different
+  shapes.
+- **"The world draws on every hull" was drawing hull 1 twenty-five
+  times.** `setStartHull` records which hull the hangar has selected and
+  nothing else; reaching it means playing the title and launch sequences
+  through. The draw tests build the level directly now.
+- **Every installation could stand two structures on the same ground.**
+  Each rolled an apron width and then placed each kind at its own
+  arithmetic inside it: a base put a cistern exactly on top of a depot
+  and hung its back three sheds off the end of its own deck, and a
+  spaceport stood a lander in a fuel tank. All five lay out along a
+  cursor in one shared function now, so the deck cannot come out
+  shorter than its contents and nothing shares ground.
+- **A searchlight on a hull with no radar dish painted nothing.** The
+  paint loop had an early-out from before beams existed — no dish, no
+  painting at all — and an air-defence post fields lights, a watchtower,
+  sheds and one gun and not a single dish. On the one installation built
+  around them, the searchlights did nothing.
+- **A searchlight's lamp disagreed with its own beam**, drawn at the
+  raw phase accumulator while the beam used the sine of it, so the lamp
+  span while the light swung.
 - **Eighteen of the twenty-five hulls had somewhere the ship could not
   get through.** Reported from play, with a screenshot. The hull walk
   checked each vertical slice for a gap tall enough, which says nothing

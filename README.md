@@ -78,6 +78,10 @@ backend down**; you lose the leaderboard, not the game.
 
 | | |
 | --- | --- |
+| ![Installations](docs/installations.png) | ![Hazard fields](docs/hazards.png) |
+| An air-defence post, with its searchlights holding the ship | All four hazard fields: flare, vortex, ice cloud, arc |
+| ![Hyperspace jump](docs/jump.png) | ![On-screen controls](docs/touch.png) |
+| The jump, mid-streak: out of a corner, or out of a volley | Flying it on glass, with the pad and the guns under two thumbs |
 | ![Title](docs/scene-title.png) | ![Help](docs/help-1.png) |
 | The title: a backdrop, a hull to pick, and four ways out | Help, on three pages — `H` from anywhere that is not flight |
 | ![Refit](docs/scene-refit.png) | ![Settings](docs/settings.png) |
@@ -316,6 +320,8 @@ speed never changes.
 
 ## Hazard fields
 
+![All four hazard fields](docs/hazards.png)
+
 Areas rather than objects. Nothing in one is solid and nothing in one can
 be shot: you fly around it, or you fly through and pay for every second
 you are inside. That makes them the only threat on a hull that is purely a
@@ -344,6 +350,11 @@ beside it. A field that spanned the hull would be a wall that cannot be
 broken, and a test holds every hull's fields to that.
 
 ## Installations
+
+| | |
+| --- | --- |
+| ![An air-defence post](docs/installations.png) | ![A base](docs/base.png) |
+| An air-defence post: three lights, and the gun that uses what they find. A beam is drawn only while it is holding something | A base: barracks, store sheds, a gun on the corner, and the cisterns at the back that take the rest of it with them |
 
 Things built on the hull rather than bolted to it. Each one is an apron
 off a girder with its works standing on it, so the corridor beside it
@@ -821,6 +832,8 @@ because a gun that dies to a sneeze makes breaking them a formality rather
 than the thing the end-of-hull bonus is paid on.
 
 ## The hyperspace jump
+
+![The jump, mid-streak](docs/jump.png)
 
 `V` or right shift, ten second cooldown. The only move in the game that
 is not flying.
@@ -1334,6 +1347,8 @@ are five settings or fifty.
 
 ### Controls, and playing it on glass
 
+![The on-screen controls](docs/touch.png)
+
 `CONTROLS` — reached with **C** from the settings screen — lists every
 rebindable action and the key it answers to. Choose a row, press ENTER,
 press the key you want. **R** puts every default back.
@@ -1504,6 +1519,19 @@ has its own.
 | **PHOSPHOR** | Green screen. Everything legible, nothing pretty |
 | **DEEP ICE** | Blue-white, and colder than the hull it is bolted to |
 | **OXIDE** | Warm metal and verdigris. The oldest ship in the fleet |
+
+The same frame five times, because the whole of what a scheme changes is
+the palette and five different scenes would hide that behind five
+different pictures:
+
+| | |
+| --- | --- |
+| ![GANTRY](docs/scheme-1-gantry.png) | ![AMBER CRT](docs/scheme-2-ambercrt.png) |
+| GANTRY | AMBER CRT |
+| ![PHOSPHOR](docs/scheme-3-phosphor.png) | ![DEEP ICE](docs/scheme-4-deepice.png) |
+| PHOSPHOR | DEEP ICE |
+| ![OXIDE](docs/scheme-5-oxide.png) | |
+| OXIDE | |
 
 `COL` is a live object and a scheme rewrites its fields in place. Three
 hundred-odd places read `COL.cool`; none of them has to know schemes
@@ -1692,14 +1720,38 @@ pixel checks.
 ## Audio
 
 Every sound is synthesised at runtime from oscillators and noise. There are no
-audio files to load, nothing to license, and the whole system is about 400 lines.
+audio files to load, nothing to license, and the whole system is about 1,300 lines
+across `sfx.js`, `audio.js` and `music.js`.
 It also happens to be the right register: both reference games came out of an era
 when the music *was* the synthesiser.
 
-**14 effects**, each built from a pitch sweep plus a filtered noise burst. Hull
+**33 effects**, each built from a pitch sweep plus a filtered noise burst. Hull
 contact is the one worth calling out — its brightness and pitch track impact
 speed, so a graze and a full-tilt slam are audibly different and you learn the
 damage model through your ears before you read the shield bar.
+
+Every mechanic that takes something from you has a cue of its own, which
+sounds obvious and was not: the netter, the grapnel and the scorcher all
+played the ordinary gun sound when they were written, so the three
+attackers that cost you something other than shield were audibly
+identical to the thing you had been dodging since hull one.
+
+| | |
+| --- | --- |
+| **A net** | Cloth and air, falling. Then the drive bogging down, which is the speed bar arriving early |
+| **A hook** | A launcher clank and a line paying out, rising. Then the bite, and a creak every third of a second for as long as it holds |
+| **A flame** | All breath and no pitch — anything tonal reads as a gun again. Then crackle, for as long as you are alight |
+| **The four fields** | Four voices, not one: fire roars, a vortex buffets, ice rings, arcs snap. The only decision a field offers is whether the way round is worth it, and that depends on which one it is |
+| **A cistern** | The ordinary blast with a sub under it and a long roll after. Its reach is four times a fuel tank's and the sound is the only warning anyone beside it gets |
+| **A reactor** | A long spin-down, and the floor going out from under every gun it was quickening |
+| **A pylon** | The twang first, the arc after |
+| **A searchlight** | Two notes, rising, on the edge — being lit is not damage, it is the guns around you getting better |
+| **The jump** | A charge that climbs and vanishes, then the hull arriving somewhere else. Two halves, so the ear hears a departure and a landing |
+
+Throttling matters more than the synthesis. Burning, being towed and
+standing in a field are all called from the 120Hz update loop, and any
+one of them unthrottled fills the voice pool on its own and silences
+everything else in the game.
 
 **An adaptive score** in D phrygian at 152 BPM — galloping bass, kick/snare/hats,
 an arpeggio lead and a detuned pad, sequenced on a 16th grid over a four-bar
@@ -2472,7 +2524,7 @@ src/render.js     world drawing
 src/hud.js        HUD and the title / game-over / complete screens
 src/pool.js       fixed-capacity object pools (no allocation during play)
 src/audio.js      Web Audio graph, buses, voice limiting, synthesis primitives
-src/sfx.js        the 19 sound effects
+src/sfx.js        the 33 sound effects
 src/music.js      adaptive sequencer and its instrument voices
 src/net.js        backend client; degrades to offline play
 src/mods.js       mod loading and config overrides
@@ -2497,6 +2549,7 @@ Makefile          make, for the list of targets
 tools/smoke.cjs   the browser smoke test: flies the game and reads pixels
 tools/coverage.sh the coverage gate, so CI and your machine agree
 tools/make_gallery.cjs  regenerates the README images from the live game
+tools/make_admin_shot.cjs  the same, for the operator tool's pages
 tools/make_icons.py     regenerates favicon.ico
 tools/release.sh        builds, attacks and publishes a release
 test/             the client tests; see below
@@ -2508,6 +2561,7 @@ internal/store/   Store interface, in-memory implementation, snapshots
 internal/api/     routing, handlers, auth, rate limiting
 internal/validate/ score plausibility, derived from the game's physics
 internal/hardening/ asks the OS to take privileges away at startup
+internal/adminui/  the operator page, compiled into the binary
 ```
 
 `make smoke` flies the game in a headless browser and reads pixels, asserting
