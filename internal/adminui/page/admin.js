@@ -360,11 +360,53 @@ async function loadOverview() {
     : el('div', { class: 'empty' }, 'nobody is flying'));
 
   const h = stats.hardening || {};
-  show($('server-info'), el('dl', { class: 'pairs' },
-    el('dt', {}, 'admin sessions'), el('dd', {}, n(stats.adminSessions)),
-    el('dt', {}, 'hardening'), el('dd', {}, h.mode ? String(h.mode) : 'not reported'),
-    el('dt', {}, 'applied'), el('dd', {}, (h.applied || []).join(', ') || '—'),
-    el('dt', {}, 'unavailable'), el('dd', {}, (h.skipped || []).join(', ') || '—')));
+  const srv = stats.server || {};
+  const vers = stats.clientVersions || [];
+  const stale = vers.filter((v) => v.stale);
+  show($('server-info'),
+    el('dl', { class: 'pairs' },
+      el('dt', {}, 'build'), el('dd', {}, srv.version || 'unknown'),
+      el('dt', {}, 'started'), el('dd', {}, when(srv.started)),
+      el('dt', {}, 'uptime'), el('dd', {}, forDuration(srv.uptimeSec)),
+      el('dt', {}, 'accepts writes from'),
+      el('dd', {}, srv.minClient ? `${srv.minClient} and newer` : 'any version'),
+      el('dt', {}, 'admin sessions'), el('dd', {}, n(stats.adminSessions)),
+      el('dt', {}, 'hardening'), el('dd', {}, h.mode ? String(h.mode) : 'not reported'),
+      el('dt', {}, 'applied'), el('dd', {}, (h.applied || []).join(', ') || '—'),
+      el('dt', {}, 'unavailable'), el('dd', {}, (h.skipped || []).join(', ') || '—')),
+
+    el('h2', {}, 'CLIENT VERSIONS'),
+    el('p', { class: 'hint' },
+      'Which builds of the game have talked to this server in the last day. '
+      + 'This is what turns "it is broken for some people" into "nine people '
+      + 'are still on 1.0.4".'),
+    stale.length
+      ? el('div', { class: 'note bad' },
+        `${stale.length} build(s) in use are older than this server accepts `
+        + `writes from. Those players can read the leaderboard but cannot post `
+        + `a score until they reload.`)
+      : null,
+    table(['VERSION', { label: 'REQUESTS', num: true }, 'LAST SEEN', ''],
+      vers.map((v) => el('tr', { class: v.stale ? null : 'dim' },
+        el('td', {}, v.version),
+        el('td', { class: 'num' }, n(v.count)),
+        el('td', {}, ago(v.last)),
+        el('td', { class: v.stale ? 'disagrees' : 'id' },
+          v.stale ? 'too old to post a score' : 'current')))));
+}
+
+// A span of seconds, said the way a person would. "1d 4h" beats
+// "100800s" for the one question this answers, which is whether the
+// server restarted recently.
+function forDuration(secs) {
+  const s = Math.max(0, Math.floor(secs || 0));
+  if (s < 60) return `${s}s`;
+  const parts = [
+    ['d', Math.floor(s / 86400)],
+    ['h', Math.floor(s / 3600) % 24],
+    ['m', Math.floor(s / 60) % 60],
+  ].filter(([, v]) => v > 0).slice(0, 2);
+  return parts.map(([u, v]) => `${v}${u}`).join(' ') || `${s}s`;
 }
 LOADERS.overview = loadOverview;
 

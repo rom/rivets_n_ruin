@@ -338,6 +338,12 @@ func (s *Server) adminStats(w http.ResponseWriter, r *http.Request) {
 		"store":         st,
 		"adminSessions": sessions,
 		"hardening":     s.hardening,
+		// What is running, since when, and who is talking to it. Three
+		// questions that were unanswerable from outside the process:
+		// has it restarted, what build is this, and is anybody still
+		// on an old client.
+		"server":         s.buildInfo(),
+		"clientVersions": s.clientVersionsSeen(),
 	})
 }
 

@@ -369,6 +369,14 @@ function drawBoard(ctx, x, y, rows = 10) {
     text(ctx, net.lastError || '', x, y + 29, COL.hudLine, FONT);
     return;
   }
+  // The one network problem the player can fix. Said before the run
+  // rather than after it, because finding out that a score cannot be
+  // posted at the end of a campaign is the worst possible time.
+  if (net.outdated) {
+    text(ctx, 'THIS BUILD IS TOO OLD TO POST A SCORE', x, y + 16, COL.warmHi, FONT);
+    text(ctx, 'RELOAD THE PAGE', x, y + 29, COL.warm, FONT);
+    return;
+  }
   const me = net.player ? net.player.id : null;
   const list = runs ? net.runs : net.top;
   if (!list.length) {

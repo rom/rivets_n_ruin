@@ -1956,7 +1956,7 @@ reports each pilot's progress along the hull.
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/api/health` | — | liveness |
-| `GET` | `/api/stats` | — | players, runs, mods, who is flying, client-error counts |
+| `GET` | `/api/stats` | — | players, runs, mods, who is flying, client-error counts, and the server's build, boot time, uptime and version floor |
 | `POST` | `/api/players` | — | register anonymously; returns a bearer token **once** |
 | `POST` | `/api/auth/register` | optional | register with a password, or adopt one for a pilot you already hold |
 | `POST` | `/api/auth/login` | — | log in with name and password; rotates the token |
