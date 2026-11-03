@@ -16,7 +16,7 @@ import {
 import { rows as shopRows, buy as shopBuy, applyMods, resetShop } from './shop.js';
 import { saveHangar, clearHangar, setHangarSync, mergeHangars, applyHangar } from './hangar.js';
 import { unlock, toggleMute, isMuted, ready } from './audio.js';
-import { startMusic, stopMusic, musicRunning } from './music.js';
+import { startMusic, stopMusic, pauseMusic, resumeMusic, musicRunning } from './music.js';
 import { sfxUi } from './sfx.js';
 import { initNet, rename, refreshTop, refreshRuns, refreshPresence, netState, toggleBoard,
   fetchHangar, pushHangar, setIdentityHook, forgetPlayer } from './net.js';
@@ -208,8 +208,16 @@ for (const ev of ['pagehide', 'beforeunload']) {
   window.addEventListener(ev, () => saveHangar(game));
 }
 // Backgrounding a tab is the same risk: a phone may never come back to it.
+//
+// It is also when the music breaks. requestAnimationFrame stops, so the
+// game is frozen, but setInterval keeps going — throttled to roughly one
+// tick a second — and a sequencer woken once a second cannot fill a
+// window measured in milliseconds. What comes out is a stutter, played
+// over a frozen game, for nobody. Stop the clock, and pick the tune up
+// where it left off once the tab is looked at again.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') saveHangar(game);
+  if (document.visibilityState === 'hidden') { saveHangar(game); pauseMusic(); }
+  else resumeMusic();
 });
 
 // Error reporting, installed before anything else can throw. The context
