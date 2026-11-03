@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rom/rivets_n_ruin/internal/model"
 	"github.com/rom/rivets_n_ruin/internal/store"
@@ -87,6 +88,14 @@ func TestAdminRoutesAreNilWithoutAPassword(t *testing.T) {
 // operator mistyping a password, useless for working through a list.
 func TestAdminLoginIsRateLimited(t *testing.T) {
 	srv, _ := adminSrv(t, true)
+	// The clock is frozen, so the bucket cannot refill while the test
+	// runs. Every login attempt verifies a pbkdf2 hash; on real time
+	// that is a handful of milliseconds here and an unknown number on a
+	// loaded CI runner under coverage instrumentation, and a 0.2/s
+	// bucket refills a token every five seconds. A test that fails when
+	// the machine is busy is a test nobody can act on.
+	at := time.Now()
+	srv.adminRL.setClock(func() time.Time { return at })
 	h := srv.AdminRoutes(nil) // the real limiter, not the test one
 
 	refused := 0
@@ -97,14 +106,38 @@ func TestAdminLoginIsRateLimited(t *testing.T) {
 			refused++
 		}
 	}
-	if refused == 0 {
-		t.Fatalf("%d wrong passwords in a row and none was rate limited", AdminLoginBurst+6)
+	if refused != 6 {
+		t.Fatalf("%d of %d attempts refused; a burst of %.0f should let exactly "+
+			"that many through and stop the rest",
+			refused, AdminLoginBurst+6, float64(AdminLoginBurst))
 	}
-	// The limiter is per-IP, so it must not have locked out the whole
-	// world: a different console still gets its own allowance.
-	w, _ := adminDo(t, h, "POST", "/api/admin/login", "",
+
+	// It is a limit, not a lockout: the bucket refills, and the right
+	// password then works.
+	at = at.Add(time.Duration(float64(time.Second) / AdminLoginPerSec))
+	w, out := adminDo(t, h, "POST", "/api/admin/login", "",
 		map[string]any{"password": adminPw}, true)
-	_ = w // the local bucket is spent; what matters is that it answered at all
+	if w.Code != http.StatusOK || out["token"] == nil {
+		t.Fatalf("after waiting out the limit, a correct password answered %d", w.Code)
+	}
+
+	// ...and it is per-IP, so one console hammering it does not lock
+	// out another.
+	srv2, _ := adminSrv(t, true)
+	srv2.adminRL.setClock(func() time.Time { return at })
+	h2 := srv2.AdminRoutes(nil)
+	for i := 0; i < AdminLoginBurst+2; i++ {
+		adminDo(t, h2, "POST", "/api/admin/login", "", map[string]any{"password": "wrong"}, true)
+	}
+	req := httptest.NewRequest("POST", "/api/admin/login",
+		strings.NewReader(`{"password":"`+adminPw+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "127.0.0.2:40000" // a different console on the same box
+	rec := httptest.NewRecorder()
+	h2.ServeHTTP(rec, req)
+	if rec.Code == http.StatusTooManyRequests {
+		t.Fatal("one address exhausting its bucket locked out a different one")
+	}
 }
 
 // --- the recorded runs

@@ -36,8 +36,17 @@ say() { printf '%s\n' "$*" | tee -a "$report"; }
 # it would mean either a permanently depressed number or tests that assert
 # nothing in order to raise one.
 say "— go —"
-if ! $GO test ./... -coverprofile="$BUILD_DIR/go.cover.all" -covermode=atomic >/dev/null 2>&1; then
+# The output is kept, not discarded.
+#
+# This said "go tests failed" and sent the rest to /dev/null, which in CI
+# is a red gate naming no test: the one thing needed to act on it was the
+# thing thrown away. It cost two round trips through CI to find that out,
+# which is two more than a gate should ever cost.
+if ! $GO test ./... -coverprofile="$BUILD_DIR/go.cover.all" -covermode=atomic \
+     >"$BUILD_DIR/go.test.log" 2>&1; then
   say "go tests failed; coverage is not meaningful"
+  grep -E '^(--- FAIL|FAIL|panic:|\s+[a-z_]+\.go:[0-9]+:)' "$BUILD_DIR/go.test.log" \
+    | head -40 >&2 || cat "$BUILD_DIR/go.test.log" >&2
   exit 1
 fi
 grep -v '^github.com/rom/rivets_n_ruin/cmd/server' "$BUILD_DIR/go.cover.all" >"$BUILD_DIR/go.cover"
