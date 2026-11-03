@@ -992,7 +992,27 @@ coins for.
 
 ## The armourer
 
-![The shop](docs/shop.png)
+![The hangar](docs/shop.png)
+
+The counter stands in a bay. It used to float on a flat black rectangle,
+which read as a settings page that happened to sell things — so the
+**HANGAR** is drawn around it: a trussed roof with lamps over the counter,
+ribbed wall panels down both sides, and a plated deck with hazard
+chevrons, with your own ship chocked on it under the lights. The palette
+is the steel hull's, because the place a ship is serviced in belongs to
+the same fleet as the ship.
+
+The airframe on the deck is the live one, so a mod bought on a row above
+shows up on the hull below it — the plating, the extra mounts, the drone
+wing, the burner bells.
+
+The frame costs real estate, and the list is not a fixed length: mods
+arrive hull by hull, so the armourer sells fourteen rows on the first hull
+and twenty-two by the seventeenth. `SHOP_LAYOUT` holds the margins the
+frame reserves and the row pitch tightens past ten rows a column; a test
+measures every hull's list against those numbers, because the first
+version of the bay fit the list it was built against and ran the blurb and
+the buy note down through the floor on the taller hulls.
 
 Between hulls, coins buy upgrades and mods. Upgrades are quantities bought
 repeatedly until a cap — another gun level, more shield, more ammo — and get

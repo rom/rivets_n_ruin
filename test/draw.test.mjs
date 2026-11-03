@@ -281,3 +281,86 @@ test('drawing a boss fight does not throw', () => {
     }
   }
 });
+
+// ------------------------------------------------------------- the hangar
+//
+// The armourer stands in a drawn bay now: a trussed roof, walls down both
+// sides, and a deck with the ship chocked on it. The frame takes real
+// estate, and the rows are not a fixed number — mods arrive hull by hull,
+// so the list is 14 rows on the first hull and 22 by the seventeenth.
+//
+// The first version of the frame fit the list it was developed against
+// and ran the blurb and the buy note down through the floor on the taller
+// hulls. The layout is data so this can be measured instead of looked at.
+
+test('nothing the armourer draws lands on the hangar frame', async () => {
+  const { SHOP_LAYOUT, shopPitch } = await import('../src/hud.js');
+  const { rows } = await import('../src/shop.js');
+  const { LEVELS, FIELD_H, RADAR_H } = await import('../src/config.js');
+  const { makeGame } = await import('../src/game.js');
+  const L = SHOP_LAYOUT;
+  const SCREEN = FIELD_H + RADAR_H;
+  const LINE = 12;                 // a 10px line, with its descender
+  const deckY = SCREEN - L.deck;
+
+  const game = makeGame();
+  game.coins = 1e6;
+  game.bars = 1e4;
+  let worst = { n: 0 };
+  for (let i = 0; i < LEVELS.length; i++) {
+    game.levelIndex = i;
+    const list = rows(game);
+    const perCol = Math.ceil(list.length / 2);
+    const pitch = shopPitch(perCol);
+    const lastBottom = L.top + (perCol - 1) * pitch + LINE;
+    if (list.length > worst.n) worst = { n: list.length, hull: i + 1, perCol, lastBottom };
+
+    assert.ok(L.top > L.roof,
+      `${LEVELS[i].name}: the rows start at ${L.top}, inside the ${L.roof}px roof`);
+    assert.ok(lastBottom <= L.blurbY,
+      `${LEVELS[i].name}: ${list.length} rows reach ${lastBottom}, under the blurb at ${L.blurbY}`);
+    assert.ok(L.blurbY + LINE <= L.noteY, 'the blurb overlaps the buy note');
+    assert.ok(L.noteY + LINE <= L.footerY, 'the buy note overlaps the footer');
+    assert.ok(L.footerY + LINE <= deckY,
+      `the footer reaches ${L.footerY + LINE}, into the deck at ${deckY}`);
+  }
+  assert.ok(worst.n >= 20, `the tallest list found was only ${worst.n} rows`);
+});
+
+test('no armourer row runs into a hangar wall', async () => {
+  const { SHOP_LAYOUT } = await import('../src/hud.js');
+  const { VIEW_W } = await import('../src/config.js');
+  const L = SHOP_LAYOUT;
+  // The highlight behind a selected row is the widest thing drawn: it
+  // starts 8px left of the text origin and runs colW wide.
+  for (const [i, x] of L.colX.entries()) {
+    assert.ok(x - 8 >= L.wall,
+      `column ${i + 1} starts at ${x - 8}, inside the ${L.wall}px left wall`);
+    assert.ok(x - 8 + L.colW <= VIEW_W - L.wall,
+      `column ${i + 1} ends at ${x - 8 + L.colW}, inside the right wall`);
+  }
+  // ...and the price, which is right-aligned at the far end of the row.
+  for (const x of L.colX) {
+    assert.ok(x + L.priceDX <= VIEW_W - L.wall,
+      `a price at ${x + L.priceDX} lands on the right wall`);
+  }
+  // The two columns must not overlap each other either.
+  assert.ok(L.colX[0] - 8 + L.colW <= L.colX[1] - 8,
+    'the two columns overlap');
+});
+
+test('the parked ship stands on the deck, not through it', async () => {
+  const { SHOP_LAYOUT } = await import('../src/hud.js');
+  const { FIELD_H, RADAR_H } = await import('../src/config.js');
+  const L = SHOP_LAYOUT;
+  const SCREEN = FIELD_H + RADAR_H;
+  const deckY = SCREEN - L.deck;
+  const y = deckY + L.shipDY;
+  // The airframe is about 15 logical units from its centre to a wingtip
+  // before scaling; the hazard lip across the top of the deck is 6 deep.
+  const half = 15 * L.shipScale;
+  assert.ok(y - half > deckY + 6,
+    `the ship reaches ${(y - half).toFixed(1)}, through the deck's hazard lip`);
+  assert.ok(y + half < SCREEN,
+    `the ship reaches ${(y + half).toFixed(1)}, past the bottom of the screen at ${SCREEN}`);
+});

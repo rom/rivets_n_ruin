@@ -6,8 +6,9 @@ import { netState } from './net.js';
 import { PICKUP, ARMORY, APRON, LASER } from './config.js';
 import { tint, pickups, isTreasure } from './pickups.js';
 import { minis } from './miniboss.js';
-import { markName } from './shipart.js';
+import { markName, drawShipBody } from './shipart.js';
 import { radarProfile } from './level.js';
+import { hash2 } from './rng.js';
 import { tuneName, TUNES } from './music.js';
 import { get as setting, DEFS, display } from './settings.js';
 import { BINDABLE, keyFor } from './input.js';
@@ -1074,28 +1075,300 @@ function drawEnding(ctx, game) {
   }
 }
 
+// ------------------------------------------------------------- the hangar
+//
+// The armourer is a counter, and a counter stands somewhere. It used to
+// stand on a flat black rectangle with the rows floated on it, which read
+// as a settings page that happened to sell things.
+//
+// So the bay is drawn around it: a trussed roof with lamps over the
+// counter, ribbed wall panels down both sides, and a plated deck with
+// hazard chevrons where the floor meets the bay. The palette is THEMES
+// .steel, the same plating the first hull is built from, because the
+// place the ship is serviced in belongs to the same fleet as the ships.
+//
+// The frame is drawn behind the rows, never over them: everything here
+// stays inside the margins SHOP_LAYOUT reserves, and a test measures the
+// rows against the same numbers. A wall that creeps over a price is worse
+// than no wall.
+export const SHOP_LAYOUT = {
+  roof: 26,            // ceiling band, from the top
+  wall: 26,            // wall thickness, each side
+  deck: 58,            // deck band, up from the bottom
+  titleY: 28,
+  counterY: 50,
+  purseY: 64,
+  top: 82,             // first row
+  // The row count is not fixed: mods arrive hull by hull, so the armourer
+  // sells 14 rows on the first hull and 22 by the seventeenth. At a
+  // constant pitch the tall case ran the blurb and the buy note down
+  // into the deck. The roomy pitch is kept while it fits and tightened
+  // when it does not — still wider than the help page's twelve.
+  pitch: 17,
+  tightPitch: 15,
+  tightFrom: 10,       // rows per column past which the pitch tightens
+  colX: [38, 330],     // left and right column, text origin
+  colW: 286,           // the highlight behind a selected row
+  detailDX: 150,
+  priceDX: 266,
+  // Fixed, not measured down from the last row. Anchoring them to the
+  // rows meant the taller hulls pushed them through the floor.
+  blurbY: 248,
+  noteY: 262,
+  footerY: 276,
+  // The parked ship: where it stands on the deck, and how big.
+  shipDY: 32,
+  shipScale: 1.35,
+};
+
+// The pitch a list of this many rows is drawn at.
+export const shopPitch = (perCol) =>
+  (perCol > SHOP_LAYOUT.tightFrom ? SHOP_LAYOUT.tightPitch : SHOP_LAYOUT.pitch);
+
+// A lamp hanging from the roof, with the pool of light it throws down the
+// bay. Additive, so two lamps overlapping brighten rather than flatten.
+function bayLamp(ctx, x, t) {
+  ctx.fillStyle = t.rimDark;
+  ctx.fillRect(x - 1, SHOP_LAYOUT.roof - 12, 2, 5);
+  ctx.fillStyle = t.mid;
+  ctx.fillRect(x - 7, SHOP_LAYOUT.roof - 7, 14, 4);
+  ctx.fillStyle = t.edgeHi;
+  ctx.fillRect(x - 7, SHOP_LAYOUT.roof - 7, 14, 1);
+  // the lit element
+  ctx.fillStyle = '#fff0c4';
+  ctx.fillRect(x - 5, SHOP_LAYOUT.roof - 3, 10, 2);
+
+  // The light it throws, kept short.
+  //
+  // Two earlier versions put a large faint gradient across the whole bay:
+  // a polygon shaft, then a radial pool. Both look right in the browser
+  // and both fall apart in the README, because the gallery quantises to a
+  // 160-colour MAXCOVERAGE palette — a method chosen to protect the
+  // treasure and HUD accents from being merged into grey, and one that
+  // has nothing left over for a subtle gradient across a near-black
+  // field. The shaft banded into flat triangles lying over the prices;
+  // the pool banded into contour rings.
+  //
+  // So the glow stays close to the lamp, where it is bright enough to
+  // survive a palette and too small to band, and the light that reaches
+  // the bay lands on the deck instead — see drawHangarFrame, which paints
+  // it there as a shape rather than a wash.
+  const was = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = 'lighter';
+  const drop = 26;
+  const g = ctx.createLinearGradient(0, SHOP_LAYOUT.roof - 4, 0, SHOP_LAYOUT.roof + drop);
+  g.addColorStop(0, 'rgba(255,214,130,0.5)');
+  g.addColorStop(1, 'rgba(255,214,130,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(x - 6, SHOP_LAYOUT.roof - 4);
+  ctx.lineTo(x + 6, SHOP_LAYOUT.roof - 4);
+  ctx.lineTo(x + 13, SHOP_LAYOUT.roof + drop);
+  ctx.lineTo(x - 13, SHOP_LAYOUT.roof + drop);
+  ctx.closePath();
+  ctx.fill();
+  ctx.globalCompositeOperation = was;
+}
+
+// Where a lamp's light lands. Flat, so the palette cannot band it.
+function deckPool(ctx, x, deckY) {
+  const was = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = 'lighter';
+  for (const [w, h, a] of [[60, 13, 0.030], [38, 8, 0.030], [20, 4, 0.034]]) {
+    ctx.fillStyle = `rgba(255,214,130,${a})`;
+    ctx.beginPath();
+    ctx.ellipse(x, deckY + 30, w, h, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalCompositeOperation = was;
+}
+
+export function drawHangarFrame(ctx) {
+  const L = SHOP_LAYOUT;
+  const t = THEMES.steel;
+  const deckY = SCREEN_H - L.deck;
+
+  // --- roof: a slab, then the trusses under it
+  ctx.fillStyle = t.base;
+  ctx.fillRect(0, 0, VIEW_W, L.roof);
+  ctx.fillStyle = t.seam;
+  ctx.fillRect(0, 0, VIEW_W, 6);
+  // cross-bracing between the posts, which is what says "roof" rather
+  // than "a dark strip along the top"
+  ctx.strokeStyle = t.mid;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 0; x < VIEW_W; x += 32) {
+    ctx.moveTo(x + 0.5, 6.5);
+    ctx.lineTo(x + 16.5, L.roof - 8.5);
+    ctx.moveTo(x + 32.5, 6.5);
+    ctx.lineTo(x + 16.5, L.roof - 8.5);
+    ctx.moveTo(x + 0.5, 6.5);
+    ctx.lineTo(x + 32.5, 6.5);
+  }
+  ctx.stroke();
+  // vertical posts
+  ctx.fillStyle = t.mid;
+  for (let x = 0; x < VIEW_W; x += 32) ctx.fillRect(x, 4, 2, L.roof - 12);
+  // the beam the trusses carry, with rivets along it
+  ctx.fillStyle = t.block;
+  ctx.fillRect(0, L.roof - 8, VIEW_W, 8);
+  ctx.fillStyle = t.edgeHi;
+  ctx.globalAlpha = 0.5;
+  ctx.fillRect(0, L.roof - 8, VIEW_W, 1);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = t.rivet;
+  for (let x = 8; x < VIEW_W; x += 16) ctx.fillRect(x, L.roof - 5, 2, 2);
+
+  // --- walls: ribbed panels down both sides
+  for (const side of [0, 1]) {
+    const x0 = side ? VIEW_W - L.wall : 0;
+    ctx.fillStyle = t.base;
+    ctx.fillRect(x0, L.roof, L.wall, deckY - L.roof);
+    // ribs, lit on the edge that faces into the bay
+    for (let y = L.roof; y < deckY; y += 22) {
+      ctx.fillStyle = t.mid;
+      ctx.fillRect(x0 + 3, y + 2, L.wall - 6, 18);
+      ctx.fillStyle = t.seam;
+      ctx.fillRect(x0 + 3, y + 19, L.wall - 6, 1);
+      ctx.fillStyle = t.edgeHi;
+      ctx.globalAlpha = 0.33;
+      ctx.fillRect(side ? x0 + 3 : x0 + L.wall - 4, y + 2, 1, 18);
+      ctx.globalAlpha = 1;
+    }
+    // the inner edge of the wall, catching the bay light
+    ctx.fillStyle = t.block;
+    ctx.fillRect(side ? x0 : x0 + L.wall - 3, L.roof, 3, deckY - L.roof);
+    ctx.fillStyle = t.edgeHi;
+    ctx.globalAlpha = 0.45;
+    ctx.fillRect(side ? x0 : x0 + L.wall - 1, L.roof, 1, deckY - L.roof);
+    ctx.globalAlpha = 1;
+    // a catwalk rail across the panels, a third of the way down
+    const railY = L.roof + Math.round((deckY - L.roof) * 0.34);
+    ctx.fillStyle = t.rivet;
+    ctx.globalAlpha = 0.6;
+    ctx.fillRect(x0 + 2, railY, L.wall - 4, 2);
+    ctx.globalAlpha = 1;
+    // service lamps: a column of small lit panels, so the wall is powered
+    for (let y = L.roof + 40; y < deckY - 20; y += 66) {
+      ctx.fillStyle = '#2a3a4e';
+      ctx.fillRect(side ? x0 + 8 : x0 + L.wall - 14, y, 6, 10);
+      ctx.fillStyle = COL.cool;
+      ctx.globalAlpha = 0.75;
+      ctx.fillRect(side ? x0 + 9 : x0 + L.wall - 13, y + 1, 4, 8);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // --- lamps over the counter, and the light they put on the deck
+  for (let i = 0; i < 4; i++) bayLamp(ctx, 80 + i * 160, t);
+
+  // --- deck
+  ctx.fillStyle = t.base;
+  ctx.fillRect(0, deckY, VIEW_W, L.deck);
+  // plating, in courses, each a shade off its neighbour
+  for (let x = 0; x < VIEW_W; x += 48) {
+    const n = hash2(x, 7);
+    ctx.fillStyle = t.tones[(n * t.tones.length) | 0];
+    ctx.fillRect(x, deckY + 6, 47, L.deck - 6);
+    ctx.fillStyle = t.seam;
+    ctx.fillRect(x + 47, deckY + 6, 1, L.deck - 6);
+  }
+  // the lip where the deck meets the bay, hazard-striped
+  ctx.fillStyle = t.block;
+  ctx.fillRect(0, deckY, VIEW_W, 6);
+  ctx.fillStyle = t.edgeHi;
+  ctx.globalAlpha = 0.5;
+  ctx.fillRect(0, deckY, VIEW_W, 1);
+  ctx.globalAlpha = 1;
+  for (let x = 0; x < VIEW_W; x += 16) {
+    ctx.fillStyle = (x / 16) % 2 ? '#15181e' : t.chevron;
+    ctx.fillRect(x, deckY + 1, 8, 4);
+  }
+  // tie-down rings along the deck, where a ship would be chocked
+  ctx.fillStyle = t.rivet;
+  ctx.globalAlpha = 0.5;
+  for (let x = 28; x < VIEW_W - 20; x += 72) {
+    ctx.fillRect(x, deckY + 18, 8, 3);
+    ctx.fillRect(x + 2, deckY + 15, 4, 3);
+  }
+  ctx.globalAlpha = 1;
+
+  // ...and the light from the lamps, landing on it
+  for (let i = 0; i < 4; i++) deckPool(ctx, 80 + i * 160, deckY);
+}
+
+// The ship itself, chocked on the deck with its nose to the counter.
+//
+// An empty hangar is a corridor with a roof. This is also the only place
+// in the game where the hull can be looked at rather than flown, and it
+// is drawn from the live player, so a mod bought on the row above shows
+// up on the airframe below it — the plating, the extra mounts, the drone
+// wing, the burner bells.
+function drawParkedShip(ctx, game) {
+  const L = SHOP_LAYOUT;
+  const p = game.player;
+  if (!p) return;
+  const deckY = SCREEN_H - L.deck;
+  const y = deckY + L.shipDY;
+  const x = VIEW_W / 2;
+
+  // Hard light from overhead, so it sits on the deck rather than floating.
+  ctx.fillStyle = '#000000';
+  ctx.globalAlpha = 0.45;
+  ctx.beginPath();
+  ctx.ellipse(x, y + 11, 38, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(L.shipScale, L.shipScale);
+  // Parked: no thrust, whatever it was doing when the hull was cleared.
+  drawShipBody(ctx, { ...p, vx: 0, vy: 0 }, game);
+  ctx.restore();
+
+  // chocks, fore and aft
+  const t = THEMES.steel;
+  ctx.fillStyle = t.block;
+  for (const dx of [-27, 23]) {
+    ctx.fillRect(x + dx, y + 8, 5, 4);
+    ctx.fillStyle = t.blockLo;
+    ctx.fillRect(x + dx, y + 11, 5, 1);
+    ctx.fillStyle = t.block;
+  }
+}
+
 export function drawShop(ctx, game, sel, note) {
+  const L = SHOP_LAYOUT;
   ctx.fillStyle = '#04060a';
   ctx.fillRect(0, 0, VIEW_W, SCREEN_H);
+  drawHangarFrame(ctx);
+  drawParkedShip(ctx, game);
   const cx = VIEW_W / 2;
 
-  text(ctx, 'ARMOURER', cx, 12, COL.hudBright, FONT_BIG, 'center');
+  // The place, then the counter standing in it. The armourer keeps its
+  // name — it is what the README and the end-of-hull screen call this —
+  // but what you are looking at is the bay.
+  text(ctx, 'HANGAR', cx, L.titleY, COL.hudBright, FONT_BIG, 'center');
+  text(ctx, 'ARMOURER  ·  FIT, REARM AND REFUEL', cx, L.counterY, COL.cool, FONT, 'center');
   text(ctx, 'COINS ' + (game.coins || 0) + '    GOLD BARS ' + (game.bars || 0),
-    cx, 40, '#ffd24a', FONT, 'center');
+    cx, L.purseY, '#ffd24a', FONT, 'center');
 
   const list = shopRows(game);
-  const top = 60;
+  const top = L.top;
   const perCol = Math.ceil(list.length / 2);
+  const pitch = shopPitch(perCol);
   list.forEach((r, i) => {
     const col = i < perCol ? 0 : 1;
-    const y = top + (i % perCol) * 17;
-    const x = 24 + col * 300;
+    const y = top + (i % perCol) * pitch;
+    const x = L.colX[col];
     const on = i === sel;
     if (on) {
       ctx.fillStyle = '#131c26';
-      ctx.fillRect(x - 6, y - 3, 286, 15);
+      ctx.fillRect(x - 8, y - 3, L.colW, 15);
       ctx.fillStyle = r.affordable ? COL.cool : COL.danger;
-      ctx.fillRect(x - 6, y - 3, 2, 15);
+      ctx.fillRect(x - 8, y - 3, 2, 15);
     }
     const colour = !r.available ? '#2b3440'
       : r.affordable ? (on ? COL.hudBright : COL.hudText)
@@ -1104,27 +1377,26 @@ export function drawShop(ctx, game, sel, note) {
     // Mods print their own detail too: a tiered one says how many of its
     // tiers are already fitted, which is the thing you need to decide with.
     if (r.kind === 'mod') {
-      text(ctx, r.detail, x + 150, y, r.affordable ? '#b45ce0' : '#432f4a', FONT);
+      text(ctx, r.detail, x + L.detailDX, y, r.affordable ? '#b45ce0' : '#432f4a', FONT);
     } else {
-      text(ctx, r.detail, x + 150, y, colour, FONT);
+      text(ctx, r.detail, x + L.detailDX, y, colour, FONT);
     }
     // The unit, not just the number: 15 next to 2600 reads as a bargain
     // rather than as a different currency, which is exactly backwards.
     const price = !r.available ? 'MAX'
       : r.currency === 'bars' ? r.cost + 'b' : String(r.cost);
-    text(ctx, price, x + 276, y,
+    text(ctx, price, x + L.priceDX, y,
       !r.available ? '#2b3440'
         : r.affordable ? (r.currency === 'bars' ? '#ffc93a' : '#ffd24a')
           : '#5a3a40', FONT, 'right');
   });
 
   const cur = list[sel];
-  if (cur) {
-    text(ctx, cur.blurb, cx, top + perCol * 17 + 10, COL.hudLine, FONT, 'center');
-  }
-  if (note) text(ctx, note, cx, top + perCol * 17 + 26, '#5fe08a', FONT, 'center');
+  if (cur) text(ctx, cur.blurb, cx, L.blurbY, COL.hudLine, FONT, 'center');
+  if (note) text(ctx, note, cx, L.noteY, '#5fe08a', FONT, 'center');
 
-  text(ctx, 'ARROWS CHOOSE    ENTER BUY    E / ESC LEAVE', cx, 298, COL.hudText, FONT, 'center');
+  text(ctx, 'ARROWS CHOOSE    ENTER BUY    E / ESC LEAVE',
+    cx, L.footerY, COL.hudText, FONT, 'center');
 }
 
 // The controls screen: every rebindable action and the key it answers to.
