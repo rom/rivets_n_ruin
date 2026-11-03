@@ -14,6 +14,14 @@ worth learning from.
 
 ### Added
 
+- **Four hazard fields: FLARE FIELD, VORTEX, ICE CLOUD and ARC FIELD.**
+  Areas rather than objects — nothing solid, nothing to shoot, and a
+  price per second for being inside. The only threat on a hull that is
+  purely a question about your line. Charged by the second, so clipping a
+  corner is cheap and cutting through is not, and the ship's box counts
+  rather than its centre. They are invisible to the clearance sweep,
+  being insubstantial, so the generator keeps a clear band beside every
+  one and a test holds it there.
 - **Three attackers that take control rather than shield.** A **NETTER**
   throws a net that costs the next few seconds of being able to get out
   of the way; a **GRAPNEL** hooks the ship and hauls, dragging it off its

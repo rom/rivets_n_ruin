@@ -1,6 +1,6 @@
 import {
   FIELD_TOP, FIELD_BOT, FIELD_H, RIM, APRON, THEMES, TOWERS, SHIP, clamp,
-  MODIFIERS, MODIFIER_CHANCE,
+  MODIFIERS, MODIFIER_CHANCE, HAZARDS,
 } from './config.js';
 import { mulberry32, rr, ri, hash2 } from './rng.js';
 import { buildGates } from './gates.js';
@@ -109,6 +109,7 @@ export function specWithModifier(spec, mod) {
 function layout(r, spec) {
   const obstacles = [];
   const turrets = [];
+  const hazards = [];
   let advance = 0;
 
   const roll = r();
@@ -300,6 +301,30 @@ function layout(r, spec) {
       sx += segW;
     }
     advance = sx;
+  } else if (roll < 0.945 && spec.hazards) {
+    // A hazard field: an area to go round rather than a thing to shoot.
+    //
+    // Placed against one girder and never more than part of the
+    // corridor, so there is always a clear band beside it the ship can
+    // take. It is not solid and the clearance sweep never sees it, which
+    // means the generator has to keep that band honestly — a field that
+    // filled the corridor would be a wall that cannot be broken.
+    const span = FIELD_BOT - FIELD_TOP;
+    const kinds = spec.hazardKinds && spec.hazardKinds.length
+      ? spec.hazardKinds : ['fire'];
+    const kind = kinds[Math.floor(r() * kinds.length)];
+    const fromTop = r() < 0.5;
+    const w = rr(r, 110, 230);
+    // At most this much of the corridor, so CLEAR_H is always left over
+    // on the other side with room to spare.
+    const h = rr(r, 0.26, Math.min(0.52, (span - CLEAR_H * 1.6) / span)) * span;
+    hazards.push({
+      x: 0, y: fromTop ? FIELD_TOP : FIELD_BOT - h, w, h, kind,
+      // Each field drifts on its own clock, so two of the same kind on
+      // one hull do not pulse in step.
+      phase: r() * 10,
+    });
+    advance = w;
   } else if (roll < 0.96 && spec.press) {
     // A press: jaws that close and open on a cycle, staggered along the
     // run so flying it is a wave rather than one piece of timing. The
@@ -351,7 +376,7 @@ function layout(r, spec) {
     }
     advance = sx;
   }
-  return { obstacles, turrets, advance };
+  return { obstacles, turrets, hazards, advance };
 }
 
 // Builds one hull from a level spec (see LEVELS in config.js). Everything
@@ -369,11 +394,13 @@ export function buildLevel(spec, runSeed = 0) {
   const obstacles = [];
   const turretSpots = [];
 
+  const hazards = [];
   let x = APRON;
   while (x < LEN - APRON - 340) {
-    const { obstacles: obs, turrets: tur, advance } = layout(r, spec);
+    const { obstacles: obs, turrets: tur, hazards: haz, advance } = layout(r, spec);
     for (const o of obs) obstacles.push({ ...o, x: o.x + x });
     for (const t of tur) turretSpots.push({ ...t, x: t.x + x });
+    for (const h of haz) hazards.push({ ...h, x: h.x + x });
     x += advance + rr(r, 155, 330) * spec.gapScale;
   }
 
@@ -440,7 +467,7 @@ export function buildLevel(spec, runSeed = 0) {
   }
 
   return {
-    obstacles, turrets, buckets, movers,
+    obstacles, turrets, buckets, movers, hazards,
     // Laser gates, placed from the same rng so a hull always has the same
     // walls in the same places.
     gates: buildGates(r, spec, LEN, obstacles),
@@ -462,6 +489,17 @@ export function obstaclesNear(level, x0, x1) {
     if (list) for (const o of list) out.add(o);
   }
   return out;
+}
+
+// The hazard the ship is standing in, or null. Rectangles, and few
+// enough per hull that walking them beats indexing them.
+export function hazardAt(level, x, y, hw, hh) {
+  const list = level.hazards;
+  if (!list) return null;
+  for (const h of list) {
+    if (x + hw > h.x && x - hw < h.x + h.w && y + hh > h.y && y - hh < h.y + h.h) return h;
+  }
+  return null;
 }
 
 // Can a box the size of the ship actually travel the length of this hull?
@@ -1279,6 +1317,117 @@ function drawRam(g, o, t) {
   }
   g.fillStyle = t.chevron;
   g.fillRect(o.x - 1, top ? fy + 6 : fy, o.w + 2, 1);
+}
+
+// A hazard field, drawn live every frame.
+//
+// Each of the four has to be told apart at a glance and from a distance,
+// because the decision a field asks for — go round, or take the short
+// way and pay — is made before you are anywhere near it. So they differ
+// in motion as much as in colour: fire climbs, a vortex turns, ice
+// drifts and settles, an arc field snaps between its posts.
+function drawField(ctx, h, t) {
+  const C = HAZARDS[h.kind];
+  const seed = h.phase;
+  const top = h.y <= FIELD_TOP + 1;
+
+  // the floor of it, so the area reads as an area
+  ctx.fillStyle = C.dark;
+  ctx.globalAlpha = 0.55;
+  ctx.fillRect(h.x, h.y, h.w, h.h);
+  ctx.globalAlpha = 1;
+
+  // the edge that faces the corridor: the line you are deciding about
+  const edgeY = top ? h.y + h.h : h.y;
+  ctx.fillStyle = C.tint;
+  ctx.globalAlpha = 0.5 + Math.abs(Math.sin(t * 2 + seed)) * 0.3;
+  ctx.fillRect(h.x, top ? edgeY - 1 : edgeY, h.w, 1);
+  ctx.globalAlpha = 1;
+
+  const was = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = 'lighter';
+
+  if (h.kind === 'fire') {
+    // tongues climbing off the floor, each on its own clock
+    for (let i = 0; i < h.w; i += 11) {
+      const ph = t * 4 + i * 0.7 + seed;
+      const len = (0.35 + Math.abs(Math.sin(ph)) * 0.55) * h.h;
+      const x = h.x + i + 2;
+      ctx.globalAlpha = 0.16 + Math.abs(Math.cos(ph)) * 0.14;
+      ctx.fillStyle = C.tint;
+      ctx.fillRect(x, top ? h.y : edgeY + h.h - len, 6, len);
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = C.glow;
+      ctx.fillRect(x + 2, top ? h.y : h.y + h.h - len * 0.4, 2, len * 0.4);
+    }
+  } else if (h.kind === 'storm') {
+    // vortices, turning
+    for (let i = 0; i < h.w; i += 34) {
+      const cx = h.x + i + 17;
+      const cy = h.y + h.h * 0.5 + Math.sin(t * 1.3 + i + seed) * h.h * 0.18;
+      const spin = t * 2.4 + i;
+      ctx.strokeStyle = C.tint;
+      ctx.lineWidth = 1;
+      for (let a = 0; a < 3; a++) {
+        ctx.globalAlpha = 0.3 - a * 0.07;
+        ctx.beginPath();
+        const rr0 = 5 + a * 6;
+        ctx.arc(cx, cy, rr0, spin + a, spin + a + 2.1);
+        ctx.stroke();
+      }
+    }
+  } else if (h.kind === 'ice') {
+    // cloud, with crystals turning over inside it
+    for (let i = 0; i < h.w; i += 15) {
+      const ph = t * 0.9 + i * 0.4 + seed;
+      const cx = h.x + i + 7 + Math.sin(ph) * 4;
+      const cy = h.y + h.h * (0.3 + 0.4 * (0.5 + 0.5 * Math.sin(ph * 0.7)));
+      ctx.globalAlpha = 0.12;
+      ctx.fillStyle = C.tint;
+      ctx.fillRect(cx - 7, cy - 6, 15, 13);
+      ctx.globalAlpha = 0.45;
+      ctx.fillStyle = C.glow;
+      const k = 2 + Math.abs(Math.sin(ph * 1.7)) * 2;
+      ctx.fillRect(cx - k / 2, cy - 0.5, k, 1);
+      ctx.fillRect(cx - 0.5, cy - k / 2, 1, k);
+    }
+  } else {
+    // arcs, snapping between posts on the girder
+    ctx.strokeStyle = C.tint;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < h.w; i += 26) {
+      const on = Math.sin(t * 9 + i * 1.3 + seed) > 0.1;
+      if (!on) continue;
+      ctx.globalAlpha = 0.55;
+      ctx.beginPath();
+      const x0 = h.x + i + 4;
+      ctx.moveTo(x0, top ? h.y : h.y + h.h);
+      let yy = top ? h.y : h.y + h.h;
+      const dir = top ? 1 : -1;
+      for (let k = 0; k < 5; k++) {
+        yy += dir * (h.h / 5);
+        ctx.lineTo(x0 + Math.sin(t * 17 + k * 2 + i) * 7, yy);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = C.glow;
+      ctx.fillRect(x0 - 1, (top ? h.y : h.y + h.h - 2), 3, 2);
+    }
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = was;
+}
+
+// Every hazard field in view. Drawn under the jaws and the guns, over the
+// cached plating, and never baked into a chunk — all four move.
+export function drawFields(ctx, level, camX, viewW, t) {
+  const list = level.hazards;
+  if (!list || !list.length) return;
+  for (const h of list) {
+    if (h.x + h.w < camX - 16 || h.x > camX + viewW + 16) continue;
+    drawField(ctx, h, t);
+  }
 }
 
 // Every jaw in view, after the cached hull and under everything that sits

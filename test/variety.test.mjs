@@ -1234,3 +1234,158 @@ test('a second hit refreshes rather than stacks', () => {
   assert.ok(p.snareT <= STATUS.snareTime + 0.01,
     `two nets stacked to ${p.snareT.toFixed(2)}s, past the ${STATUS.snareTime}s one lasts`);
 });
+
+// ------------------------------------------------------------ hazard fields
+//
+// Areas rather than objects: nothing solid, nothing to shoot, and a
+// price per second for being inside. The thing that must hold is that
+// they are always avoidable — a field is a question about your line, and
+// a field spanning the corridor would be a wall that cannot be broken.
+
+import { HAZARDS } from '../src/config.js';
+import { hazardAt } from '../src/level.js';
+
+test('every hazard kind is complete and reachable', () => {
+  const kinds = Object.keys(HAZARDS);
+  assert.equal(kinds.length, 4, `${kinds.length} hazard kinds`);
+  for (const [id, h] of Object.entries(HAZARDS)) {
+    assert.ok(h.name && h.name === h.name.toUpperCase(), `${id} has no name`);
+    assert.ok(h.dps > 0, `${id} costs nothing to fly through`);
+    assert.ok(h.dps < 60, `${id} at ${h.dps}/s is not a hazard, it is a wall`);
+    for (const c of ['tint', 'glow', 'dark']) {
+      assert.ok(/^#[0-9a-f]{6}$/i.test(h[c]), `${id}.${c} is not a colour`);
+    }
+  }
+  // Every kind has to actually be fielded somewhere, or it is art nobody
+  // will see.
+  const fielded = new Set();
+  for (const spec of LEVELS) for (const k of spec.hazardKinds || []) fielded.add(k);
+  for (const k of kinds) assert.ok(fielded.has(k), `no hull ever fields a ${k} field`);
+});
+
+test('the tutorial hulls field no hazards', () => {
+  for (const spec of LEVELS.slice(0, 2)) {
+    for (let seed = 0; seed < 30; seed++) {
+      assert.equal(buildLevel(spec, seed).hazards.length, 0,
+        `${spec.name} grew a hazard field and is meant to be the tutorial`);
+    }
+  }
+});
+
+test('a hull only fields the kinds it lists', () => {
+  for (const spec of LEVELS) {
+    const allowed = new Set(spec.hazardKinds || []);
+    for (let seed = 0; seed < 12; seed++) {
+      for (const h of buildLevel(spec, seed).hazards) {
+        assert.ok(allowed.has(h.kind),
+          `${spec.name} grew a ${h.kind} field, which it does not list`);
+      }
+    }
+  }
+});
+
+test('a hazard field always leaves a clear band beside it', () => {
+  // The guarantee the whole category rests on. Fields are invisible to
+  // the clearance sweep — they are not solid — so nothing else would
+  // notice one that spanned the corridor.
+  const need = SHIP.hitH + 20;
+  let seen = 0;
+  for (const spec of LEVELS) {
+    for (let seed = 0; seed < 16; seed++) {
+      const lv = buildLevel(spec, seed);
+      for (const h of lv.hazards) {
+        seen++;
+        const above = h.y - FIELD_TOP;
+        const below = FIELD_BOT - (h.y + h.h);
+        assert.ok(Math.max(above, below) >= need,
+          `${spec.name}: a ${h.kind} field leaves only ${Math.max(above, below).toFixed(0)}px`
+          + ` of clear corridor, and the ship needs ${need}`);
+        assert.ok(h.h > 0 && h.w > 0, 'a field with no area');
+        assert.ok(h.y >= FIELD_TOP - 1 && h.y + h.h <= FIELD_BOT + 1,
+          'a field outside the corridor');
+      }
+    }
+  }
+  assert.ok(seen > 200, `only ${seen} fields generated to check`);
+});
+
+test('a hazard field never blocks the hull', () => {
+  // Belt and braces: fields are not obstacles, so this is really
+  // checking that nothing started adding them to the obstacle list.
+  for (const spec of LEVELS) {
+    const lv = buildLevel(spec, 7);
+    assert.ok(lv.hazards.length === 0 || lv.obstacles.every((o) => !o.kind),
+      'a hazard leaked into the obstacle list');
+    const bad = firstBlockage(lv);
+    assert.equal(bad, null, bad && `${spec.name} blocked at x=${bad.x}: ${bad.why}`);
+  }
+});
+
+test('hazardAt finds the field the ship is standing in, and only that', () => {
+  const lv = { hazards: [{ x: 100, y: 50, w: 60, h: 40, kind: 'fire', phase: 0 }] };
+  const hw = SHIP.hitW / 2;
+  const hh = SHIP.hitH / 2;
+  assert.ok(hazardAt(lv, 130, 70, hw, hh), 'the middle of a field read as clear');
+  assert.equal(hazardAt(lv, 130, 200, hw, hh), null, 'well below a field read as inside it');
+  assert.equal(hazardAt(lv, 400, 70, hw, hh), null, 'well past a field read as inside it');
+  // the ship's box counts, not just its centre
+  assert.ok(hazardAt(lv, 100 - hw + 2, 70, hw, hh), 'a wingtip inside a field read as clear');
+  assert.equal(hazardAt(lv, 100 - hw - 4, 70, hw, hh), null, 'clear of a field read as inside');
+  assert.equal(hazardAt({ hazards: [] }, 0, 0, hw, hh), null);
+  assert.equal(hazardAt({}, 0, 0, hw, hh), null, 'a level with no field list threw');
+});
+
+test('a field costs shield by the second, and only while you are in it', () => {
+  const game = inFlight();
+  const p = game.player;
+  const field = { x: p.x - 200, y: FIELD_TOP, w: 400, h: 120, kind: 'spark', phase: 0 };
+  game.level.hazards = [field];
+  p.y = FIELD_TOP + 40;                 // inside it
+  p.invuln = 0;
+  p.shield = p.shieldMax;
+  const before = p.shield;
+  for (let i = 0; i < 60; i++) {
+    onlyThis(game);
+    p.x = field.x + 200; p.y = FIELD_TOP + 40; p.vx = 0; p.vy = 0;
+    update(game, DT);
+  }
+  const lost = before - p.shield;
+  const want = HAZARDS.spark.dps * 0.5;
+  assert.ok(Math.abs(lost - want) < want * 0.4,
+    `half a second in an arc field cost ${lost.toFixed(1)}, expected about ${want.toFixed(1)}`);
+
+  // The ship's box counts, not its centre. Parked so the centre is clear
+  // of the field and a wingtip is not: a caller that passes a point
+  // instead of the hitbox flies through this for free.
+  const edge = field.y + field.h;
+  p.shield = p.shieldMax;
+  const atEdge = p.shield;
+  for (let i = 0; i < 40; i++) {
+    onlyThis(game);
+    p.x = field.x + 200;
+    p.y = edge + SHIP.hitH / 2 - 2;     // centre below the field, top edge inside
+    p.vx = 0; p.vy = 0;
+    update(game, DT);
+  }
+  assert.ok(p.shield < atEdge,
+    'a wingtip inside the field cost nothing — the hitbox is not being used');
+
+  // ...and nothing once clear of it
+  p.y = FIELD_BOT - 30;
+  p.shield = p.shieldMax;
+  const clear = p.shield;
+  for (let i = 0; i < 60; i++) {
+    onlyThis(game);
+    p.x = field.x + 200; p.y = FIELD_BOT - 30; p.vx = 0; p.vy = 0;
+    update(game, DT);
+  }
+  assert.equal(p.shield, clear, 'the ship paid for a field it was not in');
+});
+
+test('the four fields are told apart by what they cost', () => {
+  // Same shape, same question, different price — otherwise three of them
+  // are reskins.
+  const rates = Object.values(HAZARDS).map((h) => h.dps);
+  assert.equal(new Set(rates).size, rates.length,
+    `two hazard kinds cost the same: ${rates.join(', ')}`);
+});

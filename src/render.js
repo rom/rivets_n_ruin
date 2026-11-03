@@ -4,7 +4,7 @@ import { interceptors } from './enemies.js';
 import { playerShots, enemyShots } from './projectiles.js';
 import { particles, lights } from './particles.js';
 import { hash2 } from './rng.js';
-import { hullChunk, warmChunks, drawMovers, CHUNK_W } from './level.js';
+import { hullChunk, warmChunks, drawMovers, drawFields, CHUNK_W } from './level.js';
 import { get as setting } from './settings.js';
 import { renderScale, scaleGeneration, hullScale, isStatic } from './display.js';
 import { pickups, tint, isTreasure } from './pickups.js';
@@ -151,6 +151,7 @@ export function drawWorld(ctx, game) {
 
   // Jaws: part of the hull, so they go under everything mounted on it, but
   // they cannot be baked into a cached chunk, so they are drawn here.
+  drawFields(ctx, game.level, camX, VIEW_W, game.time);
   drawMovers(ctx, game.level, camX, VIEW_W);
   drawTurrets(ctx, game, camX);
   drawGates(ctx, game, camX);

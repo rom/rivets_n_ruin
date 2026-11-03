@@ -254,7 +254,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 172, interceptorSpawn: 1.50, interceptorHp: 2,
     foes: [],
     enemyDmg: 1.00,
-    towers: ['gun'], lasers: 0, laserHp: 0, press: false, tune: 0 },
+    towers: ['gun'], lasers: 0, laserHp: 0, press: false, hazards: false, tune: 0 },
 
   { name: 'OSMIUM', subtitle: 'DENSEST ALLOY AFLOAT — LINE HULL',
     theme: 'conduit', seed: 0x051f1ed, length: 14500,
@@ -263,7 +263,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 196, interceptorSpawn: 1.20, interceptorHp: 3,
     foes: ['mine'],
     enemyDmg: 1.05,
-    towers: ['gun', 'pop'], lasers: 0, laserHp: 1, press: false, tune: 1 },
+    towers: ['gun', 'pop'], lasers: 0, laserHp: 1, press: false, hazards: false, tune: 1 },
 
   { name: 'TANTALUM', subtitle: 'CORROSION PROOF — FLAGSHIP HULL',
     theme: 'glacier', seed: 0x7a07a1, length: 17000,
@@ -272,7 +272,8 @@ const CORE_LEVELS = [
     interceptorSpeed: 220, interceptorSpawn: 0.98, interceptorHp: 3,
     foes: ['mine', 'lancer', 'weaver', 'gnat'],
     enemyDmg: 1.10,
-    towers: ['gun', 'pop', 'flak', 'post'], lasers: 1, laserHp: 2, press: false, tune: 4 },
+    towers: ['gun', 'pop', 'flak', 'post'], lasers: 1, laserHp: 2, press: false,
+    hazards: true, hazardKinds: ['fire'], tune: 4 },
 
   { name: 'CUPRUM', subtitle: 'OXIDISED — SALVAGE HULK',
     theme: 'desert', seed: 0xc0ffee, length: 18500,
@@ -281,7 +282,8 @@ const CORE_LEVELS = [
     interceptorSpeed: 236, interceptorSpawn: 0.90, interceptorHp: 4,
     foes: ['mine', 'lancer', 'orbiter', 'weaver', 'gnat', 'dart', 'netter'],
     enemyDmg: 1.16,
-    towers: ['gun', 'pop', 'flak', 'lance', 'rocket', 'radar'], lasers: 2, laserHp: 3, press: true, tune: 2 },
+    towers: ['gun', 'pop', 'flak', 'lance', 'rocket', 'radar'], lasers: 2, laserHp: 3, press: true,
+    hazards: true, hazardKinds: ['fire', 'storm'], tune: 2 },
 
   { name: 'PYRITE', subtitle: 'RUNNING HOT — FOUNDRY HULL',
     theme: 'foundry', seed: 0xf00dface, length: 20000,
@@ -290,7 +292,8 @@ const CORE_LEVELS = [
     interceptorSpeed: 252, interceptorSpawn: 0.82, interceptorHp: 4,
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'dart', 'barge', 'netter'],
     enemyDmg: 1.22,
-    towers: ['gun', 'flak', 'lance', 'mortar', 'rocket', 'radar', 'bastion'], lasers: 2, laserHp: 4, press: true, tune: 5 },
+    towers: ['gun', 'flak', 'lance', 'mortar', 'rocket', 'radar', 'bastion'], lasers: 2, laserHp: 4, press: true,
+    hazards: true, hazardKinds: ['fire', 'storm'], tune: 5 },
 
   { name: 'WOLFRAM', subtitle: 'LIGHT SWALLOWING — SIEGE HULL',
     theme: 'void', seed: 0x0b51d1a, length: 21500,
@@ -299,7 +302,8 @@ const CORE_LEVELS = [
     interceptorSpeed: 266, interceptorSpawn: 0.75, interceptorHp: 5,
     foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech', 'mirror', 'barge', 'grapnel'],
     enemyDmg: 1.28,
-    towers: ['gun', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array'], lasers: 3, laserHp: 5, press: true, tune: 3 },
+    towers: ['gun', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array'], lasers: 3, laserHp: 5, press: true,
+    hazards: true, hazardKinds: ['storm', 'ice'], tune: 3 },
 
   { name: 'FERRUM', subtitle: 'EATEN THROUGH — DERELICT HULL',
     theme: 'derelict', seed: 0xfe2211, length: 23000,
@@ -309,7 +313,8 @@ const CORE_LEVELS = [
     foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech', 'chainer', 'monitor',
       'grapnel', 'scorcher'],
     enemyDmg: 1.34,
-    towers: ['gun', 'flak', 'mortar', 'warden', 'rocket', 'array', 'silo'], lasers: 3, laserHp: 6, press: true, tune: 6 },
+    towers: ['gun', 'flak', 'mortar', 'warden', 'rocket', 'array', 'silo'], lasers: 3, laserHp: 6, press: true,
+    hazards: true, hazardKinds: ['fire', 'ice', 'spark'], tune: 6 },
 
   { name: 'AURUM', subtitle: 'THE PRIZE — ADMIRALTY HULL',
     theme: 'admiralty', seed: 0xa17aa17a, length: 25000,
@@ -319,7 +324,8 @@ const CORE_LEVELS = [
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech', 'carrier',
       'gnat', 'dart', 'barge', 'monitor', 'netter', 'grapnel', 'scorcher'],
     enemyDmg: 1.40,
-    towers: ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array', 'silo'], lasers: 4, laserHp: 7, press: true, tune: 7 },
+    towers: ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array', 'silo'], lasers: 4, laserHp: 7,
+    press: true, hazards: true, hazardKinds: ['fire', 'storm', 'ice', 'spark'], tune: 7 },
 ];
 
 // The campaign past the admiralty hull.
@@ -378,6 +384,8 @@ const DEEP_LEVELS = DEEP_HULLS.map(([name, subtitle], i) => {
     lasers: Math.min(8, 4 + Math.floor(k / 3)),
     laserHp: 7 + k,
     press: true,
+    hazards: true,
+    hazardKinds: ['fire', 'storm', 'ice', 'spark'],
     tune: n % 8,
   };
 });
@@ -436,6 +444,48 @@ export const MODIFIERS = [
   { id: 'vacuum', name: 'HARD VACUUM', from: 5,
     blurb: 'Scrapes cost double. Everything you pick up is worth double.' },
 ];
+
+// ----------------------------------------------------------- hazard fields
+//
+// Areas rather than objects. Nothing here is solid and nothing here can
+// be shot: you fly around them, or you fly through and pay for every
+// second you are inside. That makes them the only threat on a hull that
+// is purely a question about your line — there is no trade where killing
+// it is an option.
+//
+// Because they are not solid they never appear to the clearance sweep,
+// which is the point: a hazard must never be the thing that makes a hull
+// impassable. The generator keeps a clear band beside every one.
+export const HAZARDS = {
+  fire: {
+    name: 'FLARE FIELD',
+    dps: 26,                  // shield a second while inside
+    tint: '#ff7a3a',
+    glow: '#ffd24a',
+    dark: '#3a1408',
+  },
+  storm: {
+    name: 'VORTEX',
+    dps: 20,
+    tint: '#6fb4e8',
+    glow: '#d8f0ff',
+    dark: '#0d1b2a',
+  },
+  ice: {
+    name: 'ICE CLOUD',
+    dps: 16,
+    tint: '#9fe8f8',
+    glow: '#ffffff',
+    dark: '#0f2430',
+  },
+  spark: {
+    name: 'ARC FIELD',
+    dps: 30,
+    tint: '#c9a0ff',
+    glow: '#ffffff',
+    dark: '#1a0f2e',
+  },
+};
 
 // What the three entangling attackers do to the ship once they connect.
 //

@@ -311,6 +311,35 @@ Homing is implemented as a turn rate on the shot itself (`seek` in
 that accelerated while turning would be unavoidable, and a test asserts its
 speed never changes.
 
+## Hazard fields
+
+Areas rather than objects. Nothing in one is solid and nothing in one can
+be shot: you fly around it, or you fly through and pay for every second
+you are inside. That makes them the only threat on a hull that is purely a
+question about your line — there is no version where killing it is an
+option.
+
+| Field | From | Costs |
+| --- | --- | --- |
+| **FLARE FIELD** | TANTALUM | 26 shield a second. Tongues of flame climbing off the plating |
+| **VORTEX** | CUPRUM | 20 a second. Turning cells that drag at the hull |
+| **ICE CLOUD** | WOLFRAM | 16 a second, the cheapest, and the hardest to see the far side of |
+| **ARC FIELD** | FERRUM | 30 a second, the dearest. Arcs snapping between posts on the girder |
+
+They differ in motion as much as in colour, because the decision a field
+asks for is made from a distance: fire climbs, a vortex turns, ice drifts
+and settles, an arc field snaps.
+
+Charged by the second rather than on entry, so clipping a corner is cheap
+and cutting the long way through is not. The ship's box counts, not its
+centre — a wingtip in a flare field is still in it.
+
+Because a field is not solid, the clearance sweep never sees one, which
+means the generator has to keep the corridor honest by itself: a field
+takes at most about half the corridor and always leaves a clear band
+beside it. A field that spanned the hull would be a wall that cannot be
+broken, and a test holds every hull's fields to that.
+
 ## Laser gates
 
 ![A laser gate](docs/laser.png)

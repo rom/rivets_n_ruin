@@ -1,6 +1,6 @@
 import {
   SHIP, PICKUP, ARMORY, FIELD_TOP, FIELD_BOT, clamp, REAR, LANCE,
-  MOD_FORCE, hullRule, STATUS} from './config.js';
+  MOD_FORCE, hullRule, STATUS, HAZARDS} from './config.js';
 
 // Cycles to the next ordnance you actually have, so the key is never a
 // no-op while something else is loaded.
@@ -13,7 +13,7 @@ function cycleSecondary(p, dir) {
   }
 }
 import { axisX, axisY, held, tapped } from './input.js';
-import { obstaclesNear, pointBlocked } from './level.js';
+import { obstaclesNear, pointBlocked, hazardAt } from './level.js';
 import { playerShots, enemyShots, fire } from './projectiles.js';
 import { sparks, thrust, addLight } from './particles.js';
 import { fireSecondary } from './armory.js';
@@ -34,6 +34,8 @@ export function makePlayer() {
     flip: 0,         // >0 while mid-flip
     fireCd: 0,
     scrapeCd: 0,
+    inField: null,    // the hazard field the ship is standing in
+    fieldT: 0,        // and how long it has been in it
     // --- entangling status. See STATUS in config.js.
     snareT: 0,        // netted: thrust and top speed cut
     burnT: 0,         // alight: shield draining
@@ -88,6 +90,18 @@ export function updatePlayer(p, game, dt) {
   if (p.burnT > 0) {
     p.burnT -= dt;
     if (p.alive && p.invuln <= 0) p.shield -= STATUS.burnDps * dt;
+  }
+
+  // Standing in a hazard field. Charged by the second rather than on
+  // entry, so crossing a corner is cheap and cutting the long way
+  // through is not — which is the whole of the decision a field offers.
+  p.inField = p.alive
+    ? hazardAt(game.level, p.x, p.y, SHIP.hitW / 2, SHIP.hitH / 2) : null;
+  if (p.inField && p.invuln <= 0) {
+    p.shield -= HAZARDS[p.inField.kind].dps * dt;
+    p.fieldT = (p.fieldT || 0) + dt;
+  } else {
+    p.fieldT = 0;
   }
   if (p.scrapeCd > 0) p.scrapeCd -= dt;
   if (p.invuln > 0) p.invuln -= dt;
