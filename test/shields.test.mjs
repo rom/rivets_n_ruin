@@ -283,6 +283,7 @@ test('something that has not clamped on still rams', async () => {
 test('losing a hull in the real update loop takes the leech with it', async () => {
   const { makeGame, update } = await import('../src/game.js');
   const { foes: pool, spawnFoe: spawn } = await import('../src/foes.js');
+  const { enemyShots } = await import('../src/projectiles.js');
 
   const game = makeGame();
   game.state = 'play';
@@ -311,6 +312,16 @@ test('losing a hull in the real update loop takes the leech with it', async () =
   for (let i = 0; i < 400 && game.state !== 'play'; i++) update(game, 1 / 120);
   assert.equal(game.state, 'play', 'never respawned');
   assert.equal(pool.count, 0, 'the leech came back with the new ship');
+
+  // Silence the hull before measuring. This last check is about one thing
+  // — that a leech clamped to the lost ship is not still draining the new
+  // one — but shield is shield, and it counted any source. It passed only
+  // because x=2000 on ARGENTUM happened to sit outside every gun's reach;
+  // re-weighting the pattern bands moved a gun to x=1972, 28px away and
+  // well inside its 300px range, and the test started failing half the
+  // time with damage in exact multiples of a turret bullet.
+  for (const t of game.level.turrets) t.dead = true;
+  enemyShots.clear();
   const shield = game.player.shield;
   game.player.invuln = 0;
   for (let i = 0; i < 120; i++) update(game, 1 / 120);

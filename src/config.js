@@ -254,7 +254,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 172, interceptorSpawn: 1.50, interceptorHp: 2,
     foes: [],
     enemyDmg: 1.00,
-    towers: ['gun'], lasers: 0, laserHp: 0, tune: 0 },
+    towers: ['gun'], lasers: 0, laserHp: 0, press: false, tune: 0 },
 
   { name: 'OSMIUM', subtitle: 'DENSEST ALLOY AFLOAT — LINE HULL',
     theme: 'conduit', seed: 0x051f1ed, length: 14500,
@@ -263,7 +263,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 196, interceptorSpawn: 1.20, interceptorHp: 3,
     foes: ['mine'],
     enemyDmg: 1.05,
-    towers: ['gun', 'pop'], lasers: 0, laserHp: 1, tune: 1 },
+    towers: ['gun', 'pop'], lasers: 0, laserHp: 1, press: false, tune: 1 },
 
   { name: 'TANTALUM', subtitle: 'CORROSION PROOF — FLAGSHIP HULL',
     theme: 'glacier', seed: 0x7a07a1, length: 17000,
@@ -272,7 +272,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 220, interceptorSpawn: 0.98, interceptorHp: 3,
     foes: ['mine', 'lancer', 'weaver', 'gnat'],
     enemyDmg: 1.10,
-    towers: ['gun', 'pop', 'flak', 'post'], lasers: 1, laserHp: 2, tune: 4 },
+    towers: ['gun', 'pop', 'flak', 'post'], lasers: 1, laserHp: 2, press: false, tune: 4 },
 
   { name: 'CUPRUM', subtitle: 'OXIDISED — SALVAGE HULK',
     theme: 'desert', seed: 0xc0ffee, length: 18500,
@@ -281,7 +281,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 236, interceptorSpawn: 0.90, interceptorHp: 4,
     foes: ['mine', 'lancer', 'orbiter', 'weaver', 'gnat', 'dart'],
     enemyDmg: 1.16,
-    towers: ['gun', 'pop', 'flak', 'lance', 'rocket', 'radar'], lasers: 2, laserHp: 3, tune: 2 },
+    towers: ['gun', 'pop', 'flak', 'lance', 'rocket', 'radar'], lasers: 2, laserHp: 3, press: true, tune: 2 },
 
   { name: 'PYRITE', subtitle: 'RUNNING HOT — FOUNDRY HULL',
     theme: 'foundry', seed: 0xf00dface, length: 20000,
@@ -290,7 +290,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 252, interceptorSpawn: 0.82, interceptorHp: 4,
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'dart', 'barge'],
     enemyDmg: 1.22,
-    towers: ['gun', 'flak', 'lance', 'mortar', 'rocket', 'radar', 'bastion'], lasers: 2, laserHp: 4, tune: 5 },
+    towers: ['gun', 'flak', 'lance', 'mortar', 'rocket', 'radar', 'bastion'], lasers: 2, laserHp: 4, press: true, tune: 5 },
 
   { name: 'WOLFRAM', subtitle: 'LIGHT SWALLOWING — SIEGE HULL',
     theme: 'void', seed: 0x0b51d1a, length: 21500,
@@ -299,7 +299,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 266, interceptorSpawn: 0.75, interceptorHp: 5,
     foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech', 'mirror', 'barge'],
     enemyDmg: 1.28,
-    towers: ['gun', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array'], lasers: 3, laserHp: 5, tune: 3 },
+    towers: ['gun', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array'], lasers: 3, laserHp: 5, press: true, tune: 3 },
 
   { name: 'FERRUM', subtitle: 'EATEN THROUGH — DERELICT HULL',
     theme: 'derelict', seed: 0xfe2211, length: 23000,
@@ -308,7 +308,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 280, interceptorSpawn: 0.70, interceptorHp: 5,
     foes: ['mine', 'lancer', 'orbiter', 'warder', 'bomber', 'leech', 'chainer', 'monitor'],
     enemyDmg: 1.34,
-    towers: ['gun', 'flak', 'mortar', 'warden', 'rocket', 'array', 'silo'], lasers: 3, laserHp: 6, tune: 6 },
+    towers: ['gun', 'flak', 'mortar', 'warden', 'rocket', 'array', 'silo'], lasers: 3, laserHp: 6, press: true, tune: 6 },
 
   { name: 'AURUM', subtitle: 'THE PRIZE — ADMIRALTY HULL',
     theme: 'admiralty', seed: 0xa17aa17a, length: 25000,
@@ -318,7 +318,7 @@ const CORE_LEVELS = [
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'bomber', 'leech', 'carrier',
       'gnat', 'dart', 'barge', 'monitor'],
     enemyDmg: 1.40,
-    towers: ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array', 'silo'], lasers: 4, laserHp: 7, tune: 7 },
+    towers: ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array', 'silo'], lasers: 4, laserHp: 7, press: true, tune: 7 },
 ];
 
 // The campaign past the admiralty hull.
@@ -375,6 +375,7 @@ const DEEP_LEVELS = DEEP_HULLS.map(([name, subtitle], i) => {
     towers: ALL_TOWERS,
     lasers: Math.min(8, 4 + Math.floor(k / 3)),
     laserHp: 7 + k,
+    press: true,
     tune: n % 8,
   };
 });
@@ -387,6 +388,113 @@ export const LEVELS = [...CORE_LEVELS, ...DEEP_LEVELS];
 // difficulty curve is met with a power curve, not just better flying.
 // Difficulty. One multiplier set, applied where the numbers are actually
 // used, so changing it takes effect without rebuilding anything.
+// --------------------------------------------------------------- modifiers
+//
+// Past AURUM the campaign is one formula with bigger numbers: every
+// generated hull fields the whole roster and the whole tower list, and
+// differs from its neighbour only in health, speed and spawn rate. That is
+// a curve, and a curve is not a reason to fly a hull.
+//
+// A modifier is one named rule that changes how a hull is flown rather
+// than how much of it there is. It is drawn per hull from the hull's own
+// seed, so with FIXED layouts a hull always has the same one and can be
+// learned, and with SHUFFLED the same hull is a different problem each run.
+//
+// `spec` multiplies fields of the level spec before the hull is built.
+// Everything else is a flag the relevant system reads. `from` is the
+// earliest hull a modifier can appear on.
+export const MODIFIERS = [
+  // gapScale is the run between one pattern and the next, not the
+  // clearance through either — the blurb said "the corridor is tighter",
+  // which is a thing this modifier cannot do.
+  { id: 'pressure', name: 'PRESSURE', from: 3,
+    blurb: 'Pattern on pattern, back to back, with almost no clear run between.',
+    spec: { gapScale: 0.82, clearChance: 0.45 } },
+
+  { id: 'flak', name: 'FLAK CURTAIN', from: 3,
+    blurb: 'The guns fire half again as often, and break half again as easily.',
+    spec: { turretCooldown: 0.62, turretHp: 0.6 } },
+
+  { id: 'overrun', name: 'OVERRUN', from: 4,
+    blurb: 'Squadrons come a third more often.',
+    spec: { foeRateMul: 1.35 } },
+
+  { id: 'gravity', name: 'GRAVITY WELL', from: 3,
+    blurb: 'Something under the hull pulls. Nose up or sink.' },
+
+  { id: 'blackout', name: 'BLACKOUT', from: 5,
+    blurb: 'The hull is unlit. Your guns and their explosions are the lamp.' },
+
+  { id: 'livehull', name: 'LIVE HULL', from: 6,
+    blurb: 'Broken guns are rebuilt behind you. Clearing it means clearing it fast.' },
+
+  { id: 'salvage', name: 'SALVAGE RUN', from: 4,
+    blurb: 'No crates. No shield, no gun levels — but the wreckage pays double.' },
+
+  { id: 'vacuum', name: 'HARD VACUUM', from: 5,
+    blurb: 'Scrapes cost double. Everything you pick up is worth double.' },
+];
+
+// Whether this hull is being flown under a named rule. Every system that
+// reads a modifier goes through here, so none of them has to know whether
+// game.hullMod is null.
+//
+// It lives in config because config is the one module everything already
+// imports and that imports nothing itself. In level.js — next to the rest
+// of the modifier code, where it started — pickups.js could not reach it:
+// level imports gates, gates imports pickups, and pickups importing level
+// back closes the ring.
+export const hullRule = (game, id) => !!(game.hullMod && game.hullMod.id === id);
+
+// The numbers behind the modifiers that are not simple spec multipliers.
+// Here rather than inline so the strength of a rule is a value somebody
+// can read and change, not a literal buried in the system it affects.
+export const MOD_FORCE = {
+  gravity: 0.34,        // of SHIP.accelY, downward and always on
+  vacuumScrape: 2,      // what a scrape costs under HARD VACUUM
+  vacuumLoot: 2,        // and what the loot on that hull is worth
+  blackout: 0.62,       // how much of the hull's own light is taken away
+  rebuildAfter: 9,      // seconds before a LIVE HULL gun stands back up
+  salvageCoins: 2,      // what a kill drops on a SALVAGE RUN, with no crates
+};
+
+// How likely a hull is to have one at all. None on the first three — they
+// are the tutorial, and a rule you have to learn on top of the controls is
+// two things at once — then rising, because the hulls that most need an
+// identity are the generated ones at the far end.
+export const MODIFIER_CHANCE = {
+  from: 3,
+  base: 0.45,
+  perHull: 0.02,
+  cap: 0.8,
+};
+
+// How often a squadron arrives.
+//
+// The gap after one is paced by what arrived, measured in what it was
+// worth to kill — the only currency the roster already agrees on:
+//
+//   gap = max(floor, weight / rate) * jitter
+//
+// A swarm of gnats comes round again quickly; a monitor buys itself a long
+// quiet. `rate` is per hull and is not a new difficulty knob: it is set to
+// exactly what the old one-at-a-time cadence delivered on that hull — one
+// roster pull every `legacyGap` seconds — so composition changed and the
+// pressure did not. See foeRateFor in foes.js.
+//
+// A single global rate was tried first and cannot work. The old cadence's
+// threat rate climbed with roster depth, from 47 points a second on
+// TANTALUM to 97 on FERRUM, because a deeper roster holds heavier kinds
+// and it still spawned one of anything every 3.7 seconds. Weight pacing
+// against one number flattens that curve by design: the best fit over all
+// twenty-five hulls still left the deep ones 40% quieter than they were.
+export const FOE_PACE = {
+  floor: 1.2,         // shortest breath between squadrons, whatever arrives
+  jitter: 0.8,        // multiplies the gap by 0.8..1.2, mean 1
+  legacyGap: 3.7,     // the old cadence's mean gap: 2.6 + 2.2 / 2
+  assumed: 240,       // the weight to assume when nothing spawned (off the hull)
+};
+
 export const DIFFICULTY = [
   { id: 'cadet',   name: 'CADET',   enemyDmg: 0.6, bossHp: 0.7, spawn: 1.35, scrape: 0.6, scoreMul: 0.7 },
   { id: 'pilot',   name: 'PILOT',   enemyDmg: 1.0, bossHp: 1.0, spawn: 1.0,  scrape: 1.0, scoreMul: 1.0 },

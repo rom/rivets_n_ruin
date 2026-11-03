@@ -1,9 +1,11 @@
 import {
   SHIP, INTERCEPTOR, LEVELS, LEVEL_UP, PICKUP, BOSS, HULL_BONUS, APRON, VIEW_W,
-  FIELD_TOP, FIELD_BOT, clamp, LANCE} from './config.js';
+  FIELD_TOP, FIELD_BOT, clamp, LANCE, FOE_PACE} from './config.js';
 import { diff, award, hurt } from './score.js';
 import { get as setting, set as setSetting, onChange as onSetting } from './settings.js';
-import { buildLevel, obstaclesNear } from './level.js';
+import {
+  buildLevel, obstaclesNear, updateMovers, modifierFor, specWithModifier,
+} from './level.js';
 import { updateGates, hitGate, gateHit, liveGates } from './gates.js';
 import { makeBoss, updateBoss, hitBoss, bossBeaten, arenaLeft } from './boss.js';
 import { makeCamera, updateCamera, kick } from './camera.js';
@@ -17,7 +19,8 @@ import {
   updatePickups, resetPickups, pickups, TREASURES, freshHaul,
 } from './pickups.js';
 import {
-  updateFoes, resetFoes, foes, hitFoe, spawnFoeForLevel, dropAttached,
+  updateFoes, resetFoes, foes, hitFoe, spawnFoeForLevel, spawnSquadron, foeRateFor,
+  dropAttached,
   SPEC as FOE_SPEC,
 } from './foes.js';
 import { updateOrdnance, resetOrdnance, ordnance } from './armory.js';
@@ -39,15 +42,39 @@ import { activeModId } from './mods.js';
 
 export { diff } from './score.js';
 
+// The seed a run folds into every hull it builds. Zero when the pilot wants
+// fixed layouts, which is what makes buildLevel ignore it entirely.
+//
+// Not Date.now(): two tabs opened together, or a restart inside the same
+// millisecond, would fly the same "random" campaign. crypto.getRandomValues
+// is in every browser the game already requires, and the fallback is only
+// for a test environment that has no crypto at all.
+function freshRunSeed() {
+  if (!Number(setting('shuffle'))) return 0;
+  try {
+    const buf = new Uint32Array(1);
+    globalThis.crypto.getRandomValues(buf);
+    return buf[0] >>> 0;
+  } catch {
+    return (Math.random() * 0x100000000) >>> 0;
+  }
+}
+
 export function makeGame(modSpec = null) {
   // A mod overrides the first hull's seed; the rest of the campaign is
   // unchanged, so a mod is a variant opening rather than a whole new game.
   const specs = modSpec
     ? [{ ...LEVELS[0], ...modSpec }, ...LEVELS.slice(1)]
     : LEVELS;
-  const level = buildLevel(specs[0]);
+  // Drawn once here so the title screen's hull has one, and redrawn by
+  // reset() for every run after.
+  const runSeed = freshRunSeed();
+  const hullMod = modifierFor(0, specs[0], runSeed);
+  const level = buildLevel(specWithModifier(specs[0], hullMod), runSeed);
   const game = {
     level,
+    runSeed,
+    hullMod,               // the rule this hull is flown under, or null
     cam: makeCamera(),
     player: makePlayer(),
     state: 'splash',       // splash | title | launching | play | dying
@@ -151,23 +178,21 @@ function reset(game) {
   // the leaderboard and to the validator: the first is how far you got,
   // the second is how long it could possibly have taken.
   game.startAt = at;
-  if (game.levelIndex !== at) {
-    game.levelIndex = at;
-    game.level = buildLevel(game.specs[at]);
-  }
+  // A fresh run gets a fresh seed, and the hull is rebuilt whether or not
+  // the index moved — otherwise a run started from the title after another
+  // run on the same hull would fly the previous run's layout with the new
+  // run's seed, which is neither setting's behaviour.
+  game.runSeed = freshRunSeed();
+  game.levelIndex = at;
+  game.hullMod = modifierFor(at, game.specs[at], game.runSeed);
+  game.level = buildLevel(specWithModifier(game.specs[at], game.hullMod), game.runSeed);
   setTune(game.specs[at].tune);
-  for (const g of game.level.gates || []) {
-    g.dead = false;
-    g.hp = g.maxHp;
-    g.flash = 0;
-  }
-  for (const t of game.level.turrets) {
-    t.dead = false;
-    t.hp = game.level.spec.turretHp;
-    t.cd = Math.random() * 0.8;
-    t.burstLeft = 0;
-    t.angle = t.dir * Math.PI / 2;
-  }
+  // The gates and turrets used to be walked here and put back by hand,
+  // because the hull was only rebuilt when the index moved. It always is
+  // now, so a fresh one arrives with fresh guns — and the walk was wrong
+  // anyway: it assigned the hull's base turretHp flat, dropping the per-
+  // tower hpMul, so a BASTION restarted on the hull it died on stood up
+  // with a GUN's health. See the reset test in level.test.mjs.
   game.player = makePlayer();
   // Open a run with the server. Fire-and-forget: a backend that is down
   // costs the leaderboard, never the run.
@@ -274,7 +299,9 @@ function loadNextHull(game) {
   // The hull's haul and its end-of-hull bonus are both in by now, and a
   // pilot who closes the tab between hulls should keep them.
   saveHangar(game);
-  game.level = buildLevel(game.specs[game.levelIndex]);
+  game.hullMod = modifierFor(game.levelIndex, game.specs[game.levelIndex], game.runSeed);
+  game.level = buildLevel(
+    specWithModifier(game.specs[game.levelIndex], game.hullMod), game.runSeed);
   setTune(game.specs[game.levelIndex].tune);
 
   p.x = 180;
@@ -507,6 +534,10 @@ export function update(game, dt) {
   game.runTime += dt;
   const p = game.player;
 
+  // The jaws move first. A jaw closing onto the ship has to be resolved by
+  // the player's own push-out in the same frame, or the ship spends a frame
+  // inside solid steel and comes out the wrong side of it.
+  updateMovers(game.level, game.time);
   updatePlayer(p, game, dt);
   // Gates run immediately after the ship moves, so a beam stops it in the
   // same frame rather than letting it sit a frame inside the wall.
@@ -593,12 +624,24 @@ export function update(game, dt) {
     game.banner = null;
   }
 
-  // Extra attacker types, on their own slower cadence so they punctuate the
+  // Squadrons, on their own slower cadence so they punctuate the
   // interceptor stream rather than drowning it.
+  //
+  // The gap after one is paced by what arrived, in the only currency the
+  // roster already agrees on: what it was worth to kill. A swarm of gnats
+  // comes round again quickly; a monitor buys itself a long quiet. Tuned
+  // so the threat per second stays what the one-at-a-time cadence
+  // delivered — composition was the point, not a difficulty change.
   game.foeCd -= dt;
   if (game.foeCd <= 0) {
-    game.foeCd = 2.6 + Math.random() * 2.2;
-    if (p.x > APRON && p.x < game.level.length - APRON) spawnFoeForLevel(game);
+    let weight = FOE_PACE.assumed;
+    if (p.x > APRON && p.x < game.level.length - APRON) {
+      const sq = spawnSquadron(game);
+      if (sq) weight = sq.weight;
+    }
+    const rate = foeRateFor(game.level.spec) * (game.level.spec.foeRateMul || 1);
+    const gap = rate > 0 ? Math.max(FOE_PACE.floor, weight / rate) : FOE_PACE.floor;
+    game.foeCd = gap * (FOE_PACE.jitter + Math.random() * (2 - FOE_PACE.jitter * 2));
   }
 
   // Tell the backend we are out here. Self-throttling to one beat every 5s.

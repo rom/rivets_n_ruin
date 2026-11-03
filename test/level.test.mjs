@@ -18,9 +18,12 @@ test('generation is deterministic for a seed', () => {
 });
 
 test('different hulls generate different layouts', () => {
-  const a = buildLevel(LEVELS[0]);
-  const b = buildLevel(LEVELS[1]);
-  assert.notEqual(a.obstacles.length, b.obstacles.length);
+  // Compared as layouts rather than as counts. Two unrelated hulls landing
+  // on the same number of obstacles is a coincidence, not a bug, and this
+  // used to assert the counts differed — so re-weighting the pattern bands
+  // failed it the moment ARGENTUM and OSMIUM happened to tie at 73.
+  const sig = (lv) => lv.obstacles.map((o) => `${o.x}:${o.y}:${o.w}:${o.h}`).join(',');
+  assert.notEqual(sig(buildLevel(LEVELS[0])), sig(buildLevel(LEVELS[1])));
 });
 
 for (const spec of LEVELS) {

@@ -12,6 +12,33 @@ worth learning from.
 
 ## [Unreleased]
 
+### Added
+
+- **Hull modifiers.** One named rule per hull — PRESSURE, FLAK CURTAIN,
+  OVERRUN, GRAVITY WELL, BLACKOUT, LIVE HULL, SALVAGE RUN, HARD VACUUM —
+  drawn from the hull's own seed and named on the launch card with a line
+  saying what it does. Past AURUM the campaign was one formula with bigger
+  numbers: seventeen generated hulls fielding the whole roster and the
+  whole tower list, differing only in health, speed and spawn rate. None
+  on the first three hulls; from the fourth the odds run 45% to a cap of
+  80%, so a clean hull stays possible.
+- **Squadrons.** Attackers arrive as compositions with a shape — three
+  gnats in a vee, a barge with darts screening it, a monitor on its own —
+  instead of one uniform roster pull every few seconds. The gnat swarm and
+  the chainer pair were already special cases of this written into the
+  spawn path; they are table entries now. The pressure is deliberately
+  unchanged: the gap after a squadron is its weight over the hull's own
+  rate, and that rate is set to exactly what the old cadence delivered,
+  within 0.4% on every hull.
+- **The press**, the first obstacle pattern whose geometry moves. Jaws
+  hanging off both girders that close and open on a cycle, staggered along
+  the run. It never shuts: the gap bottoms out at 34-52px against a ship
+  nine tall, so being caught at the wrong phase is a scrape, not a crush.
+  From the fourth hull, for the same reason the modifiers are.
+- **HULL LAYOUTS** in settings. FIXED is the historical behaviour and the
+  default, bit for bit; SHUFFLED folds a per-run seed into every hull so
+  the campaign is new each run.
+
 ### Changed
 
 - **Ships with several engines draw far more cheaply.** Each engine
@@ -23,10 +50,26 @@ worth learning from.
 
 ### Fixed
 
+- **A ship deep inside a girder-anchored block could be pushed through
+  the girder.** Collision resolved out the shortest side, which for a
+  block hanging off the rim is the rim itself. It could not happen while
+  every obstacle was static — you are pushed off a wall long before you
+  are inside one — but a press jaw closes onto the ship, and a ship held
+  under one came out at y=11.5, above the hull.
+- **Restarting a run on the hull you died on stood the heavy towers back
+  up with the wrong health.** reset() rebuilt the hull only when the index
+  moved and otherwise restored the guns by hand, assigning the hull's base
+  turretHp flat and dropping the per-tower multiplier: a BASTION came back
+  with 6 hit points instead of 19. The hull is always rebuilt now, so the
+  restore is gone with the bug.
 - The Known gaps section counted eight attackers, six towers and eleven
   mods, long after there were sixteen, fifteen and thirteen. It opens by
   saying a stale gap list is worse than none, so a parity test now
-  counts them.
+  counts them. The same sentence appears a second time in the hull
+  section, where it was also stale and is also checked now.
+- The README claimed the narrowest gap in the campaign was 74px. It is
+  39px, and has been for some time; a parity test measures it rather
+  than trusting the prose.
 
 ## [1.1.0] — 2026-11-01
 

@@ -323,16 +323,18 @@ test('a carrier whose brood stays alive stops launching', async () => {
 });
 
 test('a chainer arrives as a pair with a live tether', async () => {
-  const { spawnFoeForLevel, resetFoes, foes } = await import('../src/foes.js');
+  // Arrives as a squadron now, like every other composition. The wiring
+  // it needs is the same wiring it always needed.
+  const { spawnSquadron, resetFoes } = await import('../src/foes.js');
   const { game, done } = await foeGame(10);
   try {
     let pair = null;
     for (let i = 0; i < 400 && !pair; i++) {
       resetFoes();
-      const f = spawnFoeForLevel(game);
-      if (f && f.kind === 'chainer') pair = f;
+      const sq = spawnSquadron(game);
+      if (sq && sq.squad.link) pair = sq.members[0];
     }
-    assert.ok(pair, 'never rolled a chainer in four hundred spawns');
+    assert.ok(pair, 'never rolled a chainer squadron in four hundred spawns');
     assert.ok(pair.mate, 'a chainer spawned alone');
     assert.equal(pair.mate.kind, 'chainer', 'a chainer was mated to something else');
     assert.equal(pair.mate.mate, pair, 'the link is one-way');
@@ -642,14 +644,26 @@ test('a gnat arrives with company', async () => {
   // One gnat is a non-event: one hit point, no gun, nothing to make
   // you move. Three is a wall to pick a side of, which is the whole
   // of what it contributes.
-  const { SPEC, spawnFoeForLevel, foes, resetFoes } = await import('../src/foes.js');
+  const { SQUADS, spawnSquadron, foes, resetFoes } = await import('../src/foes.js');
   const { makeGame } = await import('../src/game.js');
   const game = makeGame();
   game.level.spec = { ...game.level.spec, foes: ['gnat'] };
-  resetFoes();
-  spawnFoeForLevel(game);
+  // The swarm is a squadron now rather than a special case in the spawn
+  // path, so what is checked is that the squadron exists and arrives whole.
+  const swarm = SQUADS.find((sq) => sq.id === 'swarm');
+  assert.ok(swarm, 'no gnat swarm in the squadron table');
+  const want = swarm.of[0][1];
+  assert.ok(want >= 3, `a swarm of ${want} is not a wall to pick a side of`);
+
+  let got = 0;
+  for (let i = 0; i < 200 && got !== want; i++) {
+    resetFoes();
+    const sq = spawnSquadron(game);
+    if (sq && sq.squad.id === 'swarm') got = sq.members.length;
+  }
+  assert.equal(got, want, `the gnat swarm arrived ${got} strong, want ${want}`);
   const n = [...Array(foes.count).keys()].filter((i) => foes.items[i].kind === 'gnat').length;
-  assert.equal(n, SPEC.gnat.swarm, `one spawn produced ${n} gnats, want ${SPEC.gnat.swarm}`);
+  assert.equal(n, want, `one spawn produced ${n} gnats, want ${want}`);
 
   // ...and not stacked on one spot, which would be one object drawn
   // three times rather than three things in the way.

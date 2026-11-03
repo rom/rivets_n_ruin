@@ -5,7 +5,7 @@
 // LEVELS[].foes, so the hulls escalate in kind as well as in number.
 
 import {
-  FIELD_TOP, FIELD_BOT, VIEW_W, APRON, clamp, CULL_MARGIN,
+  FIELD_TOP, FIELD_BOT, VIEW_W, APRON, clamp, CULL_MARGIN, FOE_PACE,
 } from './config.js';
 import { makePool } from './pool.js';
 import { award, hurt } from './score.js';
@@ -173,47 +173,222 @@ export function spawnFoe(game, kind) {
   return f;
 }
 
-// Picks one of the kinds this hull fields.
-export function spawnFoeForLevel(game) {
-  const list = game.level.spec.foes;
-  if (!list || !list.length) return null;
-  const kind = list[Math.floor(Math.random() * list.length)];
-  const f = spawnFoe(game, kind);
-  // A gnat on its own is a non-event: one hit point, no gun, and
-  // nothing to make you move. Three of them is a wall you have to pick
-  // a side of, which is the whole of what it contributes.
-  if (f && kind === 'gnat') {
-    for (let k = 1; k < (SPEC.gnat.swarm || 1); k++) {
-      const mate = spawnFoe(game, 'gnat');
-      if (!mate) break;      // pool is full; however many arrived will do
-      mate.x = f.x + k * 18;
-      mate.baseY = clamp(f.baseY + (k % 2 ? -1 : 1) * 26 * k, FIELD_TOP + 20, FIELD_BOT - 20);
-      mate.y = mate.baseY;
-      mate.facing = f.facing;
-      mate.t = f.t + k * 0.4;   // out of phase, so they do not fly as one shape
-    }
+// ------------------------------------------------------------- squadrons
+//
+// Attackers used to arrive one at a time, uniformly at random from the
+// hull's roster. On a deep hull that is fifteen kinds all equally likely
+// at every moment, which averages out: fifteen kinds shuffled that finely
+// read as one kind. Nothing ever *arrived*, it just kept coming.
+//
+// A squadron is a composition with a shape — three gnats in a vee, a barge
+// with darts screening it, a monitor on its own because that is what a
+// monitor is. The gnat swarm and the chainer pair were already special
+// cases of this written into the spawn path; they are entries in the table
+// now, along with the rest.
+
+// Where member i of n sits relative to the squadron's anchor. Offsets are
+// in world pixels; dx is along the approach, so a positive dx is *behind*
+// the leader whichever way the squadron is flying.
+const FORMATION = {
+  // Arrowhead. Alternates above and below, so it widens as it goes back.
+  vee: (i) => ({ dx: Math.ceil(i / 2) * 22, dy: (i % 2 ? -1 : 1) * Math.ceil(i / 2) * 25 }),
+  // Nose to tail. The one that reads as a stream rather than a wall.
+  column: (i) => ({ dx: i * 30, dy: (i % 2 ? 1 : -1) * 6 }),
+  // Abreast, centred on the anchor: a wall you pick a side of.
+  line: (i, n) => ({ dx: (i % 2) * 10, dy: (i - (n - 1) / 2) * 34 }),
+  // A diagonal. Crosses your lane whatever altitude you hold.
+  echelon: (i) => ({ dx: i * 24, dy: i * 22 }),
+  // The leader out front, everything else tucked in behind it. Both the
+  // stagger and the spread grow with each rank: at a flat 16px step the
+  // first and third escorts came out on the same line 16px apart, which
+  // is two sprites in one place rather than a formation.
+  screen: (i) => (i === 0 ? { dx: 0, dy: 0 }
+    : { dx: 34 + (i >> 1) * 26, dy: (i % 2 ? -1 : 1) * (26 + (i >> 1) * 10) }),
+};
+
+// A formation's offsets, with the leader's own offset taken out so the
+// leader lands exactly where it was spawned and everything else is placed
+// relative to it. Without this a centred formation — `line` — left the
+// leader at dy 0 while its members sat at the centred offsets around it,
+// so a line of four was unevenly spaced and its first two members came
+// out 19.7px apart.
+function offsets(form, n) {
+  const base = form(0, n);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const o = form(i, n);
+    out.push({ dx: o.dx - base.dx, dy: o.dy - base.dy });
+  }
+  return out;
+}
+
+// `of` is [kind, count] pairs, in formation order. `link` wires the members
+// together as a chainer pair. A squadron is eligible only if the hull
+// fields every kind in it.
+export const SQUADS = [
+  // --- the light end: numbers, not weight
+  { id: 'swarm', form: 'vee', of: [['gnat', 3]] },
+  { id: 'cloud', form: 'echelon', of: [['gnat', 5]] },
+  { id: 'runners', form: 'echelon', of: [['dart', 3]] },
+  { id: 'pair', form: 'line', of: [['weaver', 2]] },
+  { id: 'flight', form: 'vee', of: [['weaver', 2], ['gnat', 2]] },
+
+  // --- something to kill, with something in the way of killing it
+  { id: 'screened', form: 'screen', of: [['orbiter', 1], ['gnat', 3]] },
+  { id: 'escorted', form: 'screen', of: [['barge', 1], ['dart', 2]] },
+  { id: 'guarded', form: 'screen', of: [['carrier', 1], ['weaver', 2]] },
+  { id: 'warded', form: 'line', of: [['warder', 2], ['lancer', 1]] },
+  { id: 'minelayer', form: 'column', of: [['bomber', 1], ['mine', 2]] },
+
+  // --- a line of one thing, which is a different problem from a mix
+  { id: 'lances', form: 'line', of: [['lancer', 3]] },
+  { id: 'battery', form: 'column', of: [['orbiter', 2]] },
+  { id: 'drift', form: 'line', of: [['mine', 4]] },
+
+  // --- the heavy end. One of these is the event.
+  { id: 'monitor', form: 'column', of: [['monitor', 1]] },
+  { id: 'siege', form: 'screen', of: [['monitor', 1], ['gnat', 3]] },
+  { id: 'splitters', form: 'line', of: [['splitter', 2]] },
+
+  // A chainer is half of a thing: the pair and the live tether between
+  // them is the attacker. The gap is the tether's own, not a formation's.
+  { id: 'chain', form: 'line', link: true, of: [['chainer', 2]] },
+];
+
+// A squadron's weight, in the only currency the roster already agrees on:
+// what it is worth to kill. Used to pace the cadence, so a swarm of gnats
+// comes round again quickly and a monitor buys itself a long quiet.
+export function squadWeight(sq) {
+  let total = 0;
+  for (const [kind, n] of sq.of) total += (SPEC[kind] ? SPEC[kind].score : 0) * n;
+  return total;
+}
+
+const squadKinds = (sq) => sq.of.flatMap(([kind, n]) => Array(n).fill(kind));
+
+// Kinds that are only half an attacker on their own, and so never get a
+// singleton. A chainer without its mate has no tether, which is the whole
+// of what a chainer is; the old spawn path killed one that could not be
+// paired rather than let it fly. A gnat alone is one hit point and no gun
+// — nothing to make you move. Both were already group-only before
+// squadrons existed, and generating a singleton for every roster kind
+// quietly undid that for both of them.
+export const NEVER_ALONE = new Set(['chainer', 'gnat']);
+
+// Everything this hull can field: the squadrons whose every kind is on the
+// roster, plus each kind on its own. Singletons stay in because a roster
+// entry that only ever turns up in a group stops being its own answer to
+// anything — and because a hull whose roster covers no squadron at all
+// still has to spawn something.
+export function squadsFor(spec) {
+  const roster = spec.foes;
+  if (!roster || !roster.length) return [];
+  const has = new Set(roster);
+  const out = SQUADS.filter((sq) => sq.of.every(([kind]) => has.has(kind)));
+  for (const kind of roster) {
+    if (NEVER_ALONE.has(kind)) continue;
+    out.push({ id: 'lone-' + kind, form: 'column', of: [[kind, 1]] });
+  }
+  return out;
+}
+
+// The threat rate this hull should deliver, in points a second.
+//
+// Pinned to what the one-at-a-time cadence actually produced here: the
+// mean worth of a roster pull, divided by the mean gap between pulls. The
+// multipliers are the two kinds that never arrived alone even then.
+// Squadrons change what arrives together, not how much arrives.
+export function foeRateFor(spec) {
+  const roster = spec.foes;
+  if (!roster || !roster.length) return 0;
+  let total = 0;
+  for (const k of roster) {
+    const together = k === 'gnat' ? (SPEC.gnat.swarm || 1) : k === 'chainer' ? 2 : 1;
+    total += (SPEC[k] ? SPEC[k].score : 0) * together;
+  }
+  return total / roster.length / FOE_PACE.legacyGap;
+}
+
+// Cached per spec object: the filter is pure and the roster never changes
+// under a hull, but this runs on a spawn timer with the game in flight.
+const squadCache = new WeakMap();
+function eligible(spec) {
+  let list = squadCache.get(spec);
+  if (!list) { list = squadsFor(spec); squadCache.set(spec, list); }
+  return list;
+}
+
+// Spawns one squadron and returns it, or null. The members are placed
+// relative to the leader, which is placed the way a lone attacker always
+// was: off the edge the ship is facing.
+export function spawnSquadron(game) {
+  const list = eligible(game.level.spec);
+  if (!list.length) return null;
+  const sq = list[Math.floor(Math.random() * list.length)];
+  const kinds = squadKinds(sq);
+  const form = FORMATION[sq.form] || FORMATION.column;
+
+  const lead = spawnFoe(game, kinds[0]);
+  if (!lead) return null;
+  const members = [lead];
+
+  // Put the leader where the whole formation fits. Without this, a wide
+  // one spawned near a girder had three of its members clamped onto the
+  // same line — one object drawn three times rather than three things in
+  // the way, which is the exact failure the gnat swarm was written to
+  // avoid. If the formation is taller than the corridor the clamp below
+  // still catches it; nothing in the table is.
+  const place = sq.link
+    ? kinds.map((_, i) => ({ dx: 0, dy: i * SPEC.chainer.tetherGap }))
+    : offsets(form, kinds.length);
+  let loDy = 0;
+  let hiDy = 0;
+  for (const o of place) {
+    loDy = Math.min(loDy, o.dy);
+    hiDy = Math.max(hiDy, o.dy);
+  }
+  const lo = FIELD_TOP + 20 - loDy;
+  const hi = FIELD_BOT - 20 - hiDy;
+  if (hi > lo) lead.baseY = clamp(lead.baseY, lo, hi);
+  lead.y = lead.baseY;
+
+  for (let i = 1; i < kinds.length; i++) {
+    const f = spawnFoe(game, kinds[i]);
+    if (!f) break;             // pool is full; however many arrived will do
+    const { dx, dy } = place[i];
+    // dx is along the approach: behind the leader, whichever way it flies.
+    f.x = lead.x - lead.facing * dx;
+    f.baseY = clamp(lead.baseY + dy, FIELD_TOP + 20, FIELD_BOT - 20);
+    f.y = f.baseY;
+    f.facing = lead.facing;
+    // Out of phase, so a formation reads as several craft holding station
+    // rather than as one shape repeated.
+    f.t = lead.t + i * 0.4;
+    members.push(f);
   }
 
-  // A chainer is half of a thing. One on its own is a weak weaver; the
-  // pair and the live tether between them is the attacker.
-  if (f && kind === 'chainer') {
-    const mate = spawnFoe(game, 'chainer');
-    if (mate) {
-      mate.x = f.x;
-      mate.baseY = clamp(f.baseY + SPEC.chainer.tetherGap, FIELD_TOP + 20, FIELD_BOT - 20);
-      mate.y = mate.baseY;
-      mate.facing = f.facing;
-      f.mate = mate;
-      mate.mate = f;
-      f.holdsLink = true;          // only one end draws and bills it
-    } else {
-      // No room in the pool for the other half: a lone chainer is not an
-      // attacker, so it does not get to be one.
+  if (sq.link) {
+    // A lone chainer is not an attacker, so it does not get to be one.
+    if (members.length < 2) {
       foes.kill(foes.count - 1);
       return null;
     }
+    members[0].mate = members[1];
+    members[1].mate = members[0];
+    members[0].holdsLink = true;      // only one end draws and bills it
   }
-  return f;
+
+  return { squad: sq, members, weight: squadWeight(sq) };
+}
+
+// Picks one of the kinds this hull fields, on its own. The miniboss escort
+// uses this: an escort is one more thing to deal with while you deal with
+// the miniboss, and turning it into a five-ship formation would change
+// what a miniboss is.
+export function spawnFoeForLevel(game) {
+  const list = game.level.spec.foes;
+  if (!list || !list.length) return null;
+  return spawnFoe(game, list[Math.floor(Math.random() * list.length)]);
 }
 
 // The live tether between a chainer pair. Billed from the end that holds

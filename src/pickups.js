@@ -5,6 +5,7 @@
 
 import {
   PICKUP, SHIP, FIELD_TOP, FIELD_BOT, VIEW_W, clamp, CULL_MARGIN,
+  MOD_FORCE, hullRule,
 } from './config.js';
 import { makePool } from './pool.js';
 import { award } from './score.js';
@@ -27,6 +28,15 @@ export const isTreasure = (kind) => kind in PICKUP.treasure;
 // collected in all, and keeping two counters in step by hand is how one of
 // them ends up wrong.
 export const freshHaul = () => ({ coins: 0, bars: 0, coffins: 0, treasures: 0, value: 0 });
+
+// What loot is worth here. SCAVENGER is the pilot's, HARD VACUUM is the
+// hull's, and they multiply. Written once rather than at each of the six
+// places that used to spell out `pl.coinMul || 1` by hand — a seventh kind
+// of loot added to the switch would otherwise quietly miss the hull rule.
+function lootMul(game, pl) {
+  const vac = hullRule(game, 'vacuum') ? MOD_FORCE.vacuumLoot : 1;
+  return (pl.coinMul || 1) * vac;
+}
 
 function haul(game, kind, value, coins = 0) {
   game.coins = (game.coins || 0) + coins;
@@ -168,6 +178,14 @@ export function spoils(game, x, y, source) {
   if (source === 'turret') n += 2;
   if (source === 'mini') n += 8;
   if (source === 'boss') n += 14;
+  // SALVAGE RUN: nothing in the crates, so the wreckage is the whole of
+  // what a hull pays. Doubling the coins is the other half of a rule that
+  // would otherwise only take something away.
+  //
+  // After the per-source bonus, not before it. Applied to the base roll
+  // alone it came out at 1.64x on a turret rather than 2x, which is not
+  // what the hull card promises the pilot.
+  if (hullRule(game, 'salvage')) n *= MOD_FORCE.salvageCoins;
   scatterCoins(game, x, y, n);
 
   if (Math.random() < PICKUP.barChance * (source === 'boss' ? 6 : 1)) {
@@ -208,6 +226,9 @@ export function spoils(game, x, y, source) {
 }
 
 export function maybeDrop(game, x, y, source) {
+  // SALVAGE RUN: no crates at all. No shield refills and no gun levels for
+  // the length of the hull, so it is flown clean or not at all.
+  if (hullRule(game, 'salvage')) return null;
   const chance = source === 'turret' ? PICKUP.dropFromTurret : PICKUP.dropFromInterceptor;
   if (Math.random() > chance) return null;
   return spawnPickup(game, x, y);
@@ -283,7 +304,7 @@ function collect(game, p) {
     // Scavenger lifts what loot is worth, not just how many coins it yields:
     // it used to leave coffins and treasure untouched, which made the mod
     // worth less exactly where the loot was worth most.
-    const mul = pl.coinMul || 1;
+    const mul = lootMul(game, pl);
     award(game, Math.round(t.value * mul));
     haul(game, p.kind, Math.round(t.value * mul), Math.round(t.coins * mul));
     game.onHaul?.(p.kind);
@@ -295,23 +316,26 @@ function collect(game, p) {
 
   switch (p.kind) {
     case 'goldbar': {
-      const v = Math.round(PICKUP.barValue * (pl.coinMul || 1));
+      const m = lootMul(game, pl);
+      const v = Math.round(PICKUP.barValue * m);
       award(game, v);
-      haul(game, 'goldbar', v, Math.round(PICKUP.barCoins * (pl.coinMul || 1)));
+      haul(game, 'goldbar', v, Math.round(PICKUP.barCoins * m));
       game.onHaul?.('goldbar');
       label = 'GOLD BAR  +' + v;
       break;
     }
-    case 'coin':
-      award(game, Math.round(PICKUP.coinValue * (pl.coinMul || 1)));
-      haul(game, 'coin', Math.round(PICKUP.coinValue * (pl.coinMul || 1)),
-        Math.max(1, Math.round(pl.coinMul || 1)));
+    case 'coin': {
+      const m = lootMul(game, pl);
+      award(game, Math.round(PICKUP.coinValue * m));
+      haul(game, 'coin', Math.round(PICKUP.coinValue * m), Math.max(1, Math.round(m)));
       game.onHaul?.('coin');
       return;                       // no toast: coins are constant background
+    }
     case 'coffin': {
-      const v = Math.round(PICKUP.coffinValue * (pl.coinMul || 1));
+      const m = lootMul(game, pl);
+      const v = Math.round(PICKUP.coffinValue * m);
       award(game, v);
-      haul(game, 'coffin', v, Math.round(PICKUP.coffinCoins * (pl.coinMul || 1)));
+      haul(game, 'coffin', v, Math.round(PICKUP.coffinCoins * m));
       game.onHaul?.('coffin');
       label = 'GOLD COFFIN  +' + v;
       break;

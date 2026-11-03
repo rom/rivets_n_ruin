@@ -9,6 +9,11 @@ import { DIFFICULTY, LEVELS } from './config.js';
 
 const KEY = 'rnr.settings';
 
+// Index 0 is the historical behaviour, so a save written before this
+// setting existed reads as FIXED rather than silently reshuffling the
+// campaign somebody was learning.
+export const LAYOUTS = ['FIXED', 'SHUFFLED'];
+
 // Grouped only for the heading the screen shows; the list is still flat,
 // because a group is a label and not a structure.
 export const GROUPS = ['AUDIO', 'GAME', 'ACCESSIBILITY', 'PICTURE'];
@@ -28,6 +33,13 @@ export const DEFS = [
     help: 'Begin on any hull you have reached. Earlier refits are credited.' },
   { id: 'demo', group: 'GAME', label: 'ATTRACT DEMO', kind: 'bool', def: true,
     help: 'Plays itself after two minutes idle. Any key stops it.' },
+  // Terrain is generated from a seed per hull, so with this off a hull is
+  // the same corridor every time — which is what makes it learnable, and
+  // what makes two scores on it comparable. On, each run folds a seed of
+  // its own in and the layouts are new, which is the other thing a player
+  // might want from the same campaign.
+  { id: 'shuffle', group: 'GAME', label: 'HULL LAYOUTS', kind: 'layout', def: 0,
+    help: 'FIXED is the same hull every run, and learnable. SHUFFLED redraws every layout per run.' },
   // --- accessibility.
   //
   // Each of these removes a specific barrier rather than making the game
@@ -83,6 +95,9 @@ function load() {
       if (d.kind === 'hull' && Number.isFinite(saved[d.id])) {
         state[d.id] = Math.max(0, Math.min(LEVELS.length - 1, saved[d.id]));
       }
+      if (d.kind === 'layout' && Number.isFinite(saved[d.id])) {
+        state[d.id] = Math.max(0, Math.min(LAYOUTS.length - 1, saved[d.id]));
+      }
     }
   } catch { /* corrupt or unavailable; defaults stand */ }
 }
@@ -118,6 +133,8 @@ export function nudge(id, dir, ctx = {}) {
     set(id, Math.max(0, Math.min(DIFFICULTY.length - 1, state[id] + dir)));
   } else if (d.kind === 'hull') {
     set(id, Math.max(0, Math.min(hullMax, state[id] + dir)));
+  } else if (d.kind === 'layout') {
+    set(id, Math.max(0, Math.min(LAYOUTS.length - 1, state[id] + dir)));
   }
 }
 
@@ -140,5 +157,6 @@ export function display(d, tuneName) {
     const i = Math.max(0, Math.min(LEVELS.length - 1, state[d.id] | 0));
     return LEVELS[i].name + '  ' + (i + 1) + '/' + LEVELS.length;
   }
+  if (d.kind === 'layout') return LAYOUTS[Math.max(0, Math.min(LAYOUTS.length - 1, state[d.id] | 0))];
   return '';
 }
