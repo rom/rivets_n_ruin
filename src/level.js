@@ -103,6 +103,40 @@ export function specWithModifier(spec, mod) {
 
 // ---------------------------------------------------------------- generation
 
+// A built place: an apron off one girder with structures standing on it.
+// Spaceports, bases, power plants, fuel stations and air-defence posts
+// are all this shape, so they are all laid out by this one function.
+//
+// The works go down along a cursor and the apron is made as wide as
+// whatever ended up on it. The first version of each of these rolled a
+// width and then placed every kind at its own arithmetic inside it,
+// which drew a cistern exactly on top of a depot, stood a lander in a
+// fuel tank, and hung the back three sheds of a base off the end of its
+// own deck. A cursor makes all three impossible to write: each
+// structure gets ground nothing else is standing on, and the deck
+// cannot come out shorter than its contents.
+const PLACE_EDGE = 16;      // bare deck at each end, so nothing sits on the lip
+
+function builtPlace(r, parts, out, fromTop, deck) {
+  const dir = fromTop ? 1 : -1;
+  const y = fromTop ? FIELD_TOP + deck : FIELD_BOT - deck;
+  // One gap for the whole place, so it reads as built to a plan rather
+  // than scattered. Narrow: these are compounds, not suburbs.
+  const gap = rr(r, 6, 14);
+  let cx = PLACE_EDGE;
+  for (const kind of parts) {
+    const rad = TOWERS[kind].r || 8;
+    cx += rad;
+    out.turrets.push({ x: cx, y, dir, kind });
+    cx += rad + gap;
+  }
+  const w = Math.round(cx - gap + PLACE_EDGE);
+  out.obstacles.push({
+    x: 0, y: fromTop ? FIELD_TOP : FIELD_BOT - deck, w, h: deck, face: dir,
+  });
+  return w;
+}
+
 // Obstacle patterns, chosen by a seeded roll. Every pattern leaves a
 // navigable corridor; the x-gap that follows is always wide enough to
 // reposition vertically at cruise speed.
@@ -231,7 +265,7 @@ function layout(r, spec) {
     }
     if (r() < 0.5) turrets.push({ x: w / 2, y: firstY, dir: 1 });
     advance = w * 2 + between;
-  } else if (roll < 0.86) {
+  } else if (roll < 0.84) {
     // Islands: free-standing blocks at different heights, spread out. No
     // forced line at all — several work, and picking one is the whole of
     // it. The counterweight to the patterns above, which all insist.
@@ -246,7 +280,7 @@ function layout(r, spec) {
       sx += w + rr(r, 40, 76);
     }
     advance = sx;
-  } else if (roll < 0.895) {
+  } else if (roll < 0.875) {
     // A spaceport: a place rather than a pattern.
     //
     // Everything else on a hull is something to get past. This is
@@ -255,31 +289,79 @@ function layout(r, spec) {
     // parked when the shooting started. The tanks chain, so the whole
     // installation can come apart from one shot in the right place,
     // including around you if you take it at close range.
-    const fromTop = r() < 0.5;
-    const dir = fromTop ? 1 : -1;
-    const deck = rr(r, 26, 40);
-    const y = fromTop ? FIELD_TOP + deck : FIELD_BOT - deck;
-    const w = rr(r, 250, 340);
-    obstacles.push({
-      x: 0, y: fromTop ? FIELD_TOP : FIELD_BOT - deck, w, h: deck,
-      face: dir,
-    });
-    // Control at one end, so the port has a front door.
-    turrets.push({ x: rr(r, 22, 40), y, dir, kind: 'control' });
-    // Tanks in a cluster, close enough that one going up reaches the
-    // next. Spaced by hand rather than randomly: a chain that only
+    // Control at the front door, the fuel farm behind it, and something
+    // parked at the far end — which is the reason to come in rather
+    // than go round. The tanks come out close enough to chain, because
+    // builtPlace packs a place to its own footprint: a chain that only
     // sometimes chains is a mechanic nobody learns.
-    const tanks = ri(r, 2, 3);
-    const t0 = w * 0.34;
-    for (let i = 0; i < tanks; i++) {
-      turrets.push({ x: t0 + i * 54, y, dir, kind: 'tank' });
+    const parts = ['control'];
+    for (let i = ri(r, 2, 3); i > 0; i--) parts.push('tank');
+    if (r() < 0.5) parts.push('post');
+    parts.push('lander');
+    advance = builtPlace(r, parts, { obstacles, turrets }, r() < 0.5, rr(r, 26, 40));
+  } else if (roll < 0.905 && spec.bases) {
+    // An installation. Four of them, and which one you get is rolled
+    // here rather than being four separate bands, because they are the
+    // same idea — a place built on the hull, with things in it worth
+    // breaking and usually one thing worth breaking first.
+    //
+    // All four are an apron off one girder with the works standing on
+    // it, so the corridor beside them stays open: they are somewhere to
+    // go into, not a wall across the hull.
+    const fromTop = r() < 0.5;
+    const deck = rr(r, 22, 34);
+    const pick = r();
+    const build = (parts) =>
+      builtPlace(r, parts, { obstacles, turrets }, fromTop, deck);
+
+    if (pick < 0.34) {
+      // --- a base: barracks, sheds, a gun on the corner and bulk
+      // storage at the back, which is the thing to shoot if you want
+      // all of it at once.
+      const parts = ['gun'];
+      for (let i = ri(r, 2, 3); i > 0; i--) parts.push('barracks');
+      for (let i = ri(r, 2, 3); i > 0; i--) parts.push('depot');
+      for (let i = ri(r, 2, 3); i > 0; i--) parts.push('cistern');
+      if (r() < 0.6) parts.push('watchtower');
+      advance = build(parts);
+    } else if (pick < 0.58) {
+      // --- a power plant: the reactor, and pylons carrying the line
+      // away from it. While the reactor stands every gun on the plant
+      // is quickened, so the order you take it apart in matters.
+      const parts = ['reactor', 'cistern'];
+      for (let i = ri(r, 3, 5); i > 0; i--) parts.push('pylon');
+      if (r() < 0.5) parts.push('flak');
+      advance = build(parts);
+    } else if (pick < 0.80) {
+      // --- a fuel station: pumps between cisterns. Almost all of it is
+      // volatile, and the chain runs the length of the apron.
+      // A watchtower oversees it, not a CONTROL tower: control is air
+      // traffic, and it belongs to a spaceport with craft to talk to.
+      // Reusing it here put an air traffic tower on a filling station
+      // and broke the test that says a port has fuel and something
+      // parked, by inventing a port with neither.
+      const parts = ['watchtower'];
+      // Cisterns at both ends with the pumps between them, so the chain
+      // runs the length of the apron whichever end you light it from.
+      const tanks = ri(r, 3, 4);
+      for (let i = 0; i < tanks; i++) {
+        parts.push('cistern');
+        if (i < tanks - 1) parts.push('pump');
+      }
+      if (r() < 0.5) parts.push('pop');
+      advance = build(parts);
+    } else {
+      // --- an air-defence post: searchlights, and the guns that use
+      // what they find. Breaking the lights first is the whole of the
+      // decision this one offers.
+      const parts = [];
+      for (let i = ri(r, 2, 3); i > 0; i--) parts.push('searchlight');
+      for (let i = ri(r, 1, 2); i > 0; i--) parts.push('depot');
+      parts.push('watchtower');
+      parts.push(r() < 0.5 ? 'flak' : 'gun');
+      advance = build(parts);
     }
-    // ...and something parked at the far end, which is the reason to
-    // come in rather than go round.
-    turrets.push({ x: w - rr(r, 40, 70), y, dir, kind: 'lander' });
-    if (r() < 0.5) turrets.push({ x: w * 0.6, y, dir, kind: 'post' });
-    advance = w;
-  } else if (roll < 0.92) {
+  } else if (roll < 0.93) {
     // A narrows: the corridor itself closes down for a long stretch and
     // opens again. Single obstacles are dodged; this has to be flown.
     const seg = ri(r, 5, 9);
@@ -301,7 +383,7 @@ function layout(r, spec) {
       sx += segW;
     }
     advance = sx;
-  } else if (roll < 0.945 && spec.hazards) {
+  } else if (roll < 0.955 && spec.hazards) {
     // A hazard field: an area to go round rather than a thing to shoot.
     //
     // Placed against one girder and never more than part of the
@@ -325,7 +407,7 @@ function layout(r, spec) {
       phase: r() * 10,
     });
     advance = w;
-  } else if (roll < 0.96 && spec.press) {
+  } else if (roll < 0.985 && spec.press) {
     // A press: jaws that close and open on a cycle, staggered along the
     // run so flying it is a wave rather than one piece of timing. The
     // 4% this band costs comes out of the two single-block patterns
@@ -1432,6 +1514,77 @@ function drawField(ctx, h, t) {
   }
 
   ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = was;
+}
+
+// The line strung between pylons, and the beams searchlights throw.
+//
+// Both belong to the hull rather than to the thing that owns them: a
+// span runs between two pylons and a beam runs out across the corridor,
+// and neither fits inside a body drawn in its tower's local coordinates.
+// Drawn live, because both move or go out when what holds them is shot.
+export function drawPowerLines(ctx, level, camX, viewW) {
+  const list = level.turrets;
+  let prev = null;
+  ctx.save();
+  ctx.lineWidth = 1;
+  for (const t of list) {
+    if (t.kind !== 'pylon') { continue; }
+    // Only strung to the pylon before it, and only if that one is close
+    // enough to be part of the same run. Breaking either end drops the
+    // span, which is the whole reason to shoot a pylon.
+    if (prev && !prev.dead && !t.dead && t.x - prev.x < 130 && prev.dir === t.dir) {
+      if (t.x + 40 > camX && prev.x - 40 < camX + viewW) {
+        const sag = 5;
+        const y0 = prev.y + prev.dir * 21;
+        const y1 = t.y + t.dir * 21;
+        for (const off of [-8, 8]) {
+          ctx.strokeStyle = '#2b323c';
+          ctx.beginPath();
+          ctx.moveTo(prev.x + off, y0);
+          ctx.quadraticCurveTo((prev.x + t.x) / 2 + off, (y0 + y1) / 2 + prev.dir * sag,
+            t.x + off, y1);
+          ctx.stroke();
+        }
+      }
+    }
+    prev = t;
+  }
+  ctx.restore();
+}
+
+export function drawBeams(ctx, level, camX, viewW, t) {
+  const list = level.turrets;
+  const was = ctx.globalCompositeOperation;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const s of list) {
+    if (!s.tower || !s.tower.beam || s.dead) continue;
+    if (s.x + s.tower.beam.range < camX || s.x - s.tower.beam.range > camX + viewW) continue;
+    const sw = s.tower.beam;
+    const aim = s.beamAim || 0;
+    const reach = sw.range;
+    // A cone out of the lamp, in the direction the lamp is pointing.
+    // Brighter when it has something, which is the tell that it has.
+    const spread = 0.2;
+    const ax = Math.sin(aim);
+    const ay = Math.cos(aim) * s.dir;
+    const lx = s.x;
+    const ly = s.y + s.dir * 10;
+    const g = ctx.createLinearGradient(lx, ly, lx + ax * reach, ly + ay * reach);
+    const lit = s.beamLit ? 0.3 : 0.14;
+    g.addColorStop(0, `rgba(255,240,196,${lit})`);
+    g.addColorStop(1, 'rgba(255,240,196,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(lx, ly);
+    for (const e of [-spread, spread]) {
+      ctx.lineTo(lx + Math.sin(aim + e) * reach, ly + Math.cos(aim + e) * s.dir * reach);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
   ctx.globalCompositeOperation = was;
 }
 

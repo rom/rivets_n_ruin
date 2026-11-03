@@ -254,7 +254,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 172, interceptorSpawn: 1.50, interceptorHp: 2,
     foes: [],
     enemyDmg: 1.00,
-    towers: ['gun'], lasers: 0, laserHp: 0, press: false, hazards: false, tune: 0 },
+    towers: ['gun'], lasers: 0, laserHp: 0, press: false, hazards: false, bases: false, tune: 0 },
 
   { name: 'OSMIUM', subtitle: 'DENSEST ALLOY AFLOAT — LINE HULL',
     theme: 'conduit', seed: 0x051f1ed, length: 14500,
@@ -263,7 +263,7 @@ const CORE_LEVELS = [
     interceptorSpeed: 196, interceptorSpawn: 1.20, interceptorHp: 3,
     foes: ['mine'],
     enemyDmg: 1.05,
-    towers: ['gun', 'pop'], lasers: 0, laserHp: 1, press: false, hazards: false, tune: 1 },
+    towers: ['gun', 'pop'], lasers: 0, laserHp: 1, press: false, hazards: false, bases: true, tune: 1 },
 
   { name: 'TANTALUM', subtitle: 'CORROSION PROOF — FLAGSHIP HULL',
     theme: 'glacier', seed: 0x7a07a1, length: 17000,
@@ -273,7 +273,7 @@ const CORE_LEVELS = [
     foes: ['mine', 'lancer', 'weaver', 'gnat'],
     enemyDmg: 1.10,
     towers: ['gun', 'pop', 'flak', 'post'], lasers: 1, laserHp: 2, press: false,
-    hazards: true, hazardKinds: ['fire'], tune: 4 },
+    hazards: true, hazardKinds: ['fire'], bases: true, tune: 4 },
 
   { name: 'CUPRUM', subtitle: 'OXIDISED — SALVAGE HULK',
     theme: 'desert', seed: 0xc0ffee, length: 18500,
@@ -283,7 +283,7 @@ const CORE_LEVELS = [
     foes: ['mine', 'lancer', 'orbiter', 'weaver', 'gnat', 'dart', 'netter'],
     enemyDmg: 1.16,
     towers: ['gun', 'pop', 'flak', 'lance', 'rocket', 'radar'], lasers: 2, laserHp: 3, press: true,
-    hazards: true, hazardKinds: ['fire', 'storm'], tune: 2 },
+    hazards: true, hazardKinds: ['fire', 'storm'], bases: true, tune: 2 },
 
   { name: 'PYRITE', subtitle: 'RUNNING HOT — FOUNDRY HULL',
     theme: 'foundry', seed: 0xf00dface, length: 20000,
@@ -293,7 +293,7 @@ const CORE_LEVELS = [
     foes: ['lancer', 'orbiter', 'warder', 'weaver', 'splitter', 'dart', 'barge', 'netter'],
     enemyDmg: 1.22,
     towers: ['gun', 'flak', 'lance', 'mortar', 'rocket', 'radar', 'bastion'], lasers: 2, laserHp: 4, press: true,
-    hazards: true, hazardKinds: ['fire', 'storm'], tune: 5 },
+    hazards: true, hazardKinds: ['fire', 'storm'], bases: true, tune: 5 },
 
   { name: 'WOLFRAM', subtitle: 'LIGHT SWALLOWING — SIEGE HULL',
     theme: 'void', seed: 0x0b51d1a, length: 21500,
@@ -303,7 +303,7 @@ const CORE_LEVELS = [
     foes: ['mine', 'orbiter', 'warder', 'splitter', 'leech', 'mirror', 'barge', 'grapnel'],
     enemyDmg: 1.28,
     towers: ['gun', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array'], lasers: 3, laserHp: 5, press: true,
-    hazards: true, hazardKinds: ['storm', 'ice'], tune: 3 },
+    hazards: true, hazardKinds: ['storm', 'ice'], bases: true, tune: 3 },
 
   { name: 'FERRUM', subtitle: 'EATEN THROUGH — DERELICT HULL',
     theme: 'derelict', seed: 0xfe2211, length: 23000,
@@ -314,7 +314,7 @@ const CORE_LEVELS = [
       'grapnel', 'scorcher'],
     enemyDmg: 1.34,
     towers: ['gun', 'flak', 'mortar', 'warden', 'rocket', 'array', 'silo'], lasers: 3, laserHp: 6, press: true,
-    hazards: true, hazardKinds: ['fire', 'ice', 'spark'], tune: 6 },
+    hazards: true, hazardKinds: ['fire', 'ice', 'spark'], bases: true, tune: 6 },
 
   { name: 'AURUM', subtitle: 'THE PRIZE — ADMIRALTY HULL',
     theme: 'admiralty', seed: 0xa17aa17a, length: 25000,
@@ -325,7 +325,8 @@ const CORE_LEVELS = [
       'gnat', 'dart', 'barge', 'monitor', 'netter', 'grapnel', 'scorcher'],
     enemyDmg: 1.40,
     towers: ['gun', 'flak', 'lance', 'mortar', 'warden', 'rocket', 'bastion', 'array', 'silo'], lasers: 4, laserHp: 7,
-    press: true, hazards: true, hazardKinds: ['fire', 'storm', 'ice', 'spark'], tune: 7 },
+    press: true, hazards: true, hazardKinds: ['fire', 'storm', 'ice', 'spark'],
+    bases: true, tune: 7 },
 ];
 
 // The campaign past the admiralty hull.
@@ -386,6 +387,7 @@ const DEEP_LEVELS = DEEP_HULLS.map(([name, subtitle], i) => {
     press: true,
     hazards: true,
     hazardKinds: ['fire', 'storm', 'ice', 'spark'],
+    bases: true,
     tune: n % 8,
   };
 });
@@ -755,6 +757,9 @@ export const TOWERS = {
     // The same job at longer reach, and it sweeps rather than spins, so
     // the two read apart at a glance even in silhouette.
     name: 'ARRAY', hpMul: 1.2, score: 330, r: 13,
+    // `sweep` here is how fast the dish swings, in radians a second.
+    // Not to be confused with the searchlight's `beam`, which is an
+    // object and a different mechanic entirely.
     inert: true, sweep: 1.1, paint: 360, paintWake: 300, paintTurn: 1.25,
     colour: '#7fb2ff',
   },
@@ -792,6 +797,86 @@ export const TOWERS = {
     name: 'LANDER', hpMul: 1.4, score: 290, r: 16,
     inert: true,
     colour: '#8e9aa9',
+  },
+
+  // ------------------------------------------------- installations
+  //
+  // Everything below is something built on the hull rather than bolted
+  // to it: a base, a power plant, a fuel station, a watchtower, a
+  // searchlight battery. They are worth attacking for what they are
+  // worth, and several of them are worth attacking for what they do to
+  // the things around them.
+
+  // A barrack block. Inert and tough, and worth breaking because the
+  // base it stands in counts toward the hull's gun tally.
+  barracks: {
+    // The crews live here, so while it stands the interceptors keep
+    // coming — the same job an observation post does, done by the thing
+    // that houses them rather than the thing that spots for them.
+    name: 'BARRACKS', hpMul: 2.2, score: 300, r: 17,
+    inert: true, watch: 0.5,
+    colour: '#8fa3b8',
+  },
+  // A store shed. Softer, and there are more of them.
+  depot: {
+    // Munitions. A small blast rather than a cistern's, so a base comes
+    // apart in stages instead of all at once.
+    name: 'DEPOT', hpMul: 1.1, score: 190, r: 14,
+    inert: true, volatile: { r: 58, dmg: 22 },
+    colour: '#a8b6c4',
+  },
+  // A bulk cistern. Bigger than a fuel tank and it goes up harder, so a
+  // base or a station can be taken apart from one shot in the right
+  // place — including around you, if you are close when it goes.
+  cistern: {
+    name: 'CISTERN', hpMul: 1.0, score: 260, r: 16,
+    inert: true, volatile: { r: 128, dmg: 52 },
+    colour: '#ff5c2e',
+  },
+  // A fuel pump. Small, and it stands next to things that explode.
+  pump: {
+    name: 'PUMP', hpMul: 0.6, score: 150, r: 10,
+    inert: true, volatile: { r: 72, dmg: 30 },
+    colour: '#ffb45c',
+  },
+  // The reactor at the heart of a power plant. While it stands, every
+  // gun on the plant is woken and quickened — the same mechanic a radar
+  // tower uses, at a longer reach, because a plant is a bigger thing to
+  // have to shut down.
+  reactor: {
+    name: 'REACTOR', hpMul: 3.0, score: 620, r: 19,
+    inert: true, paint: 300, paintWake: 220, paintTurn: 1.5,
+    colour: '#6fe8c0',
+  },
+  // A pylon. Carries the line to the next one; they are drawn strung
+  // together, and breaking one drops the span it was holding.
+  pylon: {
+    // Carries the line to the next one; they are drawn strung together,
+    // and breaking one drops the span it was holding. It also carries
+    // the power: guns close to a standing pylon wake earlier, which is
+    // why cutting the line is worth the shots.
+    name: 'PYLON', hpMul: 0.9, score: 170, r: 11,
+    inert: true, paint: 120, paintWake: 120, paintTurn: 1.1,
+    colour: '#9fd8e8',
+  },
+  // A watchtower. Taller reach than an observation post and it does the
+  // same job harder: leave it standing and the interceptor stream never
+  // thins.
+  watchtower: {
+    name: 'WATCHTOWER', hpMul: 1.3, score: 330, r: 12,
+    inert: true, watch: 0.75,
+    colour: '#a8f06b',
+  },
+  // An air-defence searchlight. It does not shoot. It sweeps, and
+  // anything it catches is lit for every gun in reach — which makes it
+  // the thing to break first on a hull that fields them.
+  searchlight: {
+    name: 'SEARCHLIGHT', hpMul: 1.1, score: 350, r: 12,
+    // `beam`, not `sweep`: the array already uses `sweep` for its dish
+    // speed, and a shared name for two different shapes reads as one
+    // field right up to the point where something divides by undefined.
+    inert: true, beam: { arc: 1.15, speed: 0.75, range: 300 },
+    colour: '#fff0c4',
   },
 
   silo: {

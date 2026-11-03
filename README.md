@@ -341,6 +341,40 @@ takes at most about half the corridor and always leaves a clear band
 beside it. A field that spanned the hull would be a wall that cannot be
 broken, and a test holds every hull's fields to that.
 
+## Installations
+
+Things built on the hull rather than bolted to it. Each one is an apron
+off a girder with its works standing on it, so the corridor beside it
+stays open: somewhere to go into, not a wall across the hull.
+
+| Installation | What is in it |
+| --- | --- |
+| **Base** | Barracks, store sheds, a gun on the corner, and bulk cisterns at the back |
+| **Power plant** | A reactor, a cistern, and a run of pylons carrying the line away |
+| **Fuel station** | Pumps between cisterns, overseen by a watchtower. Almost all of it goes up |
+| **Air-defence post** | Searchlights, a watchtower, and the gun that uses what they find |
+
+Most of the parts do something beyond having hit points, because an inert
+tower that only stands there is scenery with a score attached:
+
+| Part | |
+| --- | --- |
+| **BARRACKS** | The crews live here, so while it stands the interceptors keep coming |
+| **DEPOT** | Munitions: a small blast, so a base comes apart in stages |
+| **CISTERN** | Bulk storage, and a big enough blast to take the next one with it |
+| **PUMP** | Small, volatile, and standing next to things that are more so |
+| **REACTOR** | While it stands, every gun on the plant wakes earlier and tracks faster |
+| **PYLON** | Carries the line, and the power: guns near a standing pylon wake earlier |
+| **WATCHTOWER** | A post with a longer reach. Leave it and the stream never thins |
+| **SEARCHLIGHT** | Sweeps. Anything it catches is lit for every gun in reach |
+
+A searchlight is the clearest case of the idea. It has no gun at all —
+the whole of its threat is what it does for the guns around it, so
+breaking the lights before anything else is a real decision rather than a
+detour. The beam swings between the ends of an arc rather than spinning,
+because a light that went all the way round would spend half its time
+pointed into the hull it is bolted to.
+
 ## Laser gates
 
 ![A laser gate](docs/laser.png)
@@ -757,7 +791,7 @@ past a plateau rather than wait it out.
   | **press** | jaws that close and open on a cycle: the only pattern whose geometry moves, and a rhythm to arrive on rather than a shape to dodge |
   | stepped stack | climbs, so you commit to a line early |
 
-  The narrowest gap anywhere in the twenty-five hulls is 39px against a
+  The narrowest gap anywhere in the twenty-five hulls is 40px against a
   ship that is 9 tall, and a test walks every hull at 17px intervals to
   keep it that way — an unflyable hull is not a hard hull, it is a broken
   one. A press closes tighter than any static geometry, to 34px at its
@@ -777,7 +811,7 @@ past a plateau rather than wait it out.
 - **Fully procedural audio** — see below.
 
 What shoots back is its own subject, and has grown well past the two kinds
-this list used to describe: fifteen tower types, nineteen attacker types,
+this list used to describe: twenty-three tower types, nineteen attacker types,
 four minibosses and twenty-five bosses, each covered in its own section
 above.
 Turret health rises with the hull too — 6 on ARGENTUM, 52 on ORICHALCUM —
@@ -2612,7 +2646,7 @@ playthrough does not settle.
 
 - **Balance is mostly still first guesses, and there is a great deal of
   it.** Twenty-five hulls, twenty-five bosses, four minibosses, nineteen
-  attacker types, fifteen tower types, laser gates, deflector shields,
+  attacker types, twenty-three tower types, laser gates, deflector shields,
   four treasure tiers, thirteen mods, the coin economy, the refit curve,
   the end-of-hull bonus and the four difficulty settings were picked by
   reasoning about them. Only the opening hulls have actually been flown.

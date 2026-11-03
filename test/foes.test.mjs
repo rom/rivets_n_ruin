@@ -125,7 +125,18 @@ test('every tower a hull mounts is implemented, and rosters grow', async () => {
 // The pieces a spaceport is built from. They arrive as a place, not as
 // a roster entry, which is the one way a tower reaches a hull that did
 // not ask for it.
-const PORT_PARTS = new Set(['control', 'tank', 'lander', 'post']);
+// The parts of a built installation. A spaceport, a base, a power plant,
+// a fuel station and an air-defence post are each an arrangement of
+// specific structures rather than a row of whatever the hull happens to
+// field, so their parts are allowed anywhere one of them is. Named
+// explicitly, so a roster leak is still caught.
+const PORT_PARTS = new Set([
+  'control', 'tank', 'lander', 'post',
+  'barracks', 'depot', 'cistern', 'pump', 'reactor', 'pylon',
+  'watchtower', 'searchlight',
+  // the one gun each installation puts on its corner
+  'gun', 'flak', 'pop',
+]);
 
 test('every tower spec is complete and distinct', async () => {
   const { TOWERS } = await import('../src/config.js');
@@ -151,7 +162,7 @@ test('every tower spec is complete and distinct', async () => {
     // An inert tower has to justify itself: something other than
     // standing there, or it is scenery with hit points.
     if (tw.inert) {
-      assert.ok(tw.paint || tw.watch || tw.volatile || kind === 'lander',
+      assert.ok(tw.paint || tw.watch || tw.volatile || tw.beam || kind === 'lander',
         `TOWERS.${kind} neither shoots nor does anything else`);
     }
     assert.match(tw.colour, /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, `${kind} colour`);
@@ -614,6 +625,236 @@ test('fuel tanks are placed close enough to chain', async () => {
     }
   }
   assert.ok(checked > 10, `only ${checked} tank pairs across the campaign; the test proves little`);
+});
+
+// --- the installations: bases, power plants, fuel stations, air-defence
+//
+// Four arrangements built on an apron off one girder. Each is tested
+// against what it promises: that it is all there, that it stands on its
+// own apron rather than overhanging it, and that the things in it are
+// not drawn on top of each other.
+
+// Every installation in a built hull, grouped. They are the only towers
+// that stand on an apron obstacle, so an apron and the towers at its own
+// y is exactly one installation.
+function installations(lvl) {
+  const out = [];
+  for (const o of lvl.obstacles || []) {
+    if (!o.face || o.h > 40) continue;
+    const deckY = o.face === 1 ? o.y + o.h : o.y;
+    const on = lvl.turrets.filter((t) => Math.abs(t.y - deckY) < 2
+      && t.x >= o.x - 4 && t.x <= o.x + o.w + 4);
+    if (on.length >= 3) out.push({ o, on, kinds: new Set(on.map((t) => t.kind)) });
+  }
+  return out;
+}
+
+const INSTALL = {
+  port: ['control', 'tank', 'lander'],
+  base: ['barracks', 'depot', 'cistern'],
+  plant: ['reactor', 'pylon'],
+  fuel: ['pump', 'cistern'],
+  air: ['searchlight'],
+};
+
+function classify(kinds) {
+  if (kinds.has('reactor')) return 'plant';
+  if (kinds.has('barracks')) return 'base';
+  if (kinds.has('searchlight')) return 'air';
+  if (kinds.has('pump')) return 'fuel';
+  if (kinds.has('control')) return 'port';
+  return null;
+}
+
+test('no two towers give one property name two different shapes', async () => {
+  // The root cause of the searchlight bug, caught where it started.
+  //
+  // TOWERS.array has carried `sweep: 1.1` — radians a second for its
+  // dish — since the spaceports went in. The searchlight arrived with
+  // `sweep: { arc, speed, range }`, passed every guard that only asks
+  // whether `sweep` is truthy, and read `sw.speed` as undefined. Every
+  // angle downstream became NaN and the beam gradient threw once a
+  // frame. Renaming it to `beam` fixed that one; this stops the next.
+  const { TOWERS } = await import('../src/config.js');
+  const shapeOf = (v) => (Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v);
+  const seen = new Map();
+  for (const [kind, tw] of Object.entries(TOWERS)) {
+    for (const [prop, v] of Object.entries(tw)) {
+      const shape = shapeOf(v);
+      const was = seen.get(prop);
+      if (!was) { seen.set(prop, { shape, kind }); continue; }
+      assert.equal(shape, was.shape,
+        `TOWERS.${kind}.${prop} is a ${shape} but TOWERS.${was.kind}.${prop} is a ${was.shape}; `
+        + 'one name, two meanings — rename one of them');
+    }
+  }
+});
+
+// A searchlight at (500,100) on the upper girder, shining out across the
+// corridor. `out` is measured away from the deck, so the geometry below
+// reads the same for a light on the ceiling and one on the floor.
+async function lamp(playerAt, opts = {}) {
+  const { TOWERS, DT } = await import('../src/config.js');
+  const { updateTurrets } = await import('../src/enemies.js');
+  const turrets = rig(['searchlight', 'gun'], { gap: opts.gunGap || 120, x: 500 });
+  for (const t of turrets) t.tower = TOWERS[t.kind];
+  if (opts.dead) turrets[0].dead = true;
+  const game = {
+    state: 'play', level: { turrets, spec: { turretCooldown: 2, turretRange: 300 }, gates: [] },
+    player: { x: playerAt[0], y: playerAt[1], alive: opts.alive !== false, vx: 0, vy: 0 },
+  };
+  // A whole cycle of the lamp and a little over: 0.75 rad/s through a
+  // sine, so 2pi/0.75 is about 8.4 seconds.
+  let litFrames = 0;
+  let paintedFrames = 0;
+  let maxAim = 0;
+  for (let i = 0; i < Math.ceil(9 / DT); i++) {
+    updateTurrets(game, DT);
+    if (turrets[0].beamLit) litFrames++;
+    if (turrets[1].painted) paintedFrames++;
+    maxAim = Math.max(maxAim, Math.abs(turrets[0].beamAim || 0));
+  }
+  return { litFrames, paintedFrames, maxAim, turrets, game };
+}
+
+test('a searchlight catches the ship in front of it, within its reach', async () => {
+  const { TOWERS } = await import('../src/config.js');
+  const sw = TOWERS.searchlight.beam;
+  const near = await lamp([500, 100 + sw.range * 0.5]);
+  assert.ok(near.litFrames > 0, 'a ship straight out in front was never caught in a whole cycle');
+  // ...and not permanently. Being lit has to be something that happens
+  // to you, or there is nothing to fly out of.
+  assert.ok(near.litFrames < Math.ceil(9 / (1 / 120)) * 0.6,
+    `the ship was lit for ${near.litFrames} of 1080 frames — that is a floodlight, not a sweep`);
+  // The lamp stays inside the arc it says it has, which is what the art
+  // on the tower is drawn from.
+  assert.ok(near.maxAim <= sw.arc + 1e-9,
+    `the lamp reached ${near.maxAim.toFixed(2)} rad, past its own ${sw.arc} arc`);
+});
+
+test('a searchlight misses what is out of reach, behind it, or off its arc', async () => {
+  const { TOWERS } = await import('../src/config.js');
+  const sw = TOWERS.searchlight.beam;
+  const far = await lamp([500, 100 + sw.range + 80]);
+  assert.equal(far.litFrames, 0, `a ship ${sw.range + 80}px out was caught by a ${sw.range}px light`);
+
+  // Behind the deck it is bolted to. A light that shines through its own
+  // hull is a light with no blind side to approach from.
+  const behind = await lamp([500, 40]);
+  assert.equal(behind.litFrames, 0, 'the light shone backwards through its own girder');
+
+  // Hard abeam: just off the deck and far along it, so the bearing is
+  // near a right angle and well outside the arc.
+  const abeam = await lamp([500 + 280, 108]);
+  assert.equal(abeam.litFrames, 0, 'the light caught something almost directly beside it');
+
+  const dead = await lamp([500, 100 + sw.range * 0.5], { dead: true });
+  assert.equal(dead.litFrames, 0, 'a broken searchlight was still sweeping');
+
+  const gone = await lamp([500, 100 + sw.range * 0.5], { alive: false });
+  assert.equal(gone.litFrames, 0, 'the light held a ship that was not alive');
+});
+
+test('being held in a beam paints the guns around it, and only then', async () => {
+  const { TOWERS } = await import('../src/config.js');
+  const sw = TOWERS.searchlight.beam;
+  const caught = await lamp([500, 100 + sw.range * 0.5]);
+  assert.ok(caught.paintedFrames > 0,
+    'the gun beside a searchlight was never painted while the light held the ship');
+  assert.ok(caught.paintedFrames >= caught.litFrames,
+    'the gun was painted for fewer frames than the light held the ship');
+
+  // ...and the paint goes away with the light. Breaking the lights is
+  // the whole decision an air-defence post offers; a buff that outlives
+  // its source would remove it.
+  const t = caught.turrets;
+  assert.equal(t[1].painted, null,
+    'the gun was left painted after the beam swept off — the buff outlived the beam');
+
+  // Out of reach of the light, nothing is painted at any phase.
+  const missed = await lamp([500, 100 + sw.range + 80]);
+  assert.equal(missed.paintedFrames, 0, 'a gun was painted with nothing caught in the beam');
+
+  // ...and the paint reaches only as far as the light says it does.
+  // This is the case the first version of this test missed: it only ever
+  // checked a gun that was out of reach while the beam was ALSO empty,
+  // so a paint rule that ignored distance entirely still passed. The
+  // ship has to be genuinely caught, with the gun genuinely too far.
+  const far = await lamp([500, 100 + sw.range * 0.5], { gunGap: sw.range + 200 });
+  assert.ok(far.litFrames > 0, 'the control for this case never caught the ship');
+  assert.equal(far.paintedFrames, 0,
+    `a gun ${sw.range + 200}px away was painted by a ${sw.range}px light`);
+});
+
+test('the campaign actually builds all four installations', async () => {
+  const { buildLevel } = await import('../src/level.js');
+  const seen = new Map();
+  // Across every hull and a spread of run seeds, because which one you
+  // get is a roll inside the band and one pass over the campaign can
+  // easily miss a quarter of them.
+  for (let seed = 0; seed < 24; seed++) {
+    for (const spec of LEVELS) {
+      for (const inst of installations(buildLevel(spec, seed))) {
+        const which = classify(inst.kinds);
+        if (which) seen.set(which, (seen.get(which) || 0) + 1);
+      }
+    }
+  }
+  for (const which of Object.keys(INSTALL)) {
+    assert.ok((seen.get(which) || 0) > 0, `no ${which} was ever built in 24 run seeds`);
+  }
+});
+
+test('every installation is whole, and stands on its own apron', async () => {
+  const { buildLevel } = await import('../src/level.js');
+  const { TOWERS } = await import('../src/config.js');
+  // The renderer's default, for the gun towers that carry no radius of
+  // their own. Reading tw.r straight gave undefined for those, and every
+  // comparison against undefined is false — so the first version of this
+  // test silently exempted exactly the towers on each apron's corner.
+  const rad = (kind) => TOWERS[kind].r || 8;
+  let checked = 0;
+  const bad = [];
+  for (let seed = 0; seed < 12; seed++) {
+    for (const spec of LEVELS) {
+      const lvl = buildLevel(spec, seed);
+      for (const inst of installations(lvl)) {
+        const which = classify(inst.kinds);
+        if (!which) continue;
+        checked++;
+        for (const need of INSTALL[which]) {
+          if (!inst.kinds.has(need)) bad.push(`${spec.name}/${seed}: a ${which} has no ${need}`);
+        }
+        // Nothing may hang off the end of the deck it is standing on.
+        for (const t of inst.on) {
+          const r = rad(t.kind);
+          if (t.x - r < inst.o.x - 1 || t.x + r > inst.o.x + inst.o.w + 1) {
+            bad.push(`${spec.name}/${seed}: a ${which}'s ${t.kind} at `
+              + `${Math.round(t.x - inst.o.x)} overhangs its ${Math.round(inst.o.w)}px apron`);
+          }
+        }
+        // ...and no two structures may occupy the same ground. Touching
+        // is fine and reads as one built place; sharing a centre is two
+        // things drawn on top of each other.
+        const sorted = [...inst.on].sort((a, b) => a.x - b.x);
+        for (let i = 1; i < sorted.length; i++) {
+          const a = sorted[i - 1], b = sorted[i];
+          // Two structures may stand shoulder to shoulder, which is what
+          // a compound looks like. They may not share ground. The first
+          // version of this allowed half the sum of the radii, which is
+          // fifty percent overlap, and so passed a generator that was
+          // placing bodies one gap apart instead of one body apart.
+          const want = rad(a.kind) + rad(b.kind);
+          if (b.x - a.x < want) {
+            bad.push(`${spec.name}/${seed}: a ${which}'s ${a.kind} and ${b.kind} are `
+              + `${Math.round(b.x - a.x)}px apart, inside their own ${Math.round(want)}px footprint`);
+          }
+        }
+      }
+    }
+  }
+  assert.ok(checked > 40, `only ${checked} installations across the campaign; the test proves little`);
+  assert.deepEqual(bad.slice(0, 8), [], `${bad.length} broken installation(s)`);
 });
 
 // --- the ends of the scale

@@ -77,6 +77,13 @@ export function updateTurrets(game, dt) {
   // Recomputed each frame, like the aura, because killing the dish has
   // to take the effect with it immediately — a buff that outlives its
   // source by a frame reads as the game cheating.
+  // Searchlights sweep whether or not anybody is there, and what they
+  // catch is lit for everything in reach. A light is not a gun: the
+  // whole of its threat is what it does for the guns around it, which
+  // is why breaking the lights first is a real decision rather than a
+  // detour.
+  const lit = beamLights(game, dt);
+
   const dishes = [];
   for (const t of game.level.turrets) {
     if (!t.dead && t.tower && t.tower.paint) dishes.push(t);
@@ -89,10 +96,23 @@ export function updateTurrets(game, dt) {
     // a buff that does not exist. Spotted on screen: a port's tanks
     // sitting inside their own control tower's paint, haloed, doing
     // exactly what they did before.
-    if (t.dead || !t.tower || t.tower.inert || !dishes.length) continue;
+    // `!dishes.length` alone was an early-out from before beams existed,
+    // and it silently switched the searchlights off: an air-defence post
+    // fields lights, a watchtower, sheds and one gun, and not a single
+    // dish — so on the one installation built around them the lights
+    // painted nothing and the decision they exist to pose did not
+    // exist. Both sources have to be out before this is free.
+    if (t.dead || !t.tower || t.tower.inert || (!dishes.length && !lit)) continue;
     for (const d of dishes) {
       if (d === t) continue;
       if (Math.hypot(d.x - t.x, d.y - t.y) < d.tower.paint) { t.painted = d.tower; break; }
+    }
+    // Being caught in a beam counts as being painted, at the reach of
+    // the light that caught you. One mechanic, two ways into it.
+    if (!t.painted && lit) {
+      for (const L of lit) {
+        if (Math.hypot(L.x - t.x, L.y - t.y) < L.tower.beam.range) { t.painted = L.tower; break; }
+      }
     }
   }
 
@@ -274,6 +294,46 @@ export function hitInterceptor(game, i, dmg) {
   award(game, INTERCEPTOR.score);
   interceptors.kill(i);
   return true;
+}
+
+// Turns every searchlight on the hull and reports the ones whose beam
+// is currently across the ship.
+//
+// The angle is stored on the turret so the lamp housing can point where
+// the beam goes and the beam can be drawn from the same number — a light
+// whose lamp and whose beam disagree reads as two separate bugs.
+// Half the beam's width, in radians. Narrow enough that being caught is
+// something that happens to you rather than a constant state, wide
+// enough that it is not a laser.
+const BEAM_WIDTH = 0.22;
+
+function beamLights(game, dt) {
+  const p = game.player;
+  let caught = null;
+  for (const t of game.level.turrets) {
+    if (!t.tower || !t.tower.beam) continue;
+    const sw = t.tower.beam;
+    if (t.dead) { t.beamLit = false; continue; }
+    t.beamA = (t.beamA || 0) + sw.speed * dt;
+    // The lamp swings between the ends of its arc rather than spinning:
+    // a searchlight that went all the way round would spend half its
+    // time pointed into the hull it is bolted to.
+    const aim = Math.sin(t.beamA) * sw.arc;
+    t.beamAim = aim;
+
+    // Everything below is measured from straight out of the deck, which
+    // is where aim=0 points: `out` is how far in front of the light the
+    // ship is, `across` how far to one side. A light on the ceiling and
+    // one on the floor then use the same arithmetic.
+    const across = p.x - t.x;
+    const out = (p.y - t.y) * t.dir;
+    const dist = Math.hypot(across, out);
+    const bearing = Math.atan2(across, Math.max(1e-3, out));
+    t.beamLit = game.player.alive && out > 0 && dist < sw.range
+      && Math.abs(bearing - aim) < BEAM_WIDTH;
+    if (t.beamLit) (caught ||= []).push(t);
+  }
+  return caught;
 }
 
 export function hitTurret(game, t, dmg) {

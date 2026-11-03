@@ -5,7 +5,8 @@ import { interceptors } from './enemies.js';
 import { playerShots, enemyShots } from './projectiles.js';
 import { particles, lights } from './particles.js';
 import { hash2 } from './rng.js';
-import { hullChunk, warmChunks, drawMovers, drawFields, CHUNK_W } from './level.js';
+import { hullChunk, warmChunks, drawMovers, drawFields, drawPowerLines, drawBeams,
+  CHUNK_W } from './level.js';
 import { get as setting } from './settings.js';
 import { renderScale, scaleGeneration, hullScale, isStatic } from './display.js';
 import { pickups, tint, isTreasure } from './pickups.js';
@@ -154,6 +155,8 @@ export function drawWorld(ctx, game) {
   // they cannot be baked into a cached chunk, so they are drawn here.
   drawFields(ctx, game.level, camX, VIEW_W, game.time);
   drawMovers(ctx, game.level, camX, VIEW_W);
+  drawPowerLines(ctx, game.level, camX, VIEW_W);
+  drawBeams(ctx, game.level, camX, VIEW_W, game.time);
   drawTurrets(ctx, game, camX);
   drawGates(ctx, game, camX);
   drawInterceptors(ctx, game);
