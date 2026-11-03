@@ -1057,25 +1057,85 @@ export const CAM = {
 // decides when a slot is reused.
 export const CULL_MARGIN = CAM.lead * 2 + VIEW_W / 2;
 
-export const COL = {
-  space:     '#06080c',
-  hullBase:  '#171a20',
-  hullMid:   '#30363f',
-  hullHi:    '#464e5a',
-  rivet:     '#737d8c',
-  edgeHi:    '#8e9aa9',
-  edgeLo:    '#12161e',
-  hazard:    '#6b5a28',
-  cool:      '#4fd0e8',
-  coolHi:    '#b4f4ff',
-  warm:      '#ff7a2f',
-  warmHi:    '#ffd24a',
-  danger:    '#e8434f',
-  hudBg:     '#0a0d13',
-  hudLine:   '#232b36',
-  hudText:   '#7d8797',
-  hudBright: '#cfe2ee',
-};
+// The interface palette: the HUD, the menus and the frames around them.
+//
+// Not the hull. THEMES colours the hull and each one belongs to its own
+// hull; this is the instrument panel you read them through, and it is the
+// same panel whichever hull you are over.
+//
+// COL is a live object, deliberately. Something like three hundred places
+// read COL.cool, and a scheme switch rewrites the fields in place rather
+// than making every one of them call a function — so nothing has to know
+// the palette can change, and a scheme applies to code written before
+// schemes existed.
+export const SCHEMES = [
+  {
+    id: 'cyan', name: 'GANTRY',
+    blurb: 'The issue panel: cold cyan on gunmetal.',
+    col: {
+      space: '#06080c', hullBase: '#171a20', hullMid: '#30363f', hullHi: '#464e5a',
+      rivet: '#737d8c', edgeHi: '#8e9aa9', edgeLo: '#12161e', hazard: '#6b5a28',
+      cool: '#4fd0e8', coolHi: '#b4f4ff', warm: '#ff7a2f', warmHi: '#ffd24a',
+      danger: '#e8434f', hudBg: '#0a0d13', hudLine: '#232b36',
+      hudText: '#7d8797', hudBright: '#cfe2ee',
+    },
+  },
+  {
+    id: 'amber', name: 'AMBER CRT',
+    blurb: 'One phosphor, the way a terminal of the period had it.',
+    col: {
+      space: '#070500', hullBase: '#1d1407', hullMid: '#3a2a10', hullHi: '#574018',
+      rivet: '#8a6a2a', edgeHi: '#b08a38', edgeLo: '#160f05', hazard: '#6b5520',
+      cool: '#ffae2b', coolHi: '#ffe9ad', warm: '#ff7a1e', warmHi: '#ffd87a',
+      danger: '#ff5a2b', hudBg: '#0d0a03', hudLine: '#3a2c12',
+      hudText: '#a8822f', hudBright: '#ffd79a',
+    },
+  },
+  {
+    id: 'green', name: 'PHOSPHOR',
+    blurb: 'Green screen. Everything legible, nothing pretty.',
+    col: {
+      space: '#000806', hullBase: '#0b1a12', hullMid: '#17321f', hullHi: '#224a2e',
+      rivet: '#3f7a4f', edgeHi: '#58a369', edgeLo: '#06120c', hazard: '#4a6b28',
+      cool: '#46e07a', coolHi: '#bdffd2', warm: '#d8e04a', warmHi: '#f2ffa8',
+      danger: '#ff6b5a', hudBg: '#030c07', hudLine: '#16331f',
+      hudText: '#59a06c', hudBright: '#c6f7d4',
+    },
+  },
+  {
+    id: 'ice', name: 'DEEP ICE',
+    blurb: 'Blue-white, and colder than the hull it is bolted to.',
+    col: {
+      space: '#04070e', hullBase: '#121a28', hullMid: '#243348', hullHi: '#365068',
+      rivet: '#6f8ab0', edgeHi: '#93b2d4', edgeLo: '#0a1220', hazard: '#2d567a',
+      cool: '#8fc4ff', coolHi: '#e6f4ff', warm: '#9f8cff', warmHi: '#d0c4ff',
+      danger: '#ff6f9a', hudBg: '#070c16', hudLine: '#1e2c42',
+      hudText: '#7f93b4', hudBright: '#dce9fb',
+    },
+  },
+  {
+    id: 'rust', name: 'OXIDE',
+    blurb: 'Warm metal and verdigris. The oldest ship in the fleet.',
+    col: {
+      space: '#0b0705', hullBase: '#22150f', hullMid: '#3e2619', hullHi: '#5c3a26',
+      rivet: '#9a6a46', edgeHi: '#c08a60', edgeLo: '#180e09', hazard: '#7a4a1e',
+      cool: '#5fd6b0', coolHi: '#c3ffe9', warm: '#ff9154', warmHi: '#ffc978',
+      danger: '#e8545a', hudBg: '#100a07', hudLine: '#35221a',
+      hudText: '#a8795a', hudBright: '#f0d7c2',
+    },
+  },
+];
+
+export const COL = { ...SCHEMES[0].col };
+
+// Rewrites COL in place. Everything that has already read COL keeps the
+// same object, so a scheme applies everywhere at once with no redraw
+// bookkeeping and no stale copy on a module that cached it.
+export function applyScheme(i) {
+  const s = SCHEMES[Math.max(0, Math.min(SCHEMES.length - 1, i | 0))];
+  Object.assign(COL, s.col);
+  return s;
+}
 
 export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 export const lerp = (a, b, t) => a + (b - a) * t;

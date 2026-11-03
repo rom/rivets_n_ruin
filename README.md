@@ -1364,6 +1364,24 @@ settings. It is bounded by how far you have actually got, because a start
 hull past that is not a setting. Earlier refits are credited, so arriving
 on PYRITE in a factory-standard ship is not a thing that can happen.
 
+### Colour schemes
+
+`COLOUR SCHEME` repaints the instrument panel — the HUD, the menus and
+the frames around them. Not the hull: `THEMES` colours that, and each hull
+has its own.
+
+| Scheme | |
+| --- | --- |
+| **GANTRY** | The issue panel: cold cyan on gunmetal. What shipped |
+| **AMBER CRT** | One phosphor, the way a terminal of the period had it |
+| **PHOSPHOR** | Green screen. Everything legible, nothing pretty |
+| **DEEP ICE** | Blue-white, and colder than the hull it is bolted to |
+| **OXIDE** | Warm metal and verdigris. The oldest ship in the fleet |
+
+`COL` is a live object and a scheme rewrites its fields in place. Three
+hundred-odd places read `COL.cool`; none of them has to know schemes
+exist, and a scheme reaches code written before they did.
+
 ### Hull layouts
 
 A hull is generated from `mulberry32(spec.seed)`, so every run flew the

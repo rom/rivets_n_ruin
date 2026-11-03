@@ -14,6 +14,12 @@ worth learning from.
 
 ### Added
 
+- **Five colour schemes** — GANTRY (what shipped), AMBER CRT, PHOSPHOR,
+  DEEP ICE and OXIDE — on a `COLOUR SCHEME` setting. They repaint the
+  instrument panel: the HUD, the menus and the frames, not the hull,
+  which has its own per-hull theme. `COL` is rewritten in place rather
+  than replaced, so the roughly three hundred places that read it need to
+  know nothing about schemes.
 - **Four hazard fields: FLARE FIELD, VORTEX, ICE CLOUD and ARC FIELD.**
   Areas rather than objects — nothing solid, nothing to shoot, and a
   price per second for being inside. The only threat on a hull that is

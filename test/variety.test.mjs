@@ -1389,3 +1389,95 @@ test('the four fields are told apart by what they cost', () => {
   assert.equal(new Set(rates).size, rates.length,
     `two hazard kinds cost the same: ${rates.join(', ')}`);
 });
+
+// --------------------------------------------------------- colour schemes
+//
+// COL is the instrument palette — the HUD, the menus, the frames — and
+// not the hull, which THEMES colours per hull. A scheme rewrites COL in
+// place so the roughly three hundred places that read COL.cool need to
+// know nothing about schemes existing.
+
+import { SCHEMES, applyScheme, COL } from '../src/config.js';
+
+test('every scheme is complete, named, and a real palette', () => {
+  assert.ok(SCHEMES.length >= 5, `${SCHEMES.length} schemes; four alternatives were asked for`);
+  const keys = Object.keys(SCHEMES[0].col);
+  const ids = new Set();
+  for (const s of SCHEMES) {
+    assert.ok(!ids.has(s.id), `two schemes share the id ${s.id}`);
+    ids.add(s.id);
+    assert.ok(s.name && s.name === s.name.toUpperCase(), `${s.id} has no display name`);
+    assert.ok(s.blurb && s.blurb.length > 10, `${s.id} does not say what it is`);
+    assert.deepEqual(Object.keys(s.col).sort(), [...keys].sort(),
+      `${s.id} does not define the same colours as the others`);
+    for (const [k, v] of Object.entries(s.col)) {
+      assert.ok(/^#[0-9a-f]{6}$/i.test(v), `${s.id}.${k} is "${v}", not a colour`);
+    }
+  }
+});
+
+test('the schemes are actually different from each other', () => {
+  // Five names over one palette would be a setting that does nothing.
+  const sigs = SCHEMES.map((s) => Object.values(s.col).join(','));
+  assert.equal(new Set(sigs).size, SCHEMES.length, 'two schemes are the same palette');
+  // and distinguishable where it counts: the accent you read the HUD by
+  const accents = SCHEMES.map((s) => s.col.cool);
+  assert.equal(new Set(accents).size, SCHEMES.length, 'two schemes share an accent');
+});
+
+test('applying a scheme rewrites the palette everyone already holds', () => {
+  const held = COL;                     // what a module captured at import
+  const first = applyScheme(0);
+  assert.equal(COL.cool, SCHEMES[0].col.cool);
+  for (let i = 1; i < SCHEMES.length; i++) {
+    applyScheme(i);
+    assert.equal(COL.cool, SCHEMES[i].col.cool, `scheme ${i} did not take`);
+    assert.equal(held.cool, SCHEMES[i].col.cool,
+      'the palette was replaced rather than rewritten, so held references are stale');
+    assert.equal(held, COL, 'COL is a different object after a scheme change');
+  }
+  applyScheme(0);
+  assert.equal(COL.cool, first.col.cool);
+});
+
+test('a scheme index out of range is clamped, not crashed into', () => {
+  for (const bad of [-5, 99, NaN, 1.7]) {
+    const s = applyScheme(bad);
+    assert.ok(s && s.id, `applyScheme(${bad}) returned nothing`);
+    assert.ok(/^#[0-9a-f]{6}$/i.test(COL.cool), `applyScheme(${bad}) left COL broken`);
+  }
+  applyScheme(0);
+});
+
+test('the scheme setting offers every scheme and wraps', () => {
+  const def = settings.DEFS.find((d) => d.id === 'scheme');
+  assert.ok(def, 'no colour scheme setting');
+  assert.equal(def.def, 0, 'the default must be the palette that shipped');
+  const was = settings.get('scheme');
+  try {
+    settings.set('scheme', SCHEMES.length - 1);
+    settings.nudge('scheme', 1, {});
+    assert.equal(settings.get('scheme'), 0, 'the scheme list does not wrap forward');
+    settings.nudge('scheme', -1, {});
+    assert.equal(settings.get('scheme'), SCHEMES.length - 1, 'the scheme list does not wrap back');
+    // and the display names the scheme rather than printing an index
+    settings.set('scheme', 1);
+    assert.ok(settings.display(def, null).includes(SCHEMES[1].name),
+      `the settings row shows "${settings.display(def, null)}"`);
+  } finally {
+    settings.set('scheme', was);
+  }
+});
+
+test('changing the setting changes the live palette', () => {
+  const was = settings.get('scheme');
+  try {
+    settings.set('scheme', 0);
+    const base = COL.cool;
+    settings.set('scheme', 2);
+    assert.notEqual(COL.cool, base, 'setting a scheme did not reach COL');
+    assert.equal(COL.cool, SCHEMES[2].col.cool);
+  } finally {
+    settings.set('scheme', was);
+  }
+});
