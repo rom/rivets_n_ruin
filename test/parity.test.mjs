@@ -278,6 +278,10 @@ test('the README controls table lists every key the game binds', () => {
   const label = (code) => code
     .replace(/^Key/, '').replace(/^Digit/, '').replace(/^Arrow(\w+)/, '$1')
     .replace('Slash', '/').replace('BracketRight', ']').replace('Escape', 'Esc')
+    // ShiftRight before ShiftLeft would be a trap: 'ShiftLeft' does not
+    // contain 'ShiftRight', but writing them the other way round is the
+    // kind of ordering bug that only shows up when a key is added.
+    .replace('ShiftRight', 'Right Shift')
     .replace('ShiftLeft', 'Shift').replace('NumpadEnter', 'Enter');
   const missing = [];
   for (const code of Object.keys(KEYS)) {

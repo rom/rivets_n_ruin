@@ -491,6 +491,22 @@ export function obstaclesNear(level, x0, x1) {
   return out;
 }
 
+// Is a box this size clear of the hull at this point?
+//
+// pointBlocked answers for a point, which is the wrong question for
+// anything the size of a ship — see firstBlockage for how long that
+// distinction went unnoticed. The hyperspace jump asks this one, because
+// a jump that lands the ship a pixel inside a girder is worse than no
+// jump at all.
+export function boxBlocked(level, x, y, hw, hh) {
+  if (y - hh < FIELD_TOP || y + hh > FIELD_BOT) return true;
+  if (x - hw < 0 || x + hw > level.length) return true;
+  for (const o of obstaclesNear(level, x - hw, x + hw)) {
+    if (x + hw > o.x && x - hw < o.x + o.w && y + hh > o.y && y - hh < o.y + o.h) return true;
+  }
+  return false;
+}
+
 // The hazard the ship is standing in, or null. Rectangles, and few
 // enough per hull that walking them beats indexing them.
 export function hazardAt(level, x, y, hw, hh) {

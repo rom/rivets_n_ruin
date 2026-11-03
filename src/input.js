@@ -28,6 +28,7 @@ export const DEFAULT_MAP = {
   KeyE: 'shop',
   KeyX: 'secondary', ShiftLeft: 'secondary',
   KeyC: 'cycle',
+  KeyV: 'jump', ShiftRight: 'jump',
   Digit1: 'arm1', Digit2: 'arm2', Digit3: 'arm3',
   KeyT: 'tune',
   BracketRight: 'tune',
@@ -42,7 +43,8 @@ export const DEFAULT_MAP = {
 export const BINDABLE = [
   ['left', 'MOVE LEFT'], ['right', 'MOVE RIGHT'],
   ['up', 'MOVE UP'], ['down', 'MOVE DOWN'],
-  ['fire', 'FIRE'], ['secondary', 'ORDNANCE'], ['cycle', 'CYCLE ORDNANCE'],
+  ['fire', 'FIRE'], ['jump', 'HYPERSPACE JUMP'],
+  ['secondary', 'ORDNANCE'], ['cycle', 'CYCLE ORDNANCE'],
   ['arm1', 'ORDNANCE 1'], ['arm2', 'ORDNANCE 2'], ['arm3', 'ORDNANCE 3'],
   ['pause', 'PAUSE'], ['restart', 'RESTART'], ['quit', 'QUIT RUN'],
   ['shop', 'ARMOURER'], ['board', 'LEADERBOARD'], ['help', 'HELP'],

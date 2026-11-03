@@ -83,6 +83,21 @@ export function sfxFlip() {
   tone({ type: 'triangle', f0: 200, f1: 620, t, attack: 0.04, decay: 0.12, peak: 0.07, sweep: 'lin' });
 }
 
+// The jump: a short charge that climbs and vanishes, then the hull
+// arriving somewhere else. Two halves so the ear hears a departure and a
+// landing rather than one noise, which is what tells you it worked.
+export function sfxJump() {
+  if (!ready()) return;
+  const t = now();
+  tone({ type: 'sawtooth', f0: 210, f1: 1900, t, attack: 0.012, decay: 0.1, peak: 0.16 });
+  tone({ type: 'square', f0: 420, f1: 2600, t: t + 0.01, attack: 0.008, decay: 0.08, peak: 0.1 });
+  noiseHit({ t, attack: 0.004, decay: 0.12, peak: 0.16, filter: 'highpass', f0: 1800, f1: 5200 });
+  // arrival
+  noiseHit({ t: t + 0.11, attack: 0.002, decay: 0.16, peak: 0.26,
+    filter: 'lowpass', f0: 2600, f1: 160, q: 1.4, rate: 0.8 });
+  tone({ type: 'triangle', f0: 760, f1: 180, t: t + 0.11, attack: 0.004, decay: 0.16, peak: 0.14 });
+}
+
 export function sfxDeath() {
   if (!ready()) return;
   const t = now();

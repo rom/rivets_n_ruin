@@ -62,6 +62,7 @@ backend down**; you lose the leaderboard, not the game.
 | `O` | Settings |
 | `H` / `/` | Help pages |
 | `B` | Switch leaderboard: top pilots / high scores |
+| `V` / `Right Shift` | Hyperspace jump: a short hop, ten second cooldown |
 | `X` / `Shift` | Fire selected ordnance |
 | `C` / `1`–`3` | Cycle / select ordnance |
 | `E` | Armourer (between hulls) |
@@ -782,6 +783,42 @@ above.
 Turret health rises with the hull too — 6 on ARGENTUM, 52 on ORICHALCUM —
 because a gun that dies to a sneeze makes breaking them a formality rather
 than the thing the end-of-hull bonus is paid on.
+
+## The hyperspace jump
+
+`V` or right shift, ten second cooldown. The only move in the game that
+is not flying.
+
+It answers two situations nothing else does. Being wedged somewhere the
+geometry will not let you fly out of — the hull is generated, and a
+corner you cannot thrust out of is a corner you are stuck in. And a
+volley already in the air with nowhere to go, where the right play is to
+not be where it is aimed.
+
+Short on purpose: 120px against a shortest hull of 12,000. Far enough to
+cross a corridor or leave a salvo behind, nowhere near far enough to skip
+a stretch of hull and the guns on it.
+
+It goes wherever you are asking to go, or straight ahead if you are not
+asking for anything. Where it lands is searched back from the full
+distance until the ship fits, so a jump into a wall is a shorter jump up
+to the wall rather than a jump through it. If there is nowhere at all —
+hull on every side — nothing happens and **the cooldown is not spent**,
+because charging ten seconds for a move that did not occur is the worst
+thing it could do to the player it exists to rescue.
+
+Arriving is briefly safe, four tenths of a second, which is the point of
+jumping out of a volley: the shots already aimed at where you were should
+miss. Short enough that it cannot be used to tank.
+
+A tow line does not survive the ship leaving the end of it. A net and a
+fire do — both are on the hull, and they come along.
+
+The cooldown is a ring around the ship rather than a HUD readout: there
+is no room on the HUD row, and a ten second wait is something you check
+while flying rather than look away to read. It pulses once at the moment
+it comes back, which is the part worth catching out of the corner of an
+eye.
 
 ## The armory
 

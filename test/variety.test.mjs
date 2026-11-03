@@ -1698,3 +1698,167 @@ test('a rebind never leaves the map without the action', () => {
     }
   } finally { resetBindings(); }
 });
+
+// -------------------------------------------------------- the hyperspace jump
+//
+// The only move in the game that is not flying. It exists for two
+// situations nothing else answers: wedged where the geometry will not
+// let you fly out, and a volley already in the air with nowhere to go.
+
+import { JUMP } from '../src/config.js';
+import { boxBlocked } from '../src/level.js';
+import { hyperJump } from '../src/player.js';
+
+test('the jump is short, and recharges in ten seconds', () => {
+  assert.equal(JUMP.cooldown, 10, 'the cooldown was asked to be ten seconds');
+  assert.ok(JUMP.distance > 40, `a ${JUMP.distance}px jump is not an escape`);
+  // A jump long enough to skip a stretch of hull would be a way past the
+  // guns rather than a way out of trouble. The shortest hull is 12,000px.
+  assert.ok(JUMP.distance < LEVELS[0].length / 40,
+    `${JUMP.distance}px is far enough to skip hull`);
+  assert.ok(JUMP.invuln > 0 && JUMP.invuln < 1,
+    'arriving must be briefly safe, and not a way to tank');
+});
+
+test('a jump moves the ship, costs the cooldown, and lands it clear', () => {
+  const game = inFlight();
+  const p = game.player;
+  p.x = 400; p.y = (FIELD_TOP + FIELD_BOT) / 2; p.facing = 1;
+  p.jumpCd = 0; p.invuln = 0;
+  const fromX = p.x;
+  assert.equal(hyperJump(p, game), true, 'a clear jump was refused');
+  assert.ok(p.x > fromX, `the ship did not move (${fromX} -> ${p.x})`);
+  assert.ok(p.x - fromX <= JUMP.distance + 1, 'the ship went further than a jump');
+  assert.equal(p.jumpCd, JUMP.cooldown, 'the jump did not start its cooldown');
+  assert.ok(p.invuln >= JUMP.invuln, 'arriving was not briefly safe');
+  assert.equal(p.jumpFromX, fromX, 'the streak does not know where it came from');
+  assert.ok(!boxBlocked(game.level, p.x, p.y, SHIP.hitW / 2, SHIP.hitH / 2),
+    'the jump landed the ship inside the hull');
+});
+
+test('a jump on cooldown does nothing at all', () => {
+  const game = inFlight();
+  const p = game.player;
+  p.x = 400; p.jumpCd = 4;
+  const was = p.x;
+  assert.equal(hyperJump(p, game), false);
+  assert.equal(p.x, was, 'a jump happened while recharging');
+  assert.equal(p.jumpCd, 4, 'a refused jump reset the cooldown');
+});
+
+test('a jump never lands inside the hull, wherever it is aimed', () => {
+  // The guarantee the whole move rests on. Tried from a few hundred
+  // places on a late hull, including right up against blocks.
+  const game = inFlight();
+  const p = game.player;
+  const hw = SHIP.hitW / 2;
+  const hh = SHIP.hitH / 2;
+  let jumps = 0;
+  for (let i = 0; i < 400; i++) {
+    const x = 700 + i * 37;
+    const y = FIELD_TOP + hh + ((i * 53) % (FIELD_BOT - FIELD_TOP - SHIP.hitH));
+    if (x > game.level.length - 400) break;
+    if (boxBlocked(game.level, x, y, hw, hh)) continue;   // start somewhere legal
+    p.x = x; p.y = y; p.jumpCd = 0; p.facing = i % 2 ? 1 : -1;
+    if (!hyperJump(p, game)) continue;
+    jumps++;
+    assert.ok(!boxBlocked(game.level, p.x, p.y, hw, hh),
+      `a jump from ${x},${Math.round(y)} landed in the hull at`
+      + ` ${Math.round(p.x)},${Math.round(p.y)}`);
+    assert.ok(p.y - hh >= FIELD_TOP - 0.01 && p.y + hh <= FIELD_BOT + 0.01,
+      'a jump left the corridor');
+  }
+  assert.ok(jumps > 100, `only ${jumps} jumps were tried`);
+});
+
+test('a jump into a wall becomes a shorter jump, not a jump through it', () => {
+  const game = inFlight();
+  const p = game.player;
+  const hw = SHIP.hitW / 2;
+  // A block squarely in front, closer than the full jump.
+  const bx = 1000;
+  game.level.obstacles = [{ x: bx, y: FIELD_TOP, w: 60, h: FIELD_BOT - FIELD_TOP, face: 1 }];
+  game.level.buckets = new Map();
+  for (let b = Math.floor(bx / 256); b <= Math.floor((bx + 60) / 256); b++) {
+    game.level.buckets.set(b, game.level.obstacles);
+  }
+  p.x = bx - 60; p.y = (FIELD_TOP + FIELD_BOT) / 2; p.facing = 1; p.jumpCd = 0;
+  assert.equal(hyperJump(p, game), true, 'a jump with room in front was refused');
+  assert.ok(p.x + hw <= bx + 0.01,
+    `the jump put the ship at ${p.x.toFixed(1)}, through a wall starting at ${bx}`);
+});
+
+test('a jump with nowhere to go is refused and costs nothing', () => {
+  // Wedged: the hull on every side. Charging ten seconds for a move that
+  // did not happen is the worst thing this could do to the player it
+  // exists to rescue.
+  const game = inFlight();
+  const p = game.player;
+  const span = FIELD_BOT - FIELD_TOP;
+  // Fill the whole corridor around the ship.
+  game.level.obstacles = [{ x: 0, y: FIELD_TOP, w: game.level.length, h: span, face: 1 }];
+  game.level.buckets = new Map();
+  for (let b = 0; b <= Math.floor(game.level.length / 256); b++) {
+    game.level.buckets.set(b, game.level.obstacles);
+  }
+  p.x = 900; p.y = FIELD_TOP + span / 2; p.jumpCd = 0;
+  const was = { x: p.x, y: p.y };
+  assert.equal(hyperJump(p, game), false, 'a jump succeeded with the hull on every side');
+  assert.equal(p.jumpCd, 0, 'a jump that did not happen still cost ten seconds');
+  assert.deepEqual({ x: p.x, y: p.y }, was, 'a refused jump moved the ship');
+});
+
+test('a jump snaps a tow line but carries the net and the fire', () => {
+  const game = inFlight();
+  const p = game.player;
+  p.x = 500; p.y = (FIELD_TOP + FIELD_BOT) / 2; p.jumpCd = 0;
+  p.towT = 3; p.towBy = { x: 0, y: 0, dead: false, hp: 5 };
+  p.snareT = 2; p.burnT = 2;
+  assert.equal(hyperJump(p, game), true);
+  assert.equal(p.towT, 0, 'the ship jumped and stayed on the hook');
+  assert.equal(p.towBy, null);
+  assert.ok(p.snareT > 0, 'the net was left behind, and it is on the hull');
+  assert.ok(p.burnT > 0, 'the fire was left behind, and it is on the hull');
+});
+
+test('the jump is on the keyboard and on the glass', () => {
+  assert.ok(Object.values(DEFAULT_MAP).includes('jump'), 'no key jumps');
+  assert.ok(BINDABLE.some(([a]) => a === 'jump'), 'the jump cannot be rebound');
+  assert.ok(PADS.some((b) => b.action === 'jump' && b.when === 'play'),
+    'there is no way to jump with a thumb');
+});
+
+test('boxBlocked answers for a box, including the corridor edges', () => {
+  // Tested directly. The jump clamps its target into the corridor before
+  // asking, so the edge check here is never the thing that saves it —
+  // which means nothing else in this file would notice it going.
+  const span = FIELD_BOT - FIELD_TOP;
+  const obs = [{ x: 500, y: FIELD_TOP, w: 60, h: span * 0.4, face: 1 }];
+  const buckets = new Map();
+  for (let b = Math.floor(500 / 256); b <= Math.floor(560 / 256); b++) buckets.set(b, obs);
+  const lvl = { obstacles: obs, buckets, length: 2000 };
+  const hw = SHIP.hitW / 2;
+  const hh = SHIP.hitH / 2;
+
+  assert.equal(boxBlocked(lvl, 300, 160, hw, hh), false, 'open hull read as blocked');
+  assert.equal(boxBlocked(lvl, 530, FIELD_TOP + 20, hw, hh), true,
+    'the middle of a block read as clear');
+  // the box counts, not the centre: clear centre, wingtip in the block
+  assert.equal(boxBlocked(lvl, 500 - hw + 2, FIELD_TOP + 20, hw, hh), true,
+    'a wingtip in a block read as clear');
+  assert.equal(boxBlocked(lvl, 500 - hw - 3, FIELD_TOP + 20, hw, hh), false,
+    'clear of a block read as blocked');
+
+  // the corridor edges
+  assert.equal(boxBlocked(lvl, 300, FIELD_TOP + hh - 1, hw, hh), true,
+    'a box poking through the upper girder read as clear');
+  assert.equal(boxBlocked(lvl, 300, FIELD_BOT - hh + 1, hw, hh), true,
+    'a box poking through the lower girder read as clear');
+  assert.equal(boxBlocked(lvl, 300, FIELD_TOP + hh, hw, hh), false,
+    'a box exactly against the girder read as blocked');
+
+  // and the ends of the hull
+  assert.equal(boxBlocked(lvl, hw - 1, 160, hw, hh), true, 'a box off the bow read as clear');
+  assert.equal(boxBlocked(lvl, 2000 - hw + 1, 160, hw, hh), true,
+    'a box off the stern read as clear');
+});

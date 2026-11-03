@@ -1,5 +1,6 @@
 import {
-  VIEW_W, VIEW_H, FIELD_H, FIELD_TOP, FIELD_BOT, SHIP, COL, clamp, LANCE} from './config.js';
+  VIEW_W, VIEW_H, FIELD_H, FIELD_TOP, FIELD_BOT, SHIP, COL, clamp, LANCE,
+  JUMP} from './config.js';
 import { interceptors } from './enemies.js';
 import { playerShots, enemyShots } from './projectiles.js';
 import { particles, lights } from './particles.js';
@@ -164,6 +165,7 @@ export function drawWorld(ctx, game) {
   drawOrdnance(ctx);
   drawShots(ctx);
   drawPad(ctx, camX, camY);
+  drawJumpTrail(ctx, game.player);
   if (game.player.alive) {
     if (setting('aimLine')) drawFiringLine(ctx, game, camX);
     drawLance(ctx, game, camX);
@@ -394,6 +396,7 @@ function drawShip(ctx, p, seqTilt, game) {
   if (p.invuln > 0 && Math.floor(p.invuln * 18) % 2 === 0) ctx.globalAlpha = 0.4;
   drawShipBody(ctx, p, game);
   drawStatus(ctx, p);
+  drawJumpReady(ctx, p);
   ctx.restore();
 }
 
@@ -404,6 +407,52 @@ function drawShip(ctx, p, seqTilt, game) {
 // shield bar would read as damage from something unseen. Each of the
 // three is a thing you can point at, and each fades as its timer runs
 // down so the pilot can see how long is left.
+// The streak a jump leaves between where the ship was and where it is.
+//
+// Drawn in world space and behind the ship, so it reads as a thing that
+// happened rather than a thing attached. Without it a jump looks like
+// the ship stuttering across the screen, which is indistinguishable from
+// the game dropping frames.
+function drawJumpTrail(ctx, p) {
+  if (p.jumpT <= 0) return;
+  const k = p.jumpT / JUMP.streak;
+  const was = ctx.globalCompositeOperation;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+
+  // the line itself, thinning as it fades
+  ctx.strokeStyle = COL.coolHi;
+  ctx.globalAlpha = k * 0.6;
+  ctx.lineWidth = 1 + k * 3;
+  ctx.beginPath();
+  ctx.moveTo(p.jumpFromX, p.jumpFromY);
+  ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+
+  // afterimages along it, so the eye follows the direction travelled
+  const n = 5;
+  for (let i = 1; i < n; i++) {
+    const f = i / n;
+    const x = p.jumpFromX + (p.x - p.jumpFromX) * f;
+    const y = p.jumpFromY + (p.y - p.jumpFromY) * f;
+    ctx.globalAlpha = k * 0.4 * (1 - f);
+    ctx.fillStyle = COL.cool;
+    ctx.fillRect(x - 5, y - 2, 10, 4);
+  }
+
+  // a ring at each end: left here, arrived there
+  for (const [cx, cy, grow] of [[p.jumpFromX, p.jumpFromY, 1 - k], [p.x, p.y, k]]) {
+    ctx.globalAlpha = k * 0.7;
+    ctx.strokeStyle = COL.coolHi;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4 + grow * 16, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.globalCompositeOperation = was;
+}
+
 // The hook's line, from the grapnel to the ship. Drawn in world space
 // rather than on the hull, because the whole of what it tells you is
 // which direction you are being pulled and by what — and so which thing
@@ -424,6 +473,31 @@ function drawTowLine(ctx, game) {
   ctx.globalAlpha = 1;
   ctx.fillStyle = '#c9923f';
   ctx.fillRect(Math.round(p.x) - 2, Math.round(p.y) - 2, 4, 4);
+  ctx.restore();
+}
+
+// The jump's readiness, drawn on the ship rather than on the HUD.
+//
+// There is no room on the HUD row — the armoury slots run to x=386 and
+// the score starts at 402 — and a ten second cooldown is something you
+// check while flying, not something you look away to read. So it is a
+// ring around the hull: filling while it recharges, and a brief bright
+// pulse at the moment it comes back, which is the part a pilot needs to
+// catch out of the corner of an eye.
+function drawJumpReady(ctx, p) {
+  if (!p.alive) return;
+  const k = p.jumpCd > 0 ? 1 - p.jumpCd / JUMP.cooldown : 1;
+  const ready = p.jumpCd <= 0;
+  ctx.save();
+  // Just back from being ready, flash once. 0.35s of the ten seconds.
+  const justBack = ready && p.jumpWasCharging > 0;
+  ctx.globalAlpha = ready ? (justBack ? 0.9 : 0.35) : 0.55;
+  ctx.strokeStyle = ready ? COL.coolHi : COL.hudLine;
+  ctx.lineWidth = ready && justBack ? 2 : 1.2;
+  ctx.beginPath();
+  ctx.arc(0, 0, 17 + (justBack ? (1 - p.jumpWasCharging / 0.35) * 5 : 0),
+    -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k);
+  ctx.stroke();
   ctx.restore();
 }
 

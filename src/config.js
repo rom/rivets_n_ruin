@@ -445,6 +445,33 @@ export const MODIFIERS = [
     blurb: 'Scrapes cost double. Everything you pick up is worth double.' },
 ];
 
+// ---------------------------------------------------------- the jump
+//
+// A short hop, and the only move in the game that is not flying.
+//
+// It answers two situations the ship otherwise has no answer to: being
+// wedged somewhere the geometry will not let you fly out of, and a wall
+// of fire already in the air with nowhere to go. Both are moments where
+// the right play is to not be there, and nothing else offers that.
+//
+// Short on purpose. Long enough to cross a corridor or leave a volley
+// behind, nowhere near long enough to skip a stretch of hull — the
+// shortest hull is twelve thousand pixels and this is a hundred and
+// twenty of them.
+export const JUMP = {
+  distance: 120,
+  cooldown: 10,         // seconds, as asked
+  // Arriving matters more than leaving: the point of jumping out of a
+  // volley is to not be hit by the shots that were already aimed at
+  // where you were. Short enough that it cannot be used to tank.
+  invuln: 0.4,
+  streak: 0.28,         // how long the trail between the two points lasts
+  // How finely the landing is searched back toward the start when the
+  // full distance is blocked. Smaller is kinder and costs a few more
+  // box checks on a keypress, which is not a hot path.
+  step: 4,
+};
+
 // ----------------------------------------------------------- hazard fields
 //
 // Areas rather than objects. Nothing here is solid and nothing here can

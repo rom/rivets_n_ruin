@@ -14,6 +14,12 @@ worth learning from.
 
 ### Added
 
+- **A hyperspace jump**, on `V` with a ten second cooldown: a short hop
+  for the two situations nothing else answers, being wedged in geometry
+  and having a volley already in the air. Where it lands is searched back
+  from the full distance until the ship fits, so a jump into a wall is a
+  shorter jump rather than a jump through it; with nowhere to go at all
+  it is refused and the cooldown is not spent.
 - **The title screen is framed as a launch gantry**, and deliberately
   not as the hangar: an arched mouth in conduit blue with ribs over the
   opening, cold strip lighting set into the edges and open grating

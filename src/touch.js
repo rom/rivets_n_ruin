@@ -42,6 +42,7 @@ export const PADS = [
   { id: 'fire', action: 'fire', when: 'play', shape: 'round', x: 574, y: 268, r: 36, glyph: 'FIRE' },
   { id: 'secondary', action: 'secondary', when: 'play', shape: 'round', x: 492, y: 222, r: 28, glyph: 'ORD' },
   { id: 'cycle', action: 'cycle', when: 'play', shape: 'round', x: 568, y: 178, r: 25, glyph: 'CYC' },
+  { id: 'jump', action: 'jump', when: 'play', shape: 'round', x: 470, y: 300, r: 28, glyph: 'JMP' },
 
   // --- the ones that must work wherever you are. A phone has no Escape
   // key, so the pause button is on every screen including the menus.
@@ -106,16 +107,21 @@ function face(ctx, b, lit) {
   ctx.globalAlpha = 1;
 }
 
-export function drawPads(ctx, state) {
+// `dim` names the controls that are present but cannot do anything yet —
+// the jump on its cooldown. A button that is drawn the same whether or
+// not it will work teaches a player to distrust all of them.
+export function drawPads(ctx, state, dim = null) {
   const list = padsFor(state);
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (const b of list) {
     const lit = touchHeld(b.action);
-    face(ctx, b, lit);
-    ctx.fillStyle = lit ? COL.coolHi : COL.cool;
-    ctx.globalAlpha = lit ? 1 : 0.75;
+    const off = dim ? dim.has(b.action) : false;
+    ctx.globalAlpha = off ? 0.4 : 1;
+    face(ctx, b, lit && !off);
+    ctx.fillStyle = lit && !off ? COL.coolHi : COL.cool;
+    ctx.globalAlpha = off ? 0.3 : (lit ? 1 : 0.75);
     const big = b.glyph.length <= 2;
     ctx.font = `bold ${big ? 17 : 11}px ui-monospace, Menlo, monospace`;
     ctx.fillText(b.glyph, b.x, b.y + (big ? 1 : 0));

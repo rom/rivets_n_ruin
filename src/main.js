@@ -552,7 +552,10 @@ startLoop(
     if (demoOn) drawDemoBadge(hudCtx, game);
     // The buttons go on last, over everything, because they are the only
     // thing on a phone that can get you out of whatever is on screen.
-    if (padsOn) drawPads(hudCtx, padState());
+    if (padsOn) {
+      drawPads(hudCtx, padState(),
+        game.player.jumpCd > 0 ? new Set(['jump']) : null);
+    }
     if (shopOpen) drawShop(hudCtx, game, shopSel, shopNote);
     else if (helpOpen) drawHelp(hudCtx, helpPage);
     else if (controlsOpen) drawControls(hudCtx, controlsSel, awaitingKey, controlsNote);
