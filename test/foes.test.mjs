@@ -588,14 +588,21 @@ test('fuel tanks are placed close enough to chain', async () => {
   let checked = 0;
   for (const spec of LEVELS) {
     const lvl = buildLevel(spec);
-    const byPort = new Map();
-    for (const t of lvl.turrets) {
-      if (t.kind !== 'tank') continue;
-      const key = Math.round(t.x / 400);
-      if (!byPort.has(key)) byPort.set(key, []);
-      byPort.get(key).push(t);
+    // Grouped by how far apart they are, not by a fixed 400px bucket.
+    // A port's tanks sit 54px apart and span at most 108px; a port is at
+    // least 250px wide, so anything over 200px is the next port along.
+    // The bucket version put two neighbouring ports in one group as soon
+    // as the generator's x positions shifted, and then measured the gap
+    // between ports against the blast radius of a tank.
+    const ports = [];
+    const tanksOnly = lvl.turrets.filter((t) => t.kind === 'tank')
+      .sort((a, b) => a.x - b.x);
+    for (const t of tanksOnly) {
+      const last = ports[ports.length - 1];
+      if (last && t.x - last[last.length - 1].x <= 200) last.push(t);
+      else ports.push([t]);
     }
-    for (const tanks of byPort.values()) {
+    for (const tanks of ports) {
       if (tanks.length < 2) continue;
       tanks.sort((a, b) => a.x - b.x);
       for (let i = 1; i < tanks.length; i++) {

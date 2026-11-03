@@ -1,7 +1,7 @@
 import './_setup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildLevel, mixSeed, pointBlocked, obstaclesNear } from '../src/level.js';
+import { buildLevel, mixSeed, pointBlocked, obstaclesNear, firstBlockage } from '../src/level.js';
 import { makeGame, update } from '../src/game.js';
 import { setSynthetic } from '../src/input.js';
 import { foes } from '../src/foes.js';
@@ -88,12 +88,14 @@ function widestGapFailure(lv) {
 
 for (const hull of [0, 4, 7, LEVELS.length - 1]) {
   test(`${LEVELS[hull].name}: shuffled layouts stay flyable`, () => {
+    // Measured as clearance for the ship's whole box, not as a gap in a
+    // slice. See firstBlockage: the slice version passed eighteen hulls
+    // the ship could not get through.
     for (const seed of [1, 7, 0x51ed, 0xbeef, 0x7fffffff, 0xffffffff, 12345, 999983]) {
       const lv = buildLevel(LEVELS[hull], seed);
-      const bad = widestGapFailure(lv);
+      const bad = firstBlockage(lv);
       assert.equal(bad, null,
-        bad && `${LEVELS[hull].name} seed ${seed} is impassable at x=${bad.x}`
-          + ` (widest gap ${bad.best}px)`);
+        bad && `${LEVELS[hull].name} seed ${seed} blocked at x=${bad.x}: ${bad.why}`);
     }
   });
 
@@ -251,16 +253,40 @@ test('a press never closes further than the ship can fit through', () => {
 });
 
 test('a press is flyable at every phase', () => {
-  // The full walk, run at sixteen points around the cycle rather than once
-  // at the base position.
+  // The full sweep, run at sixteen points around the cycle rather than
+  // once at the base position, and for the ship's whole box.
   const { lv } = hullWithPress();
   for (let step = 0; step < 16; step++) {
     const t = (step / 16) * 3.4;      // the longest period the band makes
     updateMovers(lv, t);
-    const bad = widestGapFailure(lv);
+    const bad = firstBlockage(lv);
     assert.equal(bad, null,
-      bad && `impassable at x=${bad.x} (widest gap ${bad.best}px) at t=${t.toFixed(2)}`);
+      bad && `blocked at x=${bad.x} (${bad.why}) at t=${t.toFixed(2)}`);
   }
+});
+
+test('a chicane never closes against the width of the ship', () => {
+  // The pattern that was doing it. Consecutive stubs come off opposite
+  // surfaces, and before they were capped as a pair the two free bands
+  // could miss each other entirely — leaving the gap between the stubs as
+  // the only way through, at 18 to 20px for a ship 19px wide.
+  let seen = 0;
+  for (let seed = 1; seed <= 120; seed++) {
+    const lv = buildLevel(LEVELS[6], seed);
+    const bad = firstBlockage(lv);
+    assert.equal(bad, null, bad && `seed ${seed} blocked at x=${bad.x}: ${bad.why}`);
+    // A chicane is a run of stubs alternating top and bottom with small
+    // x gaps; count the hulls that actually contain one so this is not
+    // passing on hulls that never grew the pattern under test.
+    const byX = [...lv.obstacles].sort((a, b) => a.x - b.x);
+    for (let i = 1; i < byX.length; i++) {
+      const a = byX[i - 1];
+      const b = byX[i];
+      const gap = b.x - (a.x + a.w);
+      if (gap > 0 && gap < 60 && a.face !== b.face) { seen++; break; }
+    }
+  }
+  assert.ok(seen > 30, `only ${seen} of 120 seeds grew alternating stubs to test`);
 });
 
 test('jaws stagger, so one altitude does not clear a whole press', () => {

@@ -1,7 +1,7 @@
 import './_setup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildLevel, obstaclesNear, pointBlocked, CHUNK_W } from '../src/level.js';
+import { buildLevel, obstaclesNear, pointBlocked, firstBlockage, CHUNK_W } from '../src/level.js';
 import { LEVELS, TOWERS, FIELD_TOP, FIELD_BOT, APRON, SHIP} from '../src/config.js';
 
 // Hull generation became testable in node when the texture moved to lazy
@@ -45,20 +45,18 @@ for (const spec of LEVELS) {
     }
   });
 
-  test(`${spec.name}: a gap always exists to fly through`, () => {
-    // Walk the hull and confirm no vertical slice is fully blocked. A hull
-    // you cannot pass is unwinnable, and it would only show up by playing.
+  test(`${spec.name}: the ship can actually be flown through it`, () => {
+    // This used to walk vertical slices looking for a gap at least ten
+    // pixels tall. Every slice having a gap is not the same as the ship
+    // being able to travel between them: a stub from the roof and one
+    // from the floor nineteen pixels apart leave every slice half open,
+    // and no way past for a ship nineteen pixels wide. Reported from
+    // play, with a screenshot of the ship wedged in one — and eighteen of
+    // these twenty-five hulls had at least one.
     const lvl = buildLevel(spec);
-    const SHIP_H = 10;
-    for (let x = 10; x < lvl.length; x += 17) {
-      let run = 0;
-      let best = 0;
-      for (let y = FIELD_TOP + 1; y < FIELD_BOT; y += 2) {
-        if (pointBlocked(lvl, x, y)) run = 0;
-        else { run += 2; best = Math.max(best, run); }
-      }
-      assert.ok(best >= SHIP_H, `${spec.name} is impassable at x=${x} (widest gap ${best}px)`);
-    }
+    const bad = firstBlockage(lvl);
+    assert.equal(bad, null,
+      bad && `${spec.name} cannot be flown past x=${bad.x}: ${bad.why}`);
   });
 
   test(`${spec.name}: turrets sit on a surface, not inside one`, () => {
@@ -75,6 +73,79 @@ for (const spec of LEVELS) {
     }
   });
 }
+
+// The checker itself, fed hulls that are known to be wrong. Every hull
+// the generator makes is passable now, so nothing else in this file can
+// tell a working checker from one that always says yes.
+function fakeLevel(obstacles, length = 1200) {
+  const buckets = new Map();
+  for (const o of obstacles) {
+    for (let b = Math.floor(o.x / 256); b <= Math.floor((o.x + o.w) / 256); b++) {
+      if (!buckets.has(b)) buckets.set(b, []);
+      buckets.get(b).push(o);
+    }
+  }
+  return { obstacles, buckets, length, movers: [] };
+}
+
+test('the clearance check catches a hull with no room at all', () => {
+  const span = FIELD_BOT - FIELD_TOP;
+  // A wall with a four-pixel slot in it: every slice has a gap, and the
+  // ship is nine pixels tall.
+  const lvl = fakeLevel([
+    { x: 600, y: FIELD_TOP, w: 40, h: span / 2 - 2, face: 1 },
+    { x: 600, y: FIELD_TOP + span / 2 + 2, w: 40, h: span / 2 - 2, face: -1 },
+  ]);
+  const bad = firstBlockage(lvl);
+  assert.ok(bad, 'a 4px slot read as flyable for a 9px ship');
+  assert.equal(bad.why, 'no room for the ship at all',
+    `a wall with no slot the ship fits reported as "${bad.why}"`);
+  assert.ok(bad.x > 560 && bad.x < 660, `reported the blockage at x=${bad.x}`);
+});
+
+test('the clearance check catches two stubs the ship cannot thread', () => {
+  // The shape that was shipping: a stub from the roof and one from the
+  // floor, their free bands not overlapping, with less clear x between
+  // them than the ship is wide. Every vertical slice is half open.
+  //
+  // The gap is one pixel under the ship's width, which is what OSMIUM
+  // actually shipped: 18.9px. That matters for which guard catches it.
+  // At a wider gap some sampled column sees both stubs at once and the
+  // cheap "no room here" test fires; at this width the overlap is a
+  // single pixel that column sampling steps straight over, so every
+  // column looks open and only the connectivity test can tell.
+  const span = FIELD_BOT - FIELD_TOP;
+  const lvl = fakeLevel([
+    { x: 500, y: FIELD_TOP, w: 80, h: span * 0.55, face: 1 },
+    { x: 580 + SHIP.hitW - 1, y: FIELD_BOT - span * 0.55, w: 80, h: span * 0.55, face: -1 },
+  ]);
+  // the old check: is there a tall enough gap in every slice?
+  let thinnest = Infinity;
+  for (let x = 10; x < lvl.length; x += 2) {
+    let run = 0;
+    let best = 0;
+    for (let y = FIELD_TOP + 1; y < FIELD_BOT; y += 1) {
+      if (pointBlocked(lvl, x, y)) run = 0;
+      else { run += 1; best = Math.max(best, run); }
+    }
+    thinnest = Math.min(thinnest, best);
+  }
+  assert.ok(thinnest >= 10,
+    `this shape is meant to pass the old slice check; thinnest slice was ${thinnest}px`);
+  const bad = firstBlockage(lvl);
+  assert.ok(bad, 'the ship cannot thread this and the check said it could');
+  assert.equal(bad.why, 'nothing here connects to where the ship could be',
+    `expected the connectivity test to catch this, not "${bad.why}"`);
+});
+
+test('the clearance check passes a hull that is actually open', () => {
+  const span = FIELD_BOT - FIELD_TOP;
+  const lvl = fakeLevel([
+    { x: 500, y: FIELD_TOP, w: 80, h: span * 0.3, face: 1 },
+    { x: 700, y: FIELD_BOT - span * 0.3, w: 80, h: span * 0.3, face: -1 },
+  ]);
+  assert.equal(firstBlockage(lvl), null, 'an open hull reported as blocked');
+});
 
 test('the broad-phase bucket index finds every overlapping obstacle', () => {
   const lvl = buildLevel(LEVELS[2]);

@@ -1,11 +1,21 @@
 import {
-  FIELD_TOP, FIELD_BOT, FIELD_H, RIM, APRON, THEMES, TOWERS, clamp,
+  FIELD_TOP, FIELD_BOT, FIELD_H, RIM, APRON, THEMES, TOWERS, SHIP, clamp,
   MODIFIERS, MODIFIER_CHANCE,
 } from './config.js';
 import { mulberry32, rr, ri, hash2 } from './rng.js';
 import { buildGates } from './gates.js';
 
 const BUCKET = 256;
+
+// What the ship needs to get through, as opposed to what merely looks
+// open. The hull is generated as rectangles and the ship is a rectangle
+// too — 19 by 9 — so a gap has to clear its *width* as well as its
+// height, across every column the ship's box spans at once. Checking one
+// vertical slice at a time cannot see that, and for a long time nothing
+// did. Both carry real margin on top of the hitbox: a corridor the ship
+// passes through by a pixel is one a player reports as a wall.
+const CLEAR_H = SHIP.hitH + 34;      // 43: vertical room for the box
+const CLEAR_W = SHIP.hitW + 13;      // 32: horizontal room to thread a gap
 
 // Folds a run seed into a hull seed. A plain XOR, and deliberately nothing
 // more: mulberry32 avalanches its own seed before its first output, so
@@ -134,15 +144,33 @@ function layout(r, spec) {
     advance = w;
   } else if (roll < 0.68) {
     // Chicane: stubs from alternating surfaces, never overlapping in x,
-    // so every slice is at least half open and the line through it is a
-    // weave rather than a dodge. The first pattern that asks you to be
-    // somewhere specific *next*, rather than not where you are.
+    // flown as a weave rather than a dodge. The first pattern that asks
+    // you to be somewhere specific *next*, rather than not where you are.
+    //
+    // This used to say "every slice is at least half open", and it was,
+    // which is not the same as being flyable. A stub 50% deep from the
+    // roof followed 19px later by one 50% deep from the floor leaves no
+    // overlap between the two free bands, so the only way through was to
+    // thread the 19px of clear x between them — in a ship 19px wide.
+    // Eighteen of the twenty-five shipped hulls had at least one.
+    //
+    // So consecutive stubs are capped as a pair: whatever the first one
+    // takes, the second can only have what is left over the corridor the
+    // ship needs. A tall stub is still available, it just has to be
+    // followed by a short one, which is a better rhythm than two of the
+    // same anyway.
+    const span = FIELD_BOT - FIELD_TOP;
+    const pairCap = span - CLEAR_H;
     const n = ri(r, 3, 5);
     let sx = 0;
     let fromTop = r() < 0.5;
+    let prev = 0;
     for (let i = 0; i < n; i++) {
       const w = rr(r, 54, 86);
-      const h = rr(r, 0.44, 0.58) * (FIELD_BOT - FIELD_TOP);
+      const want = rr(r, 0.44, 0.58) * span;
+      // Never a nub: a stub too short to mean anything is worse than none.
+      const h = Math.max(span * 0.17, Math.min(want, pairCap - prev));
+      prev = h;
       obstacles.push({
         x: sx, y: fromTop ? FIELD_TOP : FIELD_BOT - h, w, h, face: fromTop ? 1 : -1,
       });
@@ -151,7 +179,9 @@ function layout(r, spec) {
           x: sx + w / 2, y: fromTop ? FIELD_TOP + h : FIELD_BOT - h, dir: fromTop ? 1 : -1,
         });
       }
-      sx += w + rr(r, 18, 40);
+      // Clear of the ship's width with room to spare, so the gap between
+      // two stubs is somewhere to be rather than somewhere to squeeze.
+      sx += w + rr(r, CLEAR_W, CLEAR_W + 24);
       fromTop = !fromTop;
     }
     advance = sx;
@@ -432,6 +462,53 @@ export function obstaclesNear(level, x0, x1) {
     if (list) for (const o of list) out.add(o);
   }
   return out;
+}
+
+// Can a box the size of the ship actually travel the length of this hull?
+//
+// The question the old walk could not answer. It checked each vertical
+// slice for a gap tall enough, which says nothing about whether the ship
+// can move *between* two slices: a stub from the roof and one from the
+// floor, 19px apart in x, leave every slice half open and the ship no way
+// through, because the ship is 19px wide and has to be somewhere while it
+// crosses. Eighteen of the twenty-five shipped hulls had one.
+//
+// Swept as a configuration-space problem instead. For each column, the
+// y-intervals where the ship's CENTRE can sit — obstacles inflated by half
+// the ship in each direction — and then left to right keeping only the
+// intervals reachable from an interval that was already reachable.
+// Returns null when the hull can be flown, or where and why it cannot.
+export function firstBlockage(level, step = 2) {
+  const hw = SHIP.hitW / 2;
+  const hh = SHIP.hitH / 2;
+  const hi = FIELD_BOT - hh;
+  let reach = null;
+
+  for (let x = hw + 1; x < level.length - hw; x += step) {
+    const blocked = [];
+    for (const o of obstaclesNear(level, x - hw, x + hw)) {
+      if (o.x >= x + hw || o.x + o.w <= x - hw) continue;
+      blocked.push([o.y - hh, o.y + o.h + hh]);
+    }
+    blocked.sort((a, b) => a[0] - b[0]);
+
+    const free = [];
+    let lo = FIELD_TOP + hh;
+    for (const [a, b] of blocked) {
+      if (a > lo) free.push([lo, Math.min(a, hi)]);
+      if (b > lo) lo = b;
+      if (lo >= hi) break;
+    }
+    if (lo < hi) free.push([lo, hi]);
+
+    const open = free.filter(([a, b]) => b - a > 0);
+    if (!open.length) return { x, why: 'no room for the ship at all' };
+    if (reach === null) { reach = open; continue; }
+    const next = open.filter(([a, b]) => reach.some(([c, d]) => a < d && c < b));
+    if (!next.length) return { x, why: 'nothing here connects to where the ship could be' };
+    reach = next;
+  }
+  return null;
 }
 
 export function pointBlocked(level, x, y) {
