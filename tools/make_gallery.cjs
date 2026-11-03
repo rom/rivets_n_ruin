@@ -230,7 +230,10 @@ const OUT = path.join(__dirname, '..', 'docs');
     const g = window.game;
     fo.resetFoes();
     ar.resetOrdnance();
-    g.player.ammo = { bomb: 6, grenade: 8, missile: 5 };
+    // Merged, not replaced: ARMORY.order has four kinds and a literal
+    // that lists three leaves the fourth undefined, which the armourer
+    // then prints as "undefined/10".
+    Object.assign(g.player.ammo, { bomb: 6, grenade: 8, missile: 5 });
     for (const k of ['bomb', 'grenade', 'missile']) {
       g.player.secondary = k;
       g.player.secondaryCd = 0;
@@ -349,7 +352,7 @@ const OUT = path.join(__dirname, '..', 'docs');
     g.player.gunCap = 5;
     g.player.gunSpeed = fit.gs;
     g.player.gunBlaze = fit.gb;
-    g.player.ammo = Object.assign({ bomb: 0, grenade: 0, missile: 0 }, fit.ammo || {});
+    Object.assign(g.player.ammo, { bomb: 0, grenade: 0, missile: 0, mine: 0 }, fit.ammo || {});
     g.mods = fit.mods || {};
     sh.applyMods(g);
   }, fit);
@@ -371,7 +374,8 @@ const OUT = path.join(__dirname, '..', 'docs');
   // already points at.
   const FINAL_FIT = {
     lvl: 24, gs: 5, gb: 5,
-    ammo: { bomb: 12, grenade: 16, missile: 8 },
+    // Within the caps in ARMORY, or the shot shows rows reading 12/9.
+    ammo: { bomb: 9, grenade: 12, missile: 8, mine: 6 },
     mods: {
       magnet: 3, plating: 1, autoloader: 1, scavenger: 3, afterburner: 1,
       reclaimer: 1, mount: 1, drone: 2, pointdef: 1, regen: 2, siege: 1,
