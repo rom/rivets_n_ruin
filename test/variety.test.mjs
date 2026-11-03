@@ -1481,3 +1481,220 @@ test('changing the setting changes the live palette', () => {
     settings.set('scheme', was);
   }
 });
+
+// ------------------------------------------------- the on-screen controls
+//
+// A phone has no keyboard. The buttons drive the same input sets the
+// keyboard does, so the only things that can be wrong here are the ones
+// a browser would have to show you: a button you can see and cannot
+// press, two that overlap, or one off the edge of the screen.
+
+import { PADS, MIN_TOUCH, hitBox, padAt, padsFor } from '../src/touch.js';
+import { VIEW_W, VIEW_H, HUD_Y } from '../src/config.js';
+
+test('every on-screen control is big enough for a thumb', () => {
+  for (const b of PADS) {
+    const r = hitBox(b);
+    assert.ok(r.w >= MIN_TOUCH && r.h >= MIN_TOUCH,
+      `${b.id} is ${r.w}x${r.h} logical px, under the ${MIN_TOUCH} floor`);
+  }
+});
+
+test('no two controls on screen at once overlap', () => {
+  // Overlapping hit boxes mean a thumb lands on whichever happens to be
+  // first in the list, which is the kind of bug that only shows up as
+  // "the controls feel wrong".
+  for (const state of ['play', 'title', 'levelclear', 'gameover', 'dying']) {
+    const list = padsFor(state);
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = hitBox(list[i]);
+        const b = hitBox(list[j]);
+        const over = a.x < b.x + b.w && b.x < a.x + a.w
+          && a.y < b.y + b.h && b.y < a.y + a.h;
+        assert.ok(!over,
+          `in ${state}, ${list[i].id} and ${list[j].id} overlap`);
+      }
+    }
+  }
+});
+
+test('every control is on the screen', () => {
+  for (const b of PADS) {
+    const r = hitBox(b);
+    assert.ok(r.x >= 0 && r.y >= 0 && r.x + r.w <= VIEW_W && r.y + r.h <= VIEW_H,
+      `${b.id} sits at ${r.x},${r.y} ${r.w}x${r.h}, off a ${VIEW_W}x${VIEW_H} screen`);
+    // ...and not over the HUD, which is the one thing a player reads
+    // while both thumbs are busy.
+    assert.ok(r.y + r.h <= HUD_Y + 2,
+      `${b.id} reaches ${r.y + r.h}, over the HUD at ${HUD_Y}`);
+  }
+});
+
+test('flying and menus get the controls they need', () => {
+  const flying = padsFor('play').map((b) => b.id);
+  for (const need of ['left', 'right', 'up', 'down', 'fire', 'pause']) {
+    assert.ok(flying.includes(need), `nothing to ${need} with while flying`);
+  }
+  assert.ok(!flying.includes('start'), 'the START button is up during a run');
+
+  for (const state of ['title', 'gameover', 'levelclear']) {
+    const menu = padsFor(state).map((b) => b.id);
+    assert.ok(menu.includes('start'),
+      `no way to start anything from ${state} without a keyboard`);
+    assert.ok(menu.includes('pause'),
+      `no way out of ${state} without a keyboard`);
+    assert.ok(!menu.includes('fire'), `the fire button is up on ${state}`);
+  }
+});
+
+test('hit testing answers the control that was drawn there', () => {
+  for (const state of ['play', 'title']) {
+    for (const b of padsFor(state)) {
+      const r = hitBox(b);
+      // the middle, and just inside each corner
+      assert.equal(padAt(state, b.x, b.y)?.id, b.id, `${b.id} misses at its centre`);
+      for (const [dx, dy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+        const px = r.x + r.w / 2 + dx * (r.w / 2 - 1);
+        const py = r.y + r.h / 2 + dy * (r.h / 2 - 1);
+        assert.equal(padAt(state, px, py)?.id, b.id, `${b.id} misses just inside its corner`);
+      }
+    }
+  }
+  assert.equal(padAt('play', 320, 120), null, 'the open playfield reported a button');
+});
+
+test('a control only answers in the states it belongs to', () => {
+  const fire = PADS.find((b) => b.id === 'fire');
+  assert.ok(padAt('play', fire.x, fire.y), 'the fire button is dead while flying');
+  assert.equal(padAt('title', fire.x, fire.y), null,
+    'the fire button is live on the title, where it is not drawn');
+});
+
+test('the touch setting offers auto, on and off', () => {
+  const def = settings.DEFS.find((d) => d.id === 'touch');
+  assert.ok(def, 'no on-screen controls setting');
+  assert.equal(def.def, 0, 'the default must be AUTO');
+  assert.deepEqual(settings.TOUCH_MODES, ['AUTO', 'ON', 'OFF']);
+});
+
+test('the buttons press and release like keys', async () => {
+  const input = await import('../src/input.js');
+  const { touchDown, touchUp, touchClear, held, touchHeld, endFrame, tapped } = input;
+  touchClear();
+  endFrame();
+
+  touchDown(1, 'fire');
+  assert.equal(held('fire'), true, 'a finger down did not hold the action');
+  assert.equal(touchHeld('fire'), true, 'the button does not know it is lit');
+  assert.equal(tapped('fire'), true, 'a finger down did not register as a press');
+  endFrame();
+  assert.equal(tapped('fire'), false, 'the press repeated on the next frame');
+  assert.equal(held('fire'), true, 'the hold did not survive the frame');
+
+  touchUp(1);
+  assert.equal(held('fire'), false, 'lifting the finger left the gun firing');
+  assert.equal(touchHeld('fire'), false, 'the button is still lit with nothing on it');
+
+  // Two fingers on buttons for the same action: lifting one must not
+  // release it while the other is still down.
+  touchDown(1, 'right');
+  touchDown(2, 'right');
+  touchUp(1);
+  assert.equal(held('right'), true, 'one of two fingers let go of the action');
+  touchUp(2);
+  assert.equal(held('right'), false, 'the last finger up did not release it');
+
+  // Sliding from one button to the next steers rather than sticking.
+  touchDown(3, 'left');
+  touchUp(3);
+  touchDown(3, 'up');
+  assert.equal(held('left'), false, 'sliding off a button left it held');
+  assert.equal(held('up'), true, 'sliding onto a button did not press it');
+
+  // Losing the pointer entirely — the browser taking the gesture, the
+  // tab losing focus — has to let go of everything.
+  touchDown(4, 'down');
+  touchClear();
+  for (const a of ['left', 'right', 'up', 'down', 'fire']) {
+    assert.equal(held(a), false, `${a} survived a touch clear`);
+  }
+  // ...and an unknown pointer id is not an error
+  touchUp(99);
+  endFrame();
+});
+
+// ---------------------------------------------------------- key remapping
+//
+// The live map is the defaults with the player's bindings over the top.
+// What must hold: a rebind takes the key off whatever had it, the keys
+// that must keep working cannot be taken, and nothing a hand-edited
+// store says can break the map.
+
+import {
+  DEFAULT_MAP, MAP, BINDABLE, rebind, resetBindings, keyFor, isBindable, isFixedKey,
+} from '../src/input.js';
+
+test('every bindable action is a real action, and the fixed ones are not listed', () => {
+  const actions = new Set(Object.values(DEFAULT_MAP));
+  for (const [action, label] of BINDABLE) {
+    assert.ok(actions.has(action), `${action} is bindable but nothing maps to it`);
+    assert.ok(label && label === label.toUpperCase(), `${action} has no readable label`);
+  }
+  // start must never be rebindable: it is the way back in when
+  // everything else has been bound to the wrong thing.
+  assert.ok(!isBindable('start'), 'START can be rebound, so it can be lost');
+  assert.ok(isFixedKey('Enter'), 'ENTER is not protected');
+  assert.ok(!isBindable('wipe') && !isBindable('wipeall'),
+    'an irreversible key can be bound to something reached for in flight');
+});
+
+test('a rebind moves the action and takes the key off the old one', () => {
+  resetBindings();
+  try {
+    const wasFire = keyFor('fire');
+    assert.ok(rebind('fire', 'KeyG'), 'a free key was refused');
+    assert.equal(keyFor('fire'), 'KeyG');
+    assert.equal(MAP.KeyG, 'fire', 'the live map did not take the binding');
+    assert.notEqual(MAP[wasFire], 'fire', 'the old key still fires');
+
+    // Binding a key that another action is using takes it away, rather
+    // than leaving one key doing two things.
+    assert.ok(rebind('cycle', 'KeyG'));
+    assert.equal(MAP.KeyG, 'cycle');
+    assert.notEqual(keyFor('fire'), 'KeyG', 'two actions share a key');
+  } finally { resetBindings(); }
+});
+
+test('the keys that must keep working cannot be taken', () => {
+  resetBindings();
+  try {
+    assert.equal(rebind('fire', 'Enter'), false, 'FIRE was bound onto ENTER');
+    assert.equal(MAP.Enter, 'start', 'ENTER stopped starting things');
+    assert.equal(rebind('left', 'KeyK'), false, 'MOVE LEFT was bound onto the hangar wipe');
+    assert.equal(rebind('start', 'KeyG'), false, 'START was rebound');
+    assert.equal(rebind('fire', ''), false, 'an empty key was accepted');
+  } finally { resetBindings(); }
+});
+
+test('resetting puts every default back', () => {
+  rebind('fire', 'KeyG');
+  rebind('up', 'KeyI');
+  resetBindings();
+  assert.deepEqual({ ...MAP }, { ...DEFAULT_MAP },
+    'resetting the controls did not restore the shipped map');
+});
+
+test('a rebind never leaves the map without the action', () => {
+  // Every bindable action must still be reachable by some key after any
+  // sequence of rebinds, or a player can lose the ability to fire.
+  resetBindings();
+  try {
+    for (const [action] of BINDABLE) rebind(action, 'Key' + action[0].toUpperCase());
+    for (const [action] of BINDABLE) {
+      const code = keyFor(action);
+      assert.ok(code, `${action} ended up bound to nothing`);
+      assert.equal(MAP[code], action, `${action} says ${code} but the map disagrees`);
+    }
+  } finally { resetBindings(); }
+});

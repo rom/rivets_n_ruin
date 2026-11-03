@@ -1243,6 +1243,44 @@ twelfth put it through. Widening the gap only moved the cliff; a fixed
 window has no cliff, and the screen now lays out identically whether there
 are five settings or fifty.
 
+### Controls, and playing it on glass
+
+`CONTROLS` — reached with **C** from the settings screen — lists every
+rebindable action and the key it answers to. Choose a row, press ENTER,
+press the key you want. **R** puts every default back.
+
+A rebind takes the key off whatever had it, so one key never does two
+things. Five actions are deliberately fixed: START, the two answers to a
+yes/no prompt, and the two irreversible wipes. START is fixed for the
+same reason a lift has a door button — it has to work when everything
+else has been bound to the wrong thing — and binding a hangar wipe onto
+something you reach for in flight is a way to lose a campaign to a typo.
+
+`ON-SCREEN CONTROLS` is AUTO, ON or OFF. AUTO asks the browser whether
+this is a touchscreen, so a phone gets buttons and a desktop does not
+without anybody finding a setting. ON is for the machines it gets wrong,
+mostly touchscreen laptops.
+
+The buttons drive the same two input sets the keyboard drives, so nothing
+downstream knows which one is being used: a run flown with a thumb goes
+through the identical update path as one flown with a hand on the arrows.
+A four-way pad sits under the left thumb and FIRE, ORDNANCE and CYCLE
+under the right; PAUSE is on every screen, because a phone has no Escape
+key. Sliding a thumb from one button to the next steers rather than
+sticking on the one it started on.
+
+The layout is data in the same logical 640×384 the HUD uses, and tested
+as data: nothing overlaps, nothing covers the HUD, nothing leaves the
+screen, and every target clears a 48-logical-pixel floor. That floor is
+in logical pixels and not a promise in CSS ones — the playfield is a
+fixed shape letterboxed into whatever screen it gets, so on an iPhone 13
+held sideways the buttons measure about 46×43 CSS px, just under the 44pt
+platform guidance and about as large as this layout allows without the
+controls covering the hull you are flying along.
+
+Held upright, a phone gets a letterboxed strip and the page says to turn
+it sideways rather than leaving somebody with a postage stamp.
+
 ### Accessibility
 
 Each of these removes a specific barrier rather than making the game easier
@@ -2302,6 +2340,7 @@ src/hangar.js     what survives a closed tab: coins banked and mods owned
 src/settings.js   settings as data, validated on the way back in
 src/sequences.js  the splash, the launch, the landing, the title backdrop
 src/display.js    adaptive render scale, static mode for menus
+src/touch.js      the on-screen controls: layout, hit testing, drawing
 src/errors.js     client error reporting; see below
 src/projectiles.js src/particles.js src/camera.js src/rng.js src/input.js
 

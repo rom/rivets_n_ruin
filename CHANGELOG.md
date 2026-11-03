@@ -14,6 +14,18 @@ worth learning from.
 
 ### Added
 
+- **Key remapping**, on a CONTROLS screen reached with C from settings.
+  A rebind takes the key off whatever had it, so one key never does two
+  things, and five actions are deliberately fixed: START, the two
+  answers to a yes/no prompt, and the two irreversible wipes.
+- **On-screen controls, and a layout that fits a phone.** A four-way pad
+  and the weapons under the thumbs, PAUSE on every screen because a
+  phone has no Escape key. AUTO shows them on a touchscreen; ON and OFF
+  are for the machines the browser gets wrong. They drive the same input
+  sets the keyboard does, so nothing downstream knows which is in use.
+  The page gives up its keyboard-hint strip on a touch device, stops the
+  browser taking a steering gesture as a scroll, and says to turn a
+  phone sideways rather than leaving a postage stamp.
 - **Five colour schemes** — GANTRY (what shipped), AMBER CRT, PHOSPHOR,
   DEEP ICE and OXIDE — on a `COLOUR SCHEME` setting. They repaint the
   instrument panel: the HUD, the menus and the frames, not the hull,
