@@ -60,6 +60,47 @@ type Score struct {
 	Created   time.Time `json:"created"`
 }
 
+// CoopScore is one co-op run: two pilots, one hull, one score.
+//
+// A separate type and a separate board, not a Score with a second name
+// bolted on. The reason is the one the README used to give for not
+// recording co-op at all: a solo score answers "how far did this pilot
+// get", and a pair's score answers a different question. Folding them
+// together would mean either crediting one pilot for two people's work
+// or splitting a score that was never two scores. So co-op runs are
+// recorded in full, on their own board, and they do not touch a
+// pilot's solo card -- Player.Runs and Player.Best stay solo.
+//
+// Both ids are kept, so either pilot's page can find the run and
+// deleting either pilot takes it with them. Both names are
+// denormalised for the same reason Score.Name is: the board is read
+// far more often than it is written.
+type CoopScore struct {
+	ID        string  `json:"id"`
+	HostID    string  `json:"hostId"`
+	HostName  string  `json:"hostName"`
+	GuestID   string  `json:"guestId"`
+	GuestName string  `json:"guestName"`
+	Points    int     `json:"points"`
+	TimeSec   float64 `json:"timeSec"`
+	Turrets   int     `json:"turrets"`
+	Deaths    int     `json:"deaths"`
+	Completed bool    `json:"completed"`
+	Levels    int     `json:"levels"`
+	// How long the two were actually connected to each other, in
+	// seconds. Recorded rather than assumed: a guest who drops out at
+	// the first hull did not fly the run the board says they did, and
+	// the honest thing is to keep the number that shows it. See
+	// submitCoopScore for the rule it has to clear.
+	PairedSec float64   `json:"pairedSec"`
+	Created   time.Time `json:"created"`
+}
+
+// Flew reports whether a pilot was one of this run's two.
+func (c *CoopScore) Flew(playerID string) bool {
+	return playerID != "" && (c.HostID == playerID || c.GuestID == playerID)
+}
+
 // Mod is a shareable variant of the game. The game is already seed-driven and
 // entirely configured from src/config.js, so a mod is exactly those two things:
 // a hull seed plus a set of config overrides.
@@ -116,6 +157,16 @@ func ParseWindow(s string) Window {
 	default:
 		return WindowAll
 	}
+}
+
+// CoopRank is a co-op leaderboard entry.
+//
+// Its own type rather than a Rank holding an `any`: the co-op board has
+// one row per run and two names on it, and a reader of the JSON should
+// not have to work out which shape arrived.
+type CoopRank struct {
+	Position int        `json:"position"`
+	Score    *CoopScore `json:"score"`
 }
 
 // Rank is a leaderboard entry: a score plus its position.

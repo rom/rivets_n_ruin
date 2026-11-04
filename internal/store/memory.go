@@ -29,6 +29,7 @@ type Memory struct {
 	byToken  map[string]string // tokenHash -> playerID
 	byName   map[string]string // lowercased name -> playerID
 	scores   []*model.Score
+	coop     []*model.CoopScore
 	mods     map[string]*model.Mod
 	hangars  map[string]*model.Hangar // playerID -> what they own between runs
 	presence map[string]model.Presence
@@ -399,6 +400,7 @@ func (m *Memory) Stats() Stats {
 	st := Stats{
 		Players:   len(m.players),
 		Runs:      len(m.scores),
+		CoopRuns:  len(m.coop),
 		Mods:      len(m.mods),
 		FlyingNow: len(live),
 	}
@@ -409,6 +411,14 @@ func (m *Memory) Stats() Stats {
 		if s.Points > st.BestScore {
 			st.BestScore = s.Points
 			st.BestPilot = s.Name
+		}
+	}
+	// Deliberately not folded into BestScore: that number is the solo
+	// record and a pair's score is not comparable to it. Co-op runs
+	// show up here only as a count, and on their own board.
+	for _, c := range m.coop {
+		if c.Created.After(dayAgo) {
+			st.RunsToday++
 		}
 	}
 	return st
@@ -431,6 +441,7 @@ type snapshot struct {
 	Tokens  map[string]string        `json:"tokens,omitempty"`
 	Hangars map[string]*model.Hangar `json:"hangars,omitempty"`
 	Scores  []*model.Score           `json:"scores,omitempty"`
+	Coop    []*model.CoopScore       `json:"coop,omitempty"`
 	Mods    []*model.Mod             `json:"mods,omitempty"`
 }
 
@@ -481,6 +492,7 @@ func (m *Memory) SnapshotPart(path string, part Part) error {
 		// Scores are never mutated after AddScore, so the pointers are
 		// safe to share; the slice header is not, hence the copy.
 		snap.Scores = append(snap.Scores, m.scores...)
+		snap.Coop = append(snap.Coop, m.coop...)
 		for _, mod := range m.mods {
 			snap.Mods = append(snap.Mods, mod)
 		}
@@ -557,6 +569,7 @@ func (m *Memory) Load(path string) error {
 		}
 	}
 	m.scores = append(m.scores, snap.Scores...)
+	m.coop = append(m.coop, snap.Coop...)
 	for _, mod := range snap.Mods {
 		m.mods[mod.ID] = mod
 	}
@@ -636,8 +649,9 @@ func clampInt(v, lo, hi int) int {
 	return v
 }
 
-func clonePlayer(p *model.Player) *model.Player { c := *p; return &c }
-func cloneScore(s *model.Score) *model.Score    { c := *s; return &c }
+func clonePlayer(p *model.Player) *model.Player     { c := *p; return &c }
+func cloneScore(s *model.Score) *model.Score        { c := *s; return &c }
+func cloneCoop(s *model.CoopScore) *model.CoopScore { c := *s; return &c }
 
 // --- administration
 
@@ -688,6 +702,7 @@ func (m *Memory) DeletePlayer(id string) error {
 	delete(m.byToken, p.TokenHash)
 	delete(m.hangars, id)
 	m.dropScoresLocked(id)
+	m.dropCoopLocked(id)
 	return nil
 }
 
@@ -702,6 +717,7 @@ func (m *Memory) ResetPlayer(id string) error {
 		return ErrNotFound
 	}
 	m.dropScoresLocked(id)
+	m.dropCoopLocked(id)
 	delete(m.hangars, id)
 	p.Runs = 0
 	p.Best = 0
@@ -844,11 +860,18 @@ func (m *Memory) DeleteScore(id string) error {
 func (m *Memory) ResetScores() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	n := len(m.scores)
+	n := len(m.scores) + len(m.coop)
 	for i := range m.scores {
 		m.scores[i] = nil
 	}
 	m.scores = nil
+	// Both boards, for the reason in the interface: an operator who
+	// asks to reset the high scores and finds one of two boards still
+	// standing has been handed a trap rather than a tool.
+	for i := range m.coop {
+		m.coop[i] = nil
+	}
+	m.coop = nil
 	for _, p := range m.players {
 		p.Runs = 0
 		p.Best = 0

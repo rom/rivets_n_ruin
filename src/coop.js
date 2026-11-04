@@ -515,19 +515,44 @@ export async function peekGame(code) {
   } catch { return null; }
 }
 
-/** Join somebody else's room. */
-export async function joinGame(code) {
+/**
+ * Join somebody else's room.
+ *
+ * Two steps, and the first one is the new part: a POST that claims the
+ * guest slot for this account, before any socket. The co-op board
+ * credits two pilots, so the server has to know who the second one is,
+ * and a browser cannot put an Authorization header on a WebSocket. A
+ * POST first keeps the token out of the URL -- a token in a query
+ * string lands in access logs -- and it also replaces the peek: the
+ * reply carries the same seed, hull and host name.
+ *
+ * So joining now needs an account. Hosting already did, and a run the
+ * board cannot name both pilots of is a run the board cannot take.
+ */
+export async function joinGame(code, token) {
   S.phase = 'opening';
   S.error = null;
-  const room = await peekGame(code);
-  if (!room) {
+  if (!token) {
     S.phase = 'off';
-    S.error = 'no game with that code';
+    S.error = 'sign in to join a co-op game';
     return false;
   }
-  if (room.full) {
+  let room = null;
+  try {
+    const res = await fetch(`/api/coop/${encodeURIComponent(code)}/join`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      S.phase = 'off';
+      S.error = (body && body.error) || `could not join (${res.status})`;
+      return false;
+    }
+    room = await res.json();
+  } catch {
     S.phase = 'off';
-    S.error = 'that game already has two pilots';
+    S.error = 'could not reach the backend';
     return false;
   }
   S.code = room.code;

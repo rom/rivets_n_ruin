@@ -14,6 +14,28 @@ worth learning from.
 
 ### Added
 
+- **A co-op top ten, and co-op runs recorded on the server.** Its own
+  board and its own table, because two pilots and one score is not
+  something the solo board can represent: ranked against a soloist a
+  pair wins for having twice the guns, and folded onto one pilot's card
+  the other pilot vanishes from a run they flew half of. `B` now cycles
+  three boards. Neither pilot's solo card moves, and `BEST SCORE` on the
+  title screen stays the solo record.
+
+  The host posts the run — it is the side that simulated it, so its
+  figures are the ones the game produced — and the guest's end screen
+  says so rather than sitting on `SENDING RUN...` for ever. The partner
+  is not in the request: joining a game is now an authenticated `POST`,
+  so the server already knows who the second pilot is and takes it from
+  the room. A host can post the run it played and nothing else.
+
+  The server also times how long the two were actually connected. A
+  guest who drops out on the first hull did not fly the run the board
+  would otherwise credit them with, so a co-op run needs half its flight
+  time flown together, with a floor under the rule so a pair who died
+  early are not refused over a second of socket setup. The number is
+  kept on the row, and the operator tool shows it as a percentage beside
+  a new CO-OP tab that lists and removes co-op runs.
 - **A hyperspace jump**, on `V` with a ten second cooldown: a short hop
   for the two situations nothing else answers, being wedged in geometry
   and having a volley already in the air. Where it lands is searched back
@@ -114,8 +136,7 @@ worth learning from.
   what does is everything the two players can affect, twenty times a
   second, binary, about 1.4KB in a busy frame. The camera sits at the
   midpoint of the pair and neither pilot can drag the other off the
-  edge. A co-op run is not submitted to the leaderboard: two pilots and
-  one score is not something the board can represent.
+  edge.
 - **A WebSocket server**, RFC 6455, in `internal/ws`, because the
   backend is standard library on purpose and co-op is the first thing
   in it that needs a socket rather than a request.
@@ -168,6 +189,17 @@ worth learning from.
   both builds and the PNGs compared.
 
 ### Fixed
+
+- **The co-op view juddered up and down until a run was unreadable.**
+  Reported by both pilots. `drawWorld` derives the view's vertical
+  offset from nothing but the screen shake, and the only code that wound
+  the shake down lived inside `updateCamera` — which co-op skips,
+  because co-op places the camera itself. So the first hit set the shake
+  and nothing ever took it away, and since a kick caps at fourteen
+  pixels, two hits left the whole world layer jittering by up to
+  fourteen pixels every frame for the rest of the run. The decay is now
+  its own function that every camera path calls, with a test that walks
+  all of them.
 
 - **The searchlights threw a NaN into the renderer once a frame, and
   every test passed.** `TOWERS.array` has carried `sweep: 1.1` — radians

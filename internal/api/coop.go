@@ -109,12 +109,39 @@ type coopRoom struct {
 	Hull    int       `json:"hull"`
 	Created time.Time `json:"created"`
 
-	mu       sync.Mutex
-	host     *coopPeer
-	guest    *coopPeer
-	closed   bool
-	expires  time.Time
-	hostName string
+	mu      sync.Mutex
+	host    *coopPeer
+	guest   *coopPeer
+	closed  bool
+	expires time.Time
+
+	// Who is in it, as accounts rather than as sockets.
+	//
+	// Separate from the peers because the two have different
+	// lifetimes and the board needs the slower one: a socket comes and
+	// goes, but who flew the run has to still be answerable when the
+	// run ends. The host's identity arrives with the room; the guest's
+	// arrives at /join, which is why that route is authenticated.
+	hostID    string
+	hostName  string
+	guestID   string
+	guestName string
+
+	// How long the two have actually been connected to each other.
+	//
+	// Recorded, not assumed. A co-op score credits two pilots, and a
+	// guest who dropped out at the first hull did not fly the run the
+	// board would say they did. paired accumulates closed intervals;
+	// pairedSince is the open one, zero when the pair is not currently
+	// complete. See pairedFor.
+	paired      time.Duration
+	pairedSince time.Time
+
+	// The registry's clock, carried so leave() can close an interval
+	// without reaching for the wall clock. A room that times itself
+	// off time.Now while every other path is on an injected clock is a
+	// test that cannot be written.
+	now func() time.Time
 }
 
 type coopRegistry struct {
@@ -143,7 +170,7 @@ func coopCode() (string, error) {
 	return string(b), nil
 }
 
-func (reg *coopRegistry) open(seed int64, hull int, hostName string) (*coopRoom, error) {
+func (reg *coopRegistry) open(seed int64, hull int, hostID, hostName string) (*coopRoom, error) {
 	reg.mu.Lock()
 	defer reg.mu.Unlock()
 	reg.sweepLocked()
@@ -164,7 +191,8 @@ func (reg *coopRegistry) open(seed int64, hull int, hostName string) (*coopRoom,
 		room := &coopRoom{
 			Code: code, Seed: seed, Hull: hull,
 			Created: reg.now(), expires: reg.now().Add(coopOpenTTL),
-			hostName: hostName,
+			hostID: hostID, hostName: hostName,
+			now: reg.now,
 		}
 		reg.rooms[code] = room
 		return room, nil
@@ -238,7 +266,63 @@ func (r *coopRoom) join(c coopConn, want coopSide, now time.Time) (*coopPeer, er
 	// Once somebody is in, the room lives as long as they do rather
 	// than until the open-room deadline.
 	r.expires = now.Add(coopOpenTTL)
+	// The pair is complete: start counting the time they fly together.
+	if r.host != nil && r.guest != nil && r.pairedSince.IsZero() {
+		r.pairedSince = now
+	}
 	return p, nil
+}
+
+// pairedFor is how long the two have been connected to each other,
+// counting the interval that is still open. Caller must NOT hold r.mu.
+func (r *coopRoom) pairedFor(now time.Time) time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.pairedForLocked(now)
+}
+
+// clock is the room's time source, defaulting to the wall clock so a
+// room built by hand in a test is still usable.
+func (r *coopRoom) clock() time.Time {
+	if r.now == nil {
+		return time.Now()
+	}
+	return r.now()
+}
+
+func (r *coopRoom) pairedForLocked(now time.Time) time.Duration {
+	d := r.paired
+	if !r.pairedSince.IsZero() && now.After(r.pairedSince) {
+		d += now.Sub(r.pairedSince)
+	}
+	return d
+}
+
+// setGuest records who is about to join as the guest.
+//
+// Called from the authenticated /join route, before the socket. It
+// refuses a pilot trying to be their own partner: two browsers and one
+// account is a thing people will try, and a board row naming the same
+// pilot twice is not a pair.
+func (r *coopRoom) setGuest(id, name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return errors.New("that game has ended")
+	}
+	if r.guest != nil {
+		return errRoomFull
+	}
+	if id != "" && id == r.hostID {
+		return errors.New("you are already hosting that game")
+	}
+	// A second pilot claiming the slot before the first one's socket
+	// arrives takes it: the claim is not a reservation, and the socket
+	// is what actually fills the room. Recording the later one keeps
+	// the identity and the socket in step.
+	r.guestID = id
+	r.guestName = name
+	return nil
 }
 
 func (r *coopRoom) leave(p *coopPeer) {
@@ -257,6 +341,12 @@ func (r *coopRoom) leave(p *coopPeer) {
 	}
 	if r.guest == p {
 		r.guest = nil
+	}
+	// The pair is no longer complete, so the open interval closes here
+	// rather than running on while one of them flies alone.
+	if !r.pairedSince.IsZero() {
+		r.paired = r.pairedForLocked(r.clock())
+		r.pairedSince = time.Time{}
 	}
 	// The host leaving ends the game: it was running the simulation,
 	// and without it the guest is drawing a world nobody is advancing.
@@ -367,7 +457,7 @@ func (s *Server) coopOpen(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "no such hull")
 		return
 	}
-	room, err := s.coop.open(req.Seed, req.Hull, p.Name)
+	room, err := s.coop.open(req.Seed, req.Hull, p.ID, p.Name)
 	if err != nil {
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
 		return
@@ -396,6 +486,47 @@ func (s *Server) coopPeek(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"code": room.Code, "seed": room.Seed, "hull": room.Hull,
 		"host": host, "full": full,
+	})
+}
+
+// coopJoin claims the guest slot for a signed-in pilot.
+//
+// Authenticated, and separate from the socket, for one reason: the
+// co-op board credits two pilots, so the server has to know who the
+// second one is, and a WebSocket cannot carry an Authorization header
+// from a browser. Doing it as a POST before the socket keeps the
+// credential out of the URL -- a token in a query string ends up in
+// access logs -- without inventing a ticket to swap for it.
+//
+// The room code is still the only thing that lets you in. This route
+// does not change that; it records who walked through.
+//
+// A pilot who is not signed in gets a 401 rather than a silent anonymous
+// game, because co-op now records what it is for: hosting already
+// required an account, and a run the board cannot name both pilots of
+// is a run the board cannot take.
+func (s *Server) coopJoin(w http.ResponseWriter, r *http.Request) {
+	p := s.bearer(r)
+	if p == nil {
+		writeErr(w, http.StatusUnauthorized, "sign in to join a co-op game")
+		return
+	}
+	room := s.coop.find(normaliseCode(r.PathValue("code")))
+	if room == nil {
+		writeErr(w, http.StatusNotFound, "no game with that code")
+		return
+	}
+	if err := room.setGuest(p.ID, p.Name); err != nil {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	room.mu.Lock()
+	host := room.hostName
+	room.mu.Unlock()
+	s.log.Info("co-op guest claimed a slot", "code", room.Code, "guest", p.Name, "host", host)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"code": room.Code, "seed": room.Seed, "hull": room.Hull,
+		"host": host, "full": false,
 	})
 }
 

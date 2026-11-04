@@ -39,6 +39,30 @@ type Store interface {
 	SetToken(id, tokenHash string) error
 
 	AddScore(s *model.Score) error
+	// --- co-op
+	//
+	// Its own table and its own board. A co-op run has two pilots, so
+	// it is not a Score and cannot be ranked with them; see
+	// model.CoopScore for why folding the two together is worse than
+	// keeping them apart. Nothing here touches Player.Runs or
+	// Player.Best: the solo card stays solo.
+	AddCoopScore(s *model.CoopScore) error
+	// TopCoop is the co-op leaderboard: the best co-op runs, one row
+	// per run. There is no per-player fold, because the thing being
+	// ranked is a pair's run and a pair is not a player.
+	TopCoop(q TopQuery) ([]model.CoopRank, error)
+	// CoopPosition is where a run stands on that board, so a submission
+	// can be told "3rd" without a second query. It takes the run, not
+	// its points, so it ranks by the same rule TopCoop sorts by.
+	CoopPosition(s *model.CoopScore) int
+	// PlayerCoopScores is one pilot's co-op runs, newest first,
+	// whichever side they flew.
+	PlayerCoopScores(playerID string, limit int) []model.CoopScore
+	// ListCoopScores, CoopScoreByID and DeleteCoopScore are the
+	// operator's view, matching ListScores and friends below.
+	ListCoopScores(query string, limit, offset int) ([]model.CoopScore, int)
+	CoopScoreByID(id string) (*model.CoopScore, error)
+	DeleteCoopScore(id string) error
 	Top(q TopQuery) ([]model.Rank, error)
 	// TopRuns is Top without the per-player fold: the best individual runs,
 	// so one exceptional pilot can hold several places.
@@ -87,10 +111,12 @@ type Store interface {
 	// leave the cheated number on the pilot's card after the run behind
 	// it was gone, which is the one thing this is for.
 	DeleteScore(id string) error
-	// ResetScores drops every recorded run and zeroes every pilot's
-	// counters, leaving the accounts themselves alone. Returns how many
-	// runs went. This is the blunt instrument; DeleteScore is the one
-	// to reach for first.
+	// ResetScores drops every recorded run -- co-op runs included,
+	// because "reset the high scores" that left one of two boards
+	// standing would be a trap -- and zeroes every pilot's counters,
+	// leaving the accounts themselves alone. Returns how many runs
+	// went, both kinds counted. This is the blunt instrument;
+	// DeleteScore is the one to reach for first.
 	ResetScores() int
 
 	// What a pilot owns between runs. Never nil: a pilot who has banked
@@ -116,6 +142,7 @@ type Store interface {
 type Stats struct {
 	Players   int    `json:"players"`
 	Runs      int    `json:"runs"`
+	CoopRuns  int    `json:"coopRuns"`
 	RunsToday int    `json:"runsToday"`
 	Mods      int    `json:"mods"`
 	FlyingNow int    `json:"flyingNow"`

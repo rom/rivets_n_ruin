@@ -145,6 +145,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /api/scores", s.requireCurrentClient(s.submitScore))
 	mux.HandleFunc("GET /api/scores/top", s.topScores)
 	mux.HandleFunc("GET /api/scores/runs", s.topRuns)
+	mux.HandleFunc("POST /api/coop/scores", s.requireCurrentClient(s.submitCoopScore))
+	mux.HandleFunc("GET /api/coop/scores/top", s.topCoopScores)
 
 	mux.HandleFunc("GET /api/mods", s.listMods)
 	mux.HandleFunc("POST /api/mods", s.requireCurrentClient(s.createMod))
@@ -160,6 +162,7 @@ func (s *Server) Routes() http.Handler {
 	// coop.go for why it is host-authoritative rather than lockstep.
 	mux.HandleFunc("POST /api/coop/open", s.coopOpen)
 	mux.HandleFunc("GET /api/coop/{code}", s.coopPeek)
+	mux.HandleFunc("POST /api/coop/{code}/join", s.coopJoin)
 	mux.HandleFunc("GET /api/coop/{code}/host", s.coopSocket(sideHost))
 	mux.HandleFunc("GET /api/coop/{code}/guest", s.coopSocket(sideGuest))
 
@@ -228,6 +231,8 @@ func (s *Server) AdminRoutes(ui http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/admin/runs", s.requireAdmin(s.adminListRuns))
 	mux.HandleFunc("GET /api/admin/runs/{id}", s.requireAdmin(s.adminGetRun))
 	mux.HandleFunc("DELETE /api/admin/runs/{id}", s.requireAdmin(s.adminDeleteRun))
+	mux.HandleFunc("GET /api/admin/coop", s.requireAdmin(s.adminListCoop))
+	mux.HandleFunc("DELETE /api/admin/coop/{id}", s.requireAdmin(s.adminDeleteCoop))
 	mux.HandleFunc("POST /api/admin/scores/reset", s.requireAdmin(s.adminResetScores))
 
 	if ui != nil {

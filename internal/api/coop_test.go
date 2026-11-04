@@ -445,7 +445,7 @@ func TestRoomsAreSweptWhenNobodyComes(t *testing.T) {
 	api.SetClock(func() time.Time { return at })
 	api.coop = newCoopRegistry(api.now)
 
-	if _, err := api.coop.open(1, 0, "rom"); err != nil {
+	if _, err := api.coop.open(1, 0, "p-rom", "rom"); err != nil {
 		t.Fatal(err)
 	}
 	if api.coop.count() != 1 {
@@ -473,11 +473,11 @@ func TestOpenRoomsAreCapped(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	api := New(st, log, Config{})
 	for i := 0; i < coopMaxRooms; i++ {
-		if _, err := api.coop.open(int64(i), 0, "rom"); err != nil {
+		if _, err := api.coop.open(int64(i), 0, "p-rom", "rom"); err != nil {
 			t.Fatalf("room %d: %v", i, err)
 		}
 	}
-	if _, err := api.coop.open(1, 0, "rom"); err == nil {
+	if _, err := api.coop.open(1, 0, "p-rom", "rom"); err == nil {
 		t.Fatalf("room %d was allowed past the cap of %d", coopMaxRooms+1, coopMaxRooms)
 	}
 }
@@ -573,7 +573,7 @@ func TestAnOversizeRelayEndsTheConnection(t *testing.T) {
 // by construction.
 func TestAGuestCannotJoinAfterTheHostHasLeft(t *testing.T) {
 	_, api, _ := coopServer(t)
-	room, err := api.coop.open(7, 1, "rom")
+	room, err := api.coop.open(7, 1, "p-rom", "rom")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -643,7 +643,7 @@ func TestLeavingTellsTheRightSide(t *testing.T) {
 	_, api, _ := coopServer(t)
 
 	// Guest leaves: the host hears about it and keeps playing.
-	room, err := api.coop.open(1, 0, "rom")
+	room, err := api.coop.open(1, 0, "p-rom", "rom")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -666,7 +666,7 @@ func TestLeavingTellsTheRightSide(t *testing.T) {
 
 	// Host leaves: the guest hears about it and is closed, because
 	// there is no longer anything advancing the world it is drawing.
-	room2, err := api.coop.open(2, 0, "rom")
+	room2, err := api.coop.open(2, 0, "p-rom", "rom")
 	if err != nil {
 		t.Fatal(err)
 	}

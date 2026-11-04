@@ -182,6 +182,7 @@ function buildShell() {
       tabButton('overview', 'OVERVIEW'),
       tabButton('pilots', 'PILOTS'),
       tabButton('runs', 'RUNS'),
+      tabButton('coop', 'CO-OP'),
       tabButton('errors', 'ERRORS')),
 
     el('main', {},
@@ -196,9 +197,10 @@ function buildShell() {
         el('div', { id: 'presence' }),
         el('h2', {}, 'DANGEROUS'),
         el('p', { class: 'hint' },
-          'Wiping the board removes every recorded run and zeroes every '
-          + "pilot's counters. Accounts, credentials and hangars stay. It "
-          + 'cannot be undone. To remove one run instead, find it under RUNS.'),
+          'Wiping the board removes every recorded run — solo and co-op — '
+          + "and zeroes every pilot's counters. Accounts, credentials and "
+          + 'hangars stay. It cannot be undone. To remove one run instead, '
+          + 'find it under RUNS or CO-OP.'),
         el('div', { class: 'row' },
           el('button', { id: 'wipe', class: 'danger', on: { click: wipeScores } },
             'WIPE EVERY RECORDED RUN'))),
@@ -241,6 +243,29 @@ function buildShell() {
         el('button', { type: 'submit' }, 'SEARCH')),
         el('div', { id: 'run-list' }),
         el('div', { id: 'run-detail' })),
+
+      el('section', { id: 'tab-coop', hidden: true },
+        el('h2', {}, 'RECORDED CO-OP RUNS'),
+        el('p', { class: 'hint' },
+          'Two pilots and one score, on their own board. These never '
+          + "touched either pilot's counters, so removing one leaves "
+          + 'nothing to recompute. The search matches either name.'),
+        el('form', {
+          class: 'row',
+          id: 'coop-search',
+          on: {
+            submit: (e) => {
+              e.preventDefault();
+              clearSay();
+              loadCoop().catch((err) => say(err.message, 'bad'));
+            },
+          },
+        },
+        el('input', { id: 'coop-q', class: 'grow',
+          placeholder: 'either pilot name, a pilot id or a run id',
+          'aria-label': 'Search co-op runs' }),
+        el('button', { type: 'submit' }, 'SEARCH')),
+        el('div', { id: 'coop-list' })),
 
       el('section', { id: 'tab-errors', hidden: true },
         el('h2', {}, 'CLIENT ERRORS'),
@@ -306,7 +331,7 @@ function table(headers, rows) {
 
 // --------------------------------------------------------------- tabs
 
-const TABS = ['overview', 'pilots', 'runs', 'errors'];
+const TABS = ['overview', 'pilots', 'runs', 'coop', 'errors'];
 const LOADERS = {};
 
 // Showing a tab and loading a tab are two different things.
@@ -343,6 +368,7 @@ async function loadOverview() {
   show($('stat-tiles'),
     tile('PILOTS', n(s.players)),
     tile('RUNS', n(s.runs)),
+    tile('CO-OP RUNS', n(s.coopRuns)),
     tile('RUNS TODAY', n(s.runsToday)),
     tile('MODS', n(s.mods)),
     tile('FLYING NOW', n(s.flyingNow)),
@@ -737,14 +763,66 @@ async function deleteRun(s) {
 
 async function wipeScores() {
   if (!confirm('Wipe EVERY recorded run?\n\n'
-    + "The leaderboard empties and every pilot's counters go to zero. "
-    + 'Accounts, passwords and hangars stay.\n\nThis cannot be undone.')) return;
+    + "Both boards empty — solo and co-op — and every pilot's counters "
+    + 'go to zero. Accounts, passwords and hangars stay.'
+    + '\n\nThis cannot be undone.')) return;
   const typed = prompt('Type RESET to confirm.');
   if (typed !== 'RESET') { say('not confirmed, nothing was changed'); return; }
   try {
     const res = await api('POST', '/api/admin/scores/reset', { confirm: 'RESET' });
     say(`${n(res.deleted)} run(s) removed. The board is empty.`, 'good');
     await loadOverview();
+  } catch (e) { say(e.message, 'bad'); }
+}
+
+// ------------------------------------------------------------- co-op
+
+// The co-op board, as an operator sees it.
+//
+// No detail panel and no "open the pilot" button, unlike RUNS, because
+// a co-op run has two pilots and no owner: every one-pilot control on
+// that panel would have to ask which of the two it meant. The two
+// names are in the row, and PILOTS searches by name.
+async function loadCoop() {
+  const q = $('coop-q').value.trim();
+  const res = await api('GET', '/api/admin/coop?limit=100&q=' + encodeURIComponent(q));
+  const shown = (res.runs || []).length;
+  show($('coop-list'),
+    caption(`${n(res.total)} co-op run${res.total === 1 ? '' : 's'}${q ? ' matching ' + q : ''}`
+      + (res.total > shown ? `, showing the newest ${shown}` : '')),
+    table(
+      ['WHEN', 'HOST', 'GUEST', { label: 'POINTS', num: true },
+        { label: 'TIME', num: true }, { label: 'TOGETHER', num: true },
+        { label: 'HULLS', num: true }, 'DONE', ''],
+      (res.runs || []).map((c) => el('tr', {},
+        el('td', {}, ago(c.created)),
+        el('td', {}, c.hostName),
+        el('td', {}, c.guestName),
+        el('td', { class: 'num' }, n(c.points)),
+        el('td', { class: 'num' }, secs(c.timeSec)),
+        // How much of the run they were actually connected for. The one
+        // column on this table that is not on the solo one, and the
+        // first thing to look at on a row that does not smell right.
+        el('td', {
+          class: c.timeSec > 0 && c.pairedSec < c.timeSec * 0.9 ? 'num disagrees' : 'num',
+        }, c.timeSec > 0 ? Math.round((c.pairedSec / c.timeSec) * 100) + '%' : '—'),
+        el('td', { class: 'num' }, n(c.levels)),
+        el('td', {}, c.completed ? 'yes' : ''),
+        el('td', {}, el('button', {
+          class: 'danger', on: { click: () => deleteCoop(c) },
+        }, 'DELETE'))))));
+}
+LOADERS.coop = loadCoop;
+
+async function deleteCoop(c) {
+  if (!confirm(`Delete the co-op run by ${c.hostName} and ${c.guestName}`
+    + ` of ${n(c.points)}?\n\nIt leaves the co-op board. Neither pilot's`
+    + ' counters change, because a co-op run never fed them.'
+    + '\n\nThis cannot be undone.')) return;
+  try {
+    await api('DELETE', '/api/admin/coop/' + encodeURIComponent(c.id));
+    say('The co-op run is gone.', 'good');
+    await loadCoop();
   } catch (e) { say(e.message, 'bad'); }
 }
 

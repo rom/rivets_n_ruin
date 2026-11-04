@@ -24,7 +24,8 @@ import { saveHangar, clearHangar, setHangarSync, mergeHangars, applyHangar } fro
 import { unlock, toggleMute, isMuted, ready } from './audio.js';
 import { startMusic, stopMusic, pauseMusic, resumeMusic, musicRunning } from './music.js';
 import { sfxUi } from './sfx.js';
-import { initNet, rename, refreshTop, refreshRuns, refreshPresence, netState, toggleBoard,
+import { initNet, rename, refreshTop, refreshRuns, refreshCoopTop, refreshPresence,
+  netState, toggleBoard,
   fetchHangar, pushHangar, setIdentityHook, forgetPlayer } from './net.js';
 import { nextTune, tuneName, setTune, TUNES } from './music.js';
 import * as settings from './settings.js';
@@ -321,6 +322,7 @@ setInterval(() => {
   }
   refreshTop(mod ? mod.id : '');
   refreshRuns(mod ? mod.id : '');
+  refreshCoopTop();
   refreshPresence();
 }, 10000);
 
@@ -421,7 +423,8 @@ startLoop(
         } else if (tapped('fire')) {    // J
           sfxUi();
           const code = window.prompt('Code from the other pilot:');
-          if (code) joinGame(code.trim());
+          const me = netState().player;
+          if (code) joinGame(code.trim(), me ? me.token : null);
         }
       } else if (cs.phase === 'playing' && tapped('start')) {
         sfxUi();

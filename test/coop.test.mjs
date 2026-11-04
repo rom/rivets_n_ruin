@@ -9,6 +9,8 @@ import {
   setKinds, kindAt, INPUT_BITS, STATES, PICKUP_KINDS,
   MSG_INPUT, MSG_SNAPSHOT,
 } from '../src/coop.js';
+import { BOARDS, setBoard, toggleBoard, submitCoopRun, netState } from '../src/net.js';
+import { rankLine, BOARD_TITLES } from '../src/hud.js';
 
 // The wire between two browsers.
 //
@@ -582,5 +584,118 @@ test('every path that places the camera winds the shake down', () => {
     kick(cam, 14);
     for (let i = 0; i < 120; i++) run(cam, DT);
     assert.equal(cam.shake, 0, `${what} left the camera shaking by ${cam.shake}`);
+  }
+});
+
+// ------------------------------------------------------------ the board
+//
+// The co-op board is one row per run with two names on it, and the one
+// thing it must never do is credit the wrong pilot or the wrong board.
+// The server guards the recording; these guard the reading.
+
+test('the board key cycles all three boards and comes back', () => {
+  const seen = [];
+  for (let i = 0; i < 4; i++) seen.push(toggleBoard());
+  assert.deepEqual(seen, ['runs', 'coop', 'pilots', 'runs'],
+    'the key has to reach the co-op board and then return to the first one');
+  setBoard('pilots');
+  assert.deepEqual(BOARDS, ['pilots', 'runs', 'coop']);
+});
+
+test('an unknown board name falls back rather than blanking the screen', () => {
+  assert.equal(setBoard('nonsense'), 'pilots');
+  assert.equal(setBoard('coop'), 'coop');
+  setBoard('pilots');
+});
+
+test('the co-op board has a heading of its own', () => {
+  // Three boards, three headings, and none of them empty: a board
+  // whose title did not change would look like the previous one with
+  // the wrong rows in it.
+  const heads = BOARDS.map((b) => BOARD_TITLES[b]);
+  for (const [b, pair] of BOARDS.map((b, i) => [b, heads[i]])) {
+    assert.ok(pair && pair[0] && pair[1], `${b} has no heading`);
+  }
+  const titles = heads.map((h) => h[0]);
+  assert.equal(new Set(titles).size, titles.length, `two boards share a title: ${titles}`);
+  assert.match(BOARD_TITLES.coop[0], /CO-OP/);
+});
+
+test('a co-op rank says both pilots placed, and among co-op runs', () => {
+  // The row the server sends back names two pilots; that is how the
+  // end screen knows which pool the position is out of without having
+  // to ask whether a co-op game is still open.
+  const line = rankLine({
+    online: true,
+    submitState: 'recorded',
+    rank: { position: 3, score: { hostId: 'a', guestId: 'b', hostName: 'rom', guestName: 'ada' } },
+    stats: { players: 40, coopRuns: 11 },
+  });
+  assert.match(line.head, /BOTH/, 'a pair should not be told "you place"');
+  assert.match(line.head, /3 OF 11/,
+    'a co-op place is out of the co-op runs, not out of the pilot count');
+  assert.equal(line.settled, true);
+});
+
+test('a solo rank is unchanged by the co-op branch', () => {
+  const line = rankLine({
+    online: true,
+    submitState: 'recorded',
+    rank: { position: 3, score: { playerId: 'a', name: 'rom' } },
+    stats: { players: 40, coopRuns: 11 },
+  });
+  assert.match(line.head, /^YOU PLACE 3 OF 40$/);
+});
+
+test('the guest is told the host is posting, not left on SENDING', () => {
+  // The guest submits nothing by design. Left on 'sending' that is
+  // indistinguishable from a backend that has gone away, which is the
+  // exact failure the rest of this screen was rebuilt to stop.
+  const line = rankLine({ online: true, submitState: 'posted-by-host' });
+  assert.equal(line.settled, true);
+  assert.doesNotMatch(line.head, /SENDING/);
+  assert.match(line.head, /CO-OP/);
+});
+
+test('every submit state the guest can be in reads as an answer', () => {
+  for (const submitState of ['posted-by-host', 'recorded', 'refused']) {
+    assert.equal(rankLine({ online: true, submitState }).settled, true,
+      `${submitState} still reads as "wait"`);
+  }
+});
+
+test('a co-op submission carries the room and never the partner', async () => {
+  // The one property the client half has to hold up: a host posts the
+  // room it played in, and nothing that could name the other pilot.
+  // The server takes the partner from the room, and its decoder
+  // rejects unknown fields outright — so a client that started
+  // sending a name here would get a 400 and no row at all.
+  const sent = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (url, opts = {}) => {
+    sent.push({ url, body: opts.body ? JSON.parse(opts.body) : null });
+    return Promise.resolve({
+      ok: true, status: 201,
+      json: () => Promise.resolve({ score: { points: 7 }, rank: { position: 1 } }),
+    });
+  };
+  try {
+    netState().player = { id: 'p1', name: 'rom', token: 'tok' };
+    netState().run = null;        // unsigned: WebCrypto is not the point here
+    await submitCoopRun({
+      code: 'BCDFG', points: 7, timeSec: 100, turrets: 1, deaths: 0,
+      completed: false, levels: 2, hullsFlown: 2,
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+    netState().player = null;
+  }
+
+  const post = sent.find((s) => String(s.url).includes('/api/coop/scores'));
+  assert.ok(post, `nothing was posted to the co-op route: ${sent.map((s) => s.url)}`);
+  assert.equal(post.body.code, 'BCDFG');
+  for (const field of ['guestId', 'guestName', 'hostId', 'hostName', 'pairedSec', 'partner']) {
+    assert.equal(field in post.body, false,
+      `the submission carries ${field}; the partner is the server's to decide`);
   }
 });
