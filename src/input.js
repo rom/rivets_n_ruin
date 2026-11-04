@@ -32,6 +32,7 @@ export const DEFAULT_MAP = {
   Digit1: 'arm1', Digit2: 'arm2', Digit3: 'arm3',
   KeyT: 'tune',
   BracketRight: 'tune',
+  KeyG: 'coop',      // open the co-op screen, from the title
 };
 
 // The actions a player can rebind, in the order the controls screen
@@ -49,6 +50,7 @@ export const BINDABLE = [
   ['pause', 'PAUSE'], ['restart', 'RESTART'], ['quit', 'QUIT RUN'],
   ['shop', 'ARMOURER'], ['board', 'LEADERBOARD'], ['help', 'HELP'],
   ['options', 'SETTINGS'], ['mute', 'MUTE'], ['tune', 'NEXT TUNE'],
+  ['coop', 'CO-OP'],
 ];
 const FIXED = new Set(['start', 'yes', 'no', 'wipe', 'wipeall']);
 
@@ -99,9 +101,21 @@ const save = () => {
 };
 
 // Which key an action answers to, for the controls screen to print.
+//
+// The live map decides, not the defaults. An action with no override
+// keeps its default key only while nothing else has taken it: rebind
+// HELP onto Q and QUIT, whose default that was, is now bound to
+// nothing. Reading the defaults directly meant the controls screen
+// listed QUIT as Q while Q opened the help — a key shown against two
+// actions, one of which it no longer does.
+//
+// '' means unbound, which the controls screen shows as a dash. That
+// is a real state a player can reach, and the honest thing to print.
 export function keyFor(action) {
   if (bindings[action]) return bindings[action];
-  for (const [code, a] of Object.entries(DEFAULT_MAP)) if (a === action) return code;
+  for (const [code, a] of Object.entries(DEFAULT_MAP)) {
+    if (a === action && MAP[code] === action) return code;
+  }
   return '';
 }
 export const isBindable = (action) => BINDABLE.some(([a]) => a === action);

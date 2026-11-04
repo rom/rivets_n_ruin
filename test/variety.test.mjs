@@ -1688,14 +1688,71 @@ test('resetting puts every default back', () => {
 test('a rebind never leaves the map without the action', () => {
   // Every bindable action must still be reachable by some key after any
   // sequence of rebinds, or a player can lose the ability to fire.
+  //
+  // A distinct key each. The first version derived one from the
+  // action's first letter, which worked until two actions started
+  // with the same one — `cycle` and `coop` both wanted KeyC, the
+  // second took it, and the test reported the first as broken. That
+  // is correct behaviour for a shared key and the wrong thing for
+  // this test to be measuring; the case has its own test below.
+  // Skipping the letters the fixed keys sit on: rebinding onto one of
+  // those is refused, which would leave that action on its default
+  // and the next action in the list free to take it — a collision the
+  // fixture created rather than the code.
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')
+    .filter((c) => !isFixedKey('Key' + c));
+  assert.ok(BINDABLE.length <= alphabet.length,
+    `${BINDABLE.length} bindable actions and only ${alphabet.length} free letters`);
   resetBindings();
   try {
-    for (const [action] of BINDABLE) rebind(action, 'Key' + action[0].toUpperCase());
+    BINDABLE.forEach(([action], i) => {
+      assert.ok(rebind(action, 'Key' + alphabet[i]),
+        `rebinding ${action} to Key${alphabet[i]} was refused`);
+    });
     for (const [action] of BINDABLE) {
       const code = keyFor(action);
       assert.ok(code, `${action} ended up bound to nothing`);
       assert.equal(MAP[code], action, `${action} says ${code} but the map disagrees`);
     }
+  } finally { resetBindings(); }
+});
+
+test('the controls screen never shows a key that does something else', () => {
+  // An action with no override keeps its default key only while
+  // nothing else has taken it. HELP rebound onto Q takes it from
+  // QUIT, whose default that was — and keyFor used to go on reading
+  // the defaults and report QUIT as Q, so the controls screen listed
+  // one key against two actions and only one of them was true.
+  resetBindings();
+  try {
+    const quitKey = keyFor('quit');
+    assert.equal(quitKey, 'KeyQ', `quit starts on ${quitKey}`);
+    assert.ok(rebind('help', 'KeyQ'), 'rebinding help onto Q was refused');
+    assert.equal(MAP.KeyQ, 'help', 'Q did not move to help');
+    assert.notEqual(keyFor('quit'), 'KeyQ',
+      'the controls screen still lists Q against quit, which no longer does it');
+    assert.equal(keyFor('quit'), '',
+      `quit lost its only key and reports ${JSON.stringify(keyFor('quit'))} rather than unbound`);
+    // ...and it can be given a new one.
+    assert.ok(rebind('quit', 'KeyU'));
+    assert.equal(keyFor('quit'), 'KeyU');
+    assert.equal(MAP.KeyU, 'quit');
+  } finally { resetBindings(); }
+});
+
+test('one key never does two things', () => {
+  // Rebinding onto a key somebody else has takes it off them. The
+  // alternative is a key that fires and cycles ordnance at once,
+  // which is unusable and impossible to diagnose from inside the
+  // game.
+  resetBindings();
+  try {
+    const before = keyFor('cycle');
+    assert.ok(before, 'cycle starts out bound to nothing');
+    rebind('coop', before);
+    assert.equal(MAP[before], 'coop', `${before} did not move to coop`);
+    assert.notEqual(keyFor('cycle'), before,
+      `${before} is still listed as cycle's key after coop took it`);
   } finally { resetBindings(); }
 });
 

@@ -730,3 +730,45 @@ test('the README layout block names every package and tool', () => {
   }
   assert.deepEqual(missing, [], `missing from the layout block: ${missing.join(', ')}`);
 });
+
+// The permanent systems, in two places on purpose.
+//
+// internal/api/systems.go mirrors src/shop.js so the operator tool can
+// offer a list instead of a text box, the same arrangement
+// internal/validate uses for the physics constants. Two copies of
+// anything drift; this is what stops them.
+test('the server knows the same permanent systems the shop sells', () => {
+  const go = readFileSync(new URL('../internal/api/systems.go', import.meta.url), 'utf8');
+  const rows = [...go.matchAll(/\{"([a-z]+)",\s*"([^"]+)",\s*(\d+)\},/g)]
+    .map((m) => ({ id: m[1], name: m[2], tiers: Number(m[3]) }));
+  assert.ok(rows.length > 5, `only found ${rows.length} systems in systems.go`);
+
+  const want = Object.entries(MODS).map(([id, m]) => ({
+    id, name: m.name, tiers: m.tiers.length,
+  }));
+  assert.deepEqual(rows, want,
+    'internal/api/systems.go and src/shop.js MODS have drifted; the operator '
+    + 'tool would offer a system the game does not have, or miss one it does');
+});
+
+// The server reports a version, and it has to be the version of the
+// game it is serving.
+//
+// The Makefile reads it out of src/config.js and stamps it in at link
+// time, so there is one source. This is the test that notices if
+// somebody hardcodes it in the Makefile instead, which is the obvious
+// shortcut and would leave the server claiming last release's number
+// for as long as nobody checked.
+test('the server is built with the version the game reports', () => {
+  const mk = readFileSync(new URL('../Makefile', import.meta.url), 'utf8');
+  const line = mk.match(/^VERSION\s*:?=\s*(.+)$/m);
+  assert.ok(line, 'the Makefile no longer sets VERSION');
+  assert.match(line[1], /src\/config\.js/,
+    `the Makefile sets VERSION to ${line[1].trim()} instead of reading it from `
+    + 'src/config.js; the server would report a number nobody updates');
+
+  const ld = mk.match(/^LDFLAGS\s*:?=\s*(.+)$/m);
+  assert.ok(ld, 'the Makefile no longer sets LDFLAGS');
+  assert.match(ld[1], /-X main\.version=\$\(VERSION\)/,
+    'LDFLAGS does not stamp the version in, so the binary reports "dev"');
+});

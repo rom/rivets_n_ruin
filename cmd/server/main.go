@@ -48,7 +48,11 @@ func main() {
 			"file holding the admin password in plaintext; prefer -admin-password-hash-file")
 		adminAnywhere = flag.Bool("admin-anywhere", false,
 			"allow the admin routes from any address; they are loopback-only without it")
-		adminAddr = flag.String("admin-addr", "127.0.0.1:8001",
+		minClient = flag.String("min-client-version", "",
+			"refuse score, run, mod and hangar writes from a game older than this; "+
+				"empty accepts every version")
+		showVersion = flag.Bool("version", false, "print the build version and exit")
+		adminAddr   = flag.String("admin-addr", "127.0.0.1:8001",
 			"address for the operator tool, on its own listener; empty disables it")
 		hsts       = flag.Bool("hsts", false, "send Strict-Transport-Security on HTTPS requests; only for a TLS deployment")
 		trustProxy = flag.Bool("trust-proxy", false,
@@ -64,7 +68,19 @@ func main() {
 		allowRoot = flag.Bool("allow-root", false,
 			"permit running as uid 0, which this does not need")
 	)
+	// When this process came up. Taken before any work, so uptime
+	// measures the server's life and not the part of it after the
+	// snapshot finished loading.
+	started := time.Now()
+
 	flag.Parse()
+
+	// Before anything else opens a file or binds a port: `-version`
+	// is a question, not a run.
+	if *showVersion {
+		fmt.Println(buildVersion())
+		return
+	}
 
 	// Offering -admin-password-hash-file without a way to make one
 	// would be offering nothing: the whole point is that the plaintext
@@ -238,7 +254,13 @@ func main() {
 		RequireRuns:       *strictRuns,
 		AdminPasswordHash: adminHash,
 		AdminAllowRemote:  *adminAnywhere,
+		Version:           buildVersion(),
+		MinClientVersion:  *minClient,
+		Started:           started,
 	})
+	if *minClient != "" {
+		log.Info("old clients will be refused writes", "minClientVersion", *minClient)
+	}
 
 	// Open runs, restored alongside the store. A campaign takes longer
 	// than a deploy, so without this a restart voided every run in flight

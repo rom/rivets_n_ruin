@@ -196,6 +196,9 @@ func (s *Server) adminGetPlayer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"player": p,
 		"hangar": hangar,
+		// What the game actually has, so the page offers a list rather
+		// than a text box an operator can misspell a system into.
+		"systems": Systems,
 		"stats": map[string]any{
 			"runs":           p.Runs,
 			"best":           best,
@@ -335,6 +338,12 @@ func (s *Server) adminStats(w http.ResponseWriter, r *http.Request) {
 		"store":         st,
 		"adminSessions": sessions,
 		"hardening":     s.hardening,
+		// What is running, since when, and who is talking to it. Three
+		// questions that were unanswerable from outside the process:
+		// has it restarted, what build is this, and is anybody still
+		// on an old client.
+		"server":         s.buildInfo(),
+		"clientVersions": s.clientVersionsSeen(),
 	})
 }
 
@@ -543,4 +552,39 @@ func (s *Server) adminErrors(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminPresence(w http.ResponseWriter, r *http.Request) {
 	live := s.store.LivePresence()
 	writeJSON(w, http.StatusOK, map[string]any{"flying": live, "count": len(live)})
+}
+
+// adminSetHangar replaces a pilot's belongings: coins, gold bars and
+// the permanent systems they own.
+//
+// Straight through store.SetHangar, the same call the pilot's own
+// client uses, so an operator gets the same clamping and cannot write
+// a value the game could not have produced. An admin door that can put
+// the shop into a state it cannot render is a worse tool than one that
+// refuses.
+//
+// A full replace rather than a patch, because that is what the shape
+// is: mods is a map, and "merge these levels in" has no sensible answer
+// for a mod the operator left out. The page sends the whole thing back,
+// which is what it was given.
+func (s *Server) adminSetHangar(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	p, err := s.store.PlayerByID(id)
+	if err != nil {
+		writeErr(w, statusFor(err), err.Error())
+		return
+	}
+	var in model.Hangar
+	if err := readJSON(w, r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, "malformed body: "+err.Error())
+		return
+	}
+	before := s.store.Hangar(id)
+	s.audit(r, "set hangar", "id", id, "name", p.Name,
+		"coins", in.Coins, "wasCoins", before.Coins,
+		"bars", in.Bars, "wasBars", before.Bars,
+		"mods", len(in.Mods), "wasMods", len(before.Mods))
+	// What was kept, not what was sent: an operator who typed more than
+	// the cap should see the cap rather than discover it later.
+	writeJSON(w, http.StatusOK, s.store.SetHangar(id, &in))
 }

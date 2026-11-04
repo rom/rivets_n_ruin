@@ -169,6 +169,13 @@ export function drawWorld(ctx, game) {
   drawShots(ctx);
   drawPad(ctx, camX, camY);
   drawJumpTrail(ctx, game.player);
+  // The other pilot, under your own ship so that overlapping reads as
+  // you in front rather than as one sprite flickering through
+  // another.
+  if (game.mate && game.mate.alive) {
+    drawShip(ctx, game.mate, null, game);
+    drawMateTag(ctx, game.mate);
+  }
   if (game.player.alive) {
     if (setting('aimLine')) drawFiringLine(ctx, game, camX);
     drawLance(ctx, game, camX);
@@ -400,6 +407,26 @@ function drawShip(ctx, p, seqTilt, game) {
   drawShipBody(ctx, p, game);
   drawStatus(ctx, p);
   drawJumpReady(ctx, p);
+  ctx.restore();
+}
+
+// A chevron over the other pilot.
+//
+// Two identical ships on one screen is the oldest problem in co-op:
+// in a scrap you lose which one is yours and fly the wrong one into
+// a wall. The marker goes on THEIRS rather than yours, because the
+// one you need to find at a glance is the one you are not steering.
+function drawMateTag(ctx, m) {
+  const y = m.y - 17;
+  ctx.save();
+  ctx.globalAlpha = 0.85;
+  ctx.fillStyle = COL.warmHi;
+  ctx.beginPath();
+  ctx.moveTo(Math.round(m.x), Math.round(y) + 5);
+  ctx.lineTo(Math.round(m.x) - 4, Math.round(y));
+  ctx.lineTo(Math.round(m.x) + 4, Math.round(y));
+  ctx.closePath();
+  ctx.fill();
   ctx.restore();
 }
 

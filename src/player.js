@@ -13,6 +13,9 @@ function cycleSecondary(p, dir) {
   }
 }
 import { axisX, axisY, held, tapped } from './input.js';
+
+// Shared empty set, for a ship that has not been flown yet.
+const EMPTY_HELD = new Set();
 import { obstaclesNear, pointBlocked, hazardAt, boxBlocked } from './level.js';
 import { playerShots, enemyShots, fire } from './projectiles.js';
 import { sparks, thrust, addLight } from './particles.js';
@@ -85,9 +88,31 @@ export function makePlayer() {
   };
 }
 
-export function updatePlayer(p, game, dt) {
-  const ix = axisX();
-  const iy = axisY();
+/**
+ * Fly a ship for one frame.
+ *
+ * `src` is where the buttons come from. It defaults to the keyboard
+ * and the on-screen pad — the only thing a single-player run has —
+ * and co-op passes the other pilot's reported input instead.
+ *
+ * Parameterised rather than copied, deliberately. A second update
+ * path for the second ship is a second set of bugs, and the first
+ * thing to go wrong would be the two ships handling differently in a
+ * way nobody could put their finger on.
+ *
+ * A remote set has no notion of "pressed this frame", so an edge is
+ * derived here from what was held last frame. The ship's own
+ * `prevHeld` keeps that per-ship, which is what lets two of them be
+ * flown from two different sources in the same loop.
+ */
+export function updatePlayer(p, game, dt, src = null) {
+  const down = src ? (a) => src.has(a) : held;
+  const prev = p.prevHeld || EMPTY_HELD;
+  const tap = src ? (a) => src.has(a) && !prev.has(a) : tapped;
+  const axis = (pos, neg) => (down(pos) ? 1 : 0) - (down(neg) ? 1 : 0);
+  const ix = src ? axis('right', 'left') : axisX();
+  const iy = src ? axis('down', 'up') : axisY();
+  if (src) p.prevHeld = new Set(src);
 
   if (p.flip > 0) p.flip -= dt;
   if (p.fireCd > 0) p.fireCd -= dt;
@@ -148,7 +173,7 @@ export function updatePlayer(p, game, dt) {
 
   updateDrones(p, game, dt);
   if (p.pointDefence) pointDefence(p, game);
-  if (tapped('jump')) hyperJump(p, game);
+  if (tap('jump')) hyperJump(p, game);
 
   // What a net or a hook leaves you with. One multiplier, applied to
   // thrust and to the ceiling, so being snared costs acceleration *and*
@@ -218,7 +243,7 @@ export function updatePlayer(p, game, dt) {
   // Auto fire is an accessibility setting, not an advantage: the fire rate
   // is the gun's, not the key's, so holding the key already did exactly
   // this. What it removes is having to hold a key for a whole run.
-  if ((held('fire') || setting('autofire')) && p.fireCd <= 0 && p.flip <= 0) {
+  if ((down('fire') || setting('autofire')) && p.fireCd <= 0 && p.flip <= 0) {
     // gunspeed shortens the interval; gunblaze adds mirrored angled barrels
     p.fireCd = SHIP.fireRate * PICKUP.speedScale[p.gunSpeed];
 
@@ -287,11 +312,11 @@ export function updatePlayer(p, game, dt) {
   }
 
   // --- armory
-  if (tapped('cycle')) cycleSecondary(p, 1);
+  if (tap('cycle')) cycleSecondary(p, 1);
   ARMORY.order.forEach((kind, i) => {
-    if (i < 3 && tapped('arm' + (i + 1))) p.secondary = kind;
+    if (i < 3 && tap('arm' + (i + 1))) p.secondary = kind;
   });
-  if (held('secondary')) fireSecondary(game);
+  if (down('secondary')) fireSecondary(game);
 }
 
 // Is there anything behind the ship worth shooting at? Keeps the rear

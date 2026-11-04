@@ -49,6 +49,20 @@ type Config struct {
 	// AdminLocalOnly before, whose zero value was "reachable from
 	// anywhere" while its comment claimed the opposite.
 	AdminAllowRemote bool
+
+	// Version is this build, set at link time; see the Makefile. Empty
+	// in a `go run`, where the server says so rather than claiming a
+	// number it does not have.
+	Version string
+	// MinClientVersion refuses writes from a game older than this.
+	// Empty — the default — is no gate at all: a server that locks out
+	// every client the moment it is upgraded is worse than one that
+	// lets an old build keep playing. Reads are never gated; see
+	// requireCurrentClient.
+	MinClientVersion string
+	// Started is when the process came up. Zero means now, which is
+	// right for everything but a test.
+	Started time.Time
 }
 
 type Server struct {
@@ -72,6 +86,11 @@ type Server struct {
 	// What the OS agreed to take away, for /api/stats. A hardening layer
 	// nobody can see the state of gets quietly broken and stays broken.
 	hardening any
+
+	build     Build
+	minClient string
+	versions  *versionTally
+	coop      *coopRegistry
 }
 
 // SetHardening records what internal/hardening managed to apply, so the
@@ -79,7 +98,7 @@ type Server struct {
 func (s *Server) SetHardening(v any) { s.hardening = v }
 
 func New(s store.Store, log *slog.Logger, cfg Config) *Server {
-	return &Server{
+	srv := &Server{
 		store:       s,
 		log:         log,
 		rl:          newRateLimiter(cfg.RateLimitPerSec, cfg.RateBurst),
@@ -93,6 +112,15 @@ func New(s store.Store, log *slog.Logger, cfg Config) *Server {
 		nameRL:           newRateLimiter(NameCheckPerSec, NameCheckBurst),
 		adminRL:          newRateLimiter(AdminLoginPerSec, AdminLoginBurst),
 	}
+	srv.build = Build{Version: cfg.Version, Started: cfg.Started}
+	if srv.build.Started.IsZero() {
+		srv.build.Started = time.Now()
+	}
+	srv.minClient = cfg.MinClientVersion
+	srv.versions = newVersionTally(srv.now)
+	srv.coop = newCoopRegistry(srv.now)
+	go srv.sweepCoop()
+	return srv
 }
 
 // Routes returns the API handler, already wrapped in middleware.
@@ -108,27 +136,49 @@ func (s *Server) Routes() http.Handler {
 	// One bit, one name at a time, behind its own tight limiter. See
 	// available.go for why it is shaped the way it is.
 	mux.HandleFunc("POST /api/auth/available", s.nameAvailable)
-	mux.HandleFunc("POST /api/runs/start", s.startRun)
+	mux.HandleFunc("POST /api/runs/start", s.requireCurrentClient(s.startRun))
 	mux.HandleFunc("GET /api/players/{id}", s.getPlayer)
 	mux.HandleFunc("GET /api/me", s.getMe)
 	mux.HandleFunc("GET /api/me/hangar", s.getHangar)
-	mux.HandleFunc("PUT /api/me/hangar", s.putHangar)
+	mux.HandleFunc("PUT /api/me/hangar", s.requireCurrentClient(s.putHangar))
 
-	mux.HandleFunc("POST /api/scores", s.submitScore)
+	mux.HandleFunc("POST /api/scores", s.requireCurrentClient(s.submitScore))
 	mux.HandleFunc("GET /api/scores/top", s.topScores)
 	mux.HandleFunc("GET /api/scores/runs", s.topRuns)
 
 	mux.HandleFunc("GET /api/mods", s.listMods)
-	mux.HandleFunc("POST /api/mods", s.createMod)
+	mux.HandleFunc("POST /api/mods", s.requireCurrentClient(s.createMod))
 	mux.HandleFunc("GET /api/mods/{id}", s.getMod)
 	mux.HandleFunc("GET /api/mods/{id}/top", s.modTop)
 
 	mux.HandleFunc("POST /api/errors", s.reportErrors)
 
+	// --- co-op
+	//
+	// Two browsers, one scrolling view, a ship each. The server pairs
+	// them and relays bytes; the game's rules stay in the game. See
+	// coop.go for why it is host-authoritative rather than lockstep.
+	mux.HandleFunc("POST /api/coop/open", s.coopOpen)
+	mux.HandleFunc("GET /api/coop/{code}", s.coopPeek)
+	mux.HandleFunc("GET /api/coop/{code}/host", s.coopSocket(sideHost))
+	mux.HandleFunc("GET /api/coop/{code}/guest", s.coopSocket(sideGuest))
+
 	mux.HandleFunc("POST /api/presence", s.heartbeat)
 	mux.HandleFunc("GET /api/presence", s.livePresence)
 
-	return recoverer(s.log)(logging(s.log)(cors(s.rl.middleware(mux))))
+	return recoverer(s.log)(logging(s.log)(cors(s.rl.middleware(s.noteVersion(mux)))))
+}
+
+// noteVersion tallies which game builds are talking to this server.
+//
+// Outside the rate limiter on purpose: a client being throttled is
+// still a client on that version, and the point of the tally is to
+// notice who has not upgraded.
+func (s *Server) noteVersion(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.versions.note(r.Header.Get(ClientVersionHeader))
+		next.ServeHTTP(w, r)
+	})
 }
 
 // AdminRoutes is the operator's door, and it is a different door.
@@ -173,6 +223,7 @@ func (s *Server) AdminRoutes(ui http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/admin/players/{id}/reset", s.requireAdmin(s.adminResetPlayer))
 	mux.HandleFunc("POST /api/admin/players/{id}/password", s.requireAdmin(s.adminSetPassword))
 	mux.HandleFunc("POST /api/admin/players/{id}/stats", s.requireAdmin(s.adminSetStats))
+	mux.HandleFunc("PUT /api/admin/players/{id}/hangar", s.requireAdmin(s.adminSetHangar))
 
 	mux.HandleFunc("GET /api/admin/runs", s.requireAdmin(s.adminListRuns))
 	mux.HandleFunc("GET /api/admin/runs/{id}", s.requireAdmin(s.adminGetRun))
@@ -278,5 +329,10 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 		store.Stats
 		ClientErrors map[string]any `json:"clientErrors"`
 		Hardening    any            `json:"hardening,omitempty"`
-	}{st, s.errs.summary(), s.hardening})
+		// What this build is, when it came up, how long it has been
+		// there and which clients it will take writes from. The game
+		// shows the last of those on the title screen when it is too
+		// old, which is the only way a player finds out.
+		Server buildInfo `json:"server"`
+	}{st, s.errs.summary(), s.hardening, s.buildInfo()})
 }

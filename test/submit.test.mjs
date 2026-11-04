@@ -169,3 +169,75 @@ test('starting a run clears the previous run\'s verdict', async () => {
   assert.equal(S.submitState, 'idle', 'the last run\'s refusal would show on this one');
   assert.equal(S.submitError, null);
 });
+
+// ------------------------------------------------- which build is talking
+//
+// Every request says which build it came from, so the server can tally
+// who has not upgraded and refuse writes from a build too old to
+// trust. Both halves matter: a header that is not sent tallies nothing,
+// and a 426 that is not noticed leaves the player to discover at the
+// end of a campaign that the score cannot be posted.
+
+test('every request carries the build version', async () => {
+  const { VERSION } = await import('../src/config.js');
+  const seen = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, opts = {}) => {
+    seen.push({ url: String(url), headers: opts.headers || {} });
+    return { ok: true, status: 200, text: async () => '{}' };
+  };
+  try {
+    const net = await import('../src/net.js');
+    await net.refreshStats();
+    await net.refreshTop();
+    await net.refreshPresence();
+  } finally { globalThis.fetch = real; }
+
+  assert.ok(seen.length >= 3, `only ${seen.length} calls were made`);
+  for (const c of seen) {
+    const hdr = c.headers['X-RNR-Version'];
+    assert.equal(hdr, VERSION,
+      `${c.url} went out with version header ${JSON.stringify(hdr)}, want ${VERSION}`);
+  }
+});
+
+test('the client notices a server that will not take its build', async () => {
+  const net = await import('../src/net.js');
+  const real = globalThis.fetch;
+  // A server whose floor is above this build.
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({
+      players: 1, runs: 0,
+      server: { version: '9.9.9', started: new Date().toISOString(), uptimeSec: 10, minClient: '9.0.0' },
+    }),
+  });
+  try {
+    await net.refreshStats();
+  } finally { globalThis.fetch = real; }
+  assert.ok(net.outdated(), 'the client did not notice it was below the floor');
+  assert.match(net.outdated(), /older than/,
+    `the warning does not say why: ${net.outdated()}`);
+  assert.ok(net.serverInfo(), 'the server block was not kept');
+  assert.equal(net.serverInfo().version, '9.9.9');
+});
+
+test('the version comparison agrees with the one the gate uses', async () => {
+  // internal/api/build.go compareVersions and src/net.js olderThan are
+  // two implementations of one rule. If they disagree, a client either
+  // warns about a server that would have taken it or stays quiet about
+  // one that will not.
+  const { olderThan } = await import('../src/net.js');
+  for (const [a, b, want] of [
+    ['1.0.0', '1.0.0', false],
+    ['1.0.0', '1.0.1', true],
+    ['1.0.1', '1.0.0', false],
+    ['1.10.0', '1.9.0', false],   // not a string compare
+    ['2.0', '10.0', true],        // nor a lexical one
+    ['1.1', '1.1.0', false],      // a missing part is zero
+    ['1.1.0-rc1', '1.1.0', false], // a candidate of a release is that release
+  ]) {
+    assert.equal(olderThan(a, b), want, `olderThan(${a}, ${b})`);
+  }
+});

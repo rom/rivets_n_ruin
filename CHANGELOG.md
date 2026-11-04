@@ -104,6 +104,39 @@ worth learning from.
   you. The ones called from the 120Hz update are throttled, because any
   one of them unthrottled fills the voice pool and silences the rest of
   the game.
+- **Two-player co-op.** Two pilots, one hull, one screen, on two
+  machines. `G` from the title: one hosts and reads out a
+  five-character code, the other types it in. The host simulates
+  everything and says what happened; the guest sends its buttons,
+  predicts its own ship so the stick answers immediately, and is
+  corrected toward the host every snapshot. The hull never crosses the
+  wire — both ends build it from the same seed — and nor do particles;
+  what does is everything the two players can affect, twenty times a
+  second, binary, about 1.4KB in a busy frame. The camera sits at the
+  midpoint of the pair and neither pilot can drag the other off the
+  edge. A co-op run is not submitted to the leaderboard: two pilots and
+  one score is not something the board can represent.
+- **A WebSocket server**, RFC 6455, in `internal/ws`, because the
+  backend is standard library on purpose and co-op is the first thing
+  in it that needs a socket rather than a request.
+- **The operator tool can edit a pilot's hangar** — coins, gold bars
+  and the permanent systems they own. Straight through the same
+  clamping the pilot's own client gets, and systems are a picker
+  rather than a text box: the ids are mirrored into Go with a parity
+  test, so an operator cannot grant `platting` and wonder why nothing
+  happened.
+- **The backend reports itself.** Build version, boot time, uptime and
+  the oldest client it will take writes from, on `/api/stats` and on
+  the operator tool. The version is stamped in at link time from
+  `src/config.js`, so the server and the game it serves cannot claim
+  different numbers.
+- **Client versions are counted and can be policed.** Every request
+  says which build it came from; the server tallies what it sees over
+  the last day and the operator tool shows the spread. With
+  `-min-client-version` set, a build below the floor is refused writes
+  with a 426 and a sentence saying to reload — reads are never gated,
+  because an old client that cannot see the leaderboard looks like a
+  server that is down.
 - **An operator tool: a password-protected web page on its own port**,
   default `127.0.0.1:8001`, with its own API beside it. Statistics, one
   pilot in full, one run in full, reset a high score, remove a pilot,
@@ -170,6 +203,17 @@ worth learning from.
 - **A searchlight's lamp disagreed with its own beam**, drawn at the
   raw phase accumulator while the beam used the sine of it, so the lamp
   span while the light swung.
+- **The controls screen could show a key that did something else.**
+  `keyFor` read the default key map directly, so after rebinding HELP
+  onto Q the screen still listed Q against QUIT — one key shown
+  against two actions, only one of which it did. It reads the live map
+  now, and an action whose only key was taken reads as unbound, which
+  is the honest thing to print. Found by adding one new action.
+- **The operator tool's whole layout was served to anyone who asked.**
+  It was in the page under a `hidden` attribute: nothing showed, but
+  view source before signing in and you had every tab, every button
+  and every route it calls. The shell is built after a password works
+  and removed again on sign-out.
 - **Searching the operator tool's runs for a short name matched random
   ids.** Ids are 32 hex characters, so a two-letter query lands inside
   a good fraction of them: searching for the pilot `ada` returned her

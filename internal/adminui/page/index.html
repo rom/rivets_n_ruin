@@ -9,10 +9,14 @@
 </head>
 <body>
 
-<!-- The way in. Shown until a password works; everything else is
-     hidden behind it. The page is useless without a session anyway —
-     every route answers 404 — so this is a convenience, not the
-     protection. The protection is the server. -->
+<!-- The way in, and until it works, the whole page.
+     The tool used to be here too, under a `hidden` attribute. Nothing
+     of it showed, but all of it was served: view source before signing
+     in and you had every tab, every button and every route the page
+     calls. A login screen that ships the thing it is guarding is a
+     login screen in name only.
+     The shell is built in admin.js after a password works, and taken
+     down again on sign-out. -->
 <div id="login">
   <h1>OPERATOR</h1>
   <p>rivets 'n ruin</p>
@@ -22,80 +26,6 @@
     <button type="submit">SIGN IN</button>
   </form>
   <div id="login-note"></div>
-</div>
-
-<div id="app" hidden>
-  <header>
-    <h1>RIVETS 'N RUIN</h1>
-    <span class="sub">OPERATOR</span>
-    <span class="spacer"></span>
-    <span class="sub" id="session"></span>
-    <button id="signout">SIGN OUT</button>
-  </header>
-
-  <nav>
-    <button data-tab="overview" aria-current="true">OVERVIEW</button>
-    <button data-tab="pilots">PILOTS</button>
-    <button data-tab="runs">RUNS</button>
-    <button data-tab="errors">ERRORS</button>
-  </nav>
-
-  <main>
-    <div id="note"></div>
-
-    <section id="tab-overview">
-      <h2>THE BOARD</h2>
-      <div class="tiles" id="stat-tiles"></div>
-
-      <h2>FLYING NOW</h2>
-      <div id="presence"></div>
-
-      <h2>THE SERVER</h2>
-      <div id="server-info"></div>
-
-      <h2>DANGEROUS</h2>
-      <p class="hint">
-        Wiping the board removes every recorded run and zeroes every pilot's
-        counters. Accounts, credentials and hangars stay. It cannot be undone.
-        To remove one run instead, find it under RUNS.
-      </p>
-      <div class="row">
-        <button id="wipe" class="danger">WIPE EVERY RECORDED RUN</button>
-      </div>
-    </section>
-
-    <section id="tab-pilots" hidden>
-      <h2>PILOTS</h2>
-      <form class="row" id="pilot-search">
-        <input id="pilot-q" class="grow" placeholder="name or id" aria-label="Search pilots">
-        <button type="submit">SEARCH</button>
-      </form>
-      <div id="pilot-list"></div>
-      <div id="pilot-detail"></div>
-    </section>
-
-    <section id="tab-runs" hidden>
-      <h2>RECORDED RUNS</h2>
-      <form class="row" id="run-search">
-        <input id="run-q" class="grow" placeholder="pilot name, pilot id or run id" aria-label="Search runs">
-        <button type="submit">SEARCH</button>
-      </form>
-      <div id="run-list"></div>
-      <div id="run-detail"></div>
-    </section>
-
-    <section id="tab-errors" hidden>
-      <h2>CLIENT ERRORS</h2>
-      <p class="hint">
-        What is going wrong in people's browsers. The game's own /api/stats
-        gives counts only, because these hold stack traces and user agents
-        from other people's machines; behind this door the contents are the
-        point.
-      </p>
-      <div id="error-summary"></div>
-      <div id="error-list"></div>
-    </section>
-  </main>
 </div>
 
 <script type="module" src="/admin.js"></script>

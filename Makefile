@@ -25,8 +25,14 @@ JSFILES     := $(wildcard src/*.js) $(wildcard internal/adminui/page/*.js)
 GO          ?= go
 NODE        ?= node
 
+# The version, read out of the game's own config rather than written
+# here. Two places claiming a version number is two places to forget;
+# the server now reports one to the operator tool and to the client, and
+# it has to be the version of the game it is serving.
+VERSION     := $(shell sed -n "s/^export const VERSION = '\(.*\)';/\1/p" src/config.js)
+
 # Strip debug info; this is a game server, not something anyone will dlv into.
-LDFLAGS     := -s -w
+LDFLAGS     := -s -w -X main.version=$(VERSION)
 
 # No cgo in anything shipped. Two reasons, and the second is the one that
 # bites: it makes the binary genuinely static, and

@@ -5,9 +5,20 @@
 // failure, flips `online` to false and returns a falsy value. Nothing in the
 // game loop may await a network call or branch on one succeeding.
 
+import { VERSION } from './config.js';
+
 const TIMEOUT_MS = 4000;
 const HEARTBEAT_MS = 5000;
 const STORE_KEY = 'rnr.player';
+
+// Every request says which build it came from.
+//
+// A header rather than a field in the body, because it has to be on
+// reads too and those have no body. The server tallies the versions it
+// sees, which is what turns "the game is broken for some people" into
+// "nine people are still on 1.0.4" — and it can refuse writes from a
+// build too old to trust, which arrives here as a 426.
+const VERSION_HEADER = 'X-RNR-Version';
 
 const S = {
   base: '',            // same origin; the Go server serves game and API together
@@ -24,6 +35,9 @@ const S = {
   flying: [],
   stats: null,
   rank: null,
+  // Set when the server refuses this build. Sticky: it does not come
+  // back on the next successful read, because the build is still old.
+  outdated: null,
   lastError: null,
   lastBeat: 0,
 };
@@ -36,7 +50,7 @@ async function call(path, { method = 'GET', body, auth = false } = {}) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
-    const headers = {};
+    const headers = { [VERSION_HEADER]: VERSION };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (auth && S.player) headers.Authorization = `Bearer ${S.player.token}`;
 
@@ -50,6 +64,11 @@ async function call(path, { method = 'GET', body, auth = false } = {}) {
     const data = text ? JSON.parse(text) : null;
     if (!res.ok) {
       S.lastError = (data && data.error) || `HTTP ${res.status}`;
+      // 426: this build is older than the server will take writes
+      // from. Worth holding onto rather than letting it scroll past as
+      // one more failed call — it is the one error the player can
+      // actually do something about, and the title screen says so.
+      if (res.status === 426) S.outdated = S.lastError;
       // A 5xx means the server is sick, not absent; anything else means it
       // answered us, so we are still online.
       S.online = res.status < 500;
@@ -244,8 +263,36 @@ export async function refreshPresence() {
 
 export async function refreshStats() {
   const data = await call('/api/stats');
-  if (data) S.stats = data;
+  if (data) {
+    S.stats = data;
+    // The server publishes the oldest build it will take writes from.
+    // Knowing before the first submission is better than finding out
+    // at the end of a run that the score cannot be posted.
+    const srv = data.server;
+    if (srv && srv.minClient && olderThan(VERSION, srv.minClient)) {
+      S.outdated = `this build (${VERSION}) is older than the server's `
+        + `minimum of ${srv.minClient} — reload to get the current one`;
+    }
+  }
   return S.stats;
+}
+
+// Server info, for anything that wants to show it: the build, when it
+// came up, and how long it has been there.
+export const serverInfo = () => (S.stats && S.stats.server) || null;
+export const outdated = () => S.outdated;
+
+// Compares two dotted versions the same way the server does, so the
+// client and the gate agree about what "older" means. Anything that is
+// not a number counts as 0, which makes 1.2.0-rc1 the same release as
+// 1.2.0 — a release candidate of an allowed version is allowed.
+export function olderThan(a, b) {
+  const part = (v, i) => parseInt((v.split('.')[i] || '0').match(/^\d*/)[0] || '0', 10);
+  const n = Math.max(a.split('.').length, b.split('.').length);
+  for (let i = 0; i < n; i++) {
+    if (part(a, i) !== part(b, i)) return part(a, i) < part(b, i);
+  }
+  return false;
 }
 
 // Opens a run with the server before the first hull. The reply carries a

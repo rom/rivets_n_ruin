@@ -61,6 +61,7 @@ backend down**; you lose the leaderboard, not the game.
 | `P` / `Esc` | Pause |
 | `M` | Mute / unmute |
 | `T` / `]` | Next tune |
+| `G` | Co-op: host a game or join one, from the title |
 | `O` | Settings |
 | `H` / `/` | Help pages |
 | `B` | Switch leaderboard: top pilots / high scores |
@@ -558,6 +559,56 @@ a second on TANTALUM to 97 on FERRUM, and pacing against a single number
 flattens that by design — the best fit across all twenty-five hulls still
 left the deep ones 40% quieter than they had been. Per hull, every one
 lands within 0.4%, and a test holds it there.
+
+## Co-op
+
+Two pilots, one hull, one screen — on two machines. `G` from the title
+screen: one of you hosts and reads out a five-character code, the other
+types it in.
+
+| | |
+| --- | --- |
+| ![The host's screen](docs/coop-host.png) | ![The guest's screen](docs/coop-guest.png) |
+| What the host sees | The same moment on the other machine. The chevron is always over the *other* pilot, because the ship you need to find at a glance is the one you are not steering |
+
+**The host simulates, the guest predicts.** One side runs the whole
+game — both ships, every attacker, every shot — and says what happened;
+the other sends its buttons and draws what it is told. The alternative
+is lockstep, both sides simulating and agreeing, and lockstep
+desynchronises the first time two machines disagree about a float,
+which in a game with this much physics is immediately.
+
+The guest does fly its own ship locally, because a ship that answers
+the stick a round trip later is not flyable. It is corrected toward the
+host's position on every snapshot: eased when the two are close,
+snapped when they are not, because past a threshold the local guess was
+wrong about something structural — a wall, a death — and easing there
+flies the ship through whatever it got wrong.
+
+**The hull never crosses the wire.** It is generated from a seed, the
+seed is in the room, and both machines build the identical 12,000
+pixels from it. Nor do particles: two machines disagreeing about where
+a spark went is not a disagreement about the game. What does cross is
+everything the two players can affect — both ships, the camera, the
+attackers, the interceptors, the shots, the loot, the score — twenty
+times a second, binary, about 1.4KB in a busy frame.
+
+**The camera belongs to both of you.** It sits at the midpoint of the
+pair, clamped so neither pilot can be pushed off the edge by the other
+flying away, and a ship that reaches the edge stops rather than being
+dragged. Without that clamp the faster pilot takes the screen and the
+slower one is scrolled into a wall, which is the oldest complaint about
+shared-screen co-op there is.
+
+**A co-op run is not submitted to the leaderboard.** Two pilots and one
+score is not a thing the board can represent, and the run validator's
+physics bounds assume one ship. The run is for playing, not for posting.
+
+Transport is a WebSocket, written to RFC 6455 in `internal/ws` because
+the backend is standard library on purpose — see the note there for
+what it does and deliberately does not do. The server is a relay and a
+registry: it pairs two people by code and passes bytes between them,
+and has no opinion about what is in those bytes.
 
 ## Minibosses
 
@@ -1956,7 +2007,7 @@ reports each pilot's progress along the hull.
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/api/health` | — | liveness |
-| `GET` | `/api/stats` | — | players, runs, mods, who is flying, client-error counts |
+| `GET` | `/api/stats` | — | players, runs, mods, who is flying, client-error counts, and the server's build, boot time, uptime and version floor |
 | `POST` | `/api/players` | — | register anonymously; returns a bearer token **once** |
 | `POST` | `/api/auth/register` | optional | register with a password, or adopt one for a pilot you already hold |
 | `POST` | `/api/auth/login` | — | log in with name and password; rotates the token |
@@ -1973,6 +2024,10 @@ reports each pilot's progress along the hull.
 | `POST` | `/api/mods` | yes | publish a mod |
 | `GET` | `/api/mods/{id}` | — | one mod, with its config |
 | `GET` | `/api/mods/{id}/top` | — | that mod's leaderboard |
+| `POST` | `/api/coop/open` | yes | open a co-op game; returns the code to share |
+| `GET` | `/api/coop/{code}` | — | what you would be joining: hull, seed, host, whether it is full |
+| `GET` | `/api/coop/{code}/host` | — | the host's socket (WebSocket upgrade) |
+| `GET` | `/api/coop/{code}/guest` | — | the guest's socket (WebSocket upgrade) |
 | `POST` | `/api/presence` | yes | heartbeat while flying |
 | `GET` | `/api/presence` | — | who is flying right now |
 
@@ -2027,6 +2082,7 @@ Four tabs:
 | `POST` | `/api/admin/players/{id}/reset` | clear their history, keep the account |
 | `POST` | `/api/admin/players/{id}/password` | set a new password |
 | `POST` | `/api/admin/players/{id}/stats` | edit their runs and best counters |
+| `PUT` | `/api/admin/players/{id}/hangar` | set their coins, gold bars and systems |
 | `GET` | `/api/admin/runs` | recorded runs — `?q=`, `?limit=`, `?offset=` |
 | `GET` | `/api/admin/runs/{id}` | one run, its pilot, and how it compares to their others |
 | `DELETE` | `/api/admin/runs/{id}` | remove one run; the pilot's best is recomputed |
@@ -2554,6 +2610,8 @@ src/audio.js      Web Audio graph, buses, voice limiting, synthesis primitives
 src/sfx.js        the 33 sound effects
 src/music.js      adaptive sequencer and its instrument voices
 src/net.js        backend client; degrades to offline play
+src/coop.js       two-player co-op: the socket and the wire format
+src/coopgame.js   co-op where it meets the game loop: the second ship
 src/mods.js       mod loading and config overrides
 src/main.js       the one entry point: wiring, input routing, the frame
 src/game.js       state machine, collision pairs, run objective
@@ -2589,6 +2647,7 @@ internal/api/     routing, handlers, auth, rate limiting
 internal/validate/ score plausibility, derived from the game's physics
 internal/hardening/ asks the OS to take privileges away at startup
 internal/adminui/  the operator page, compiled into the binary
+internal/ws/      a WebSocket server, RFC 6455, for co-op
 ```
 
 `make smoke` flies the game in a headless browser and reads pixels, asserting
