@@ -2105,14 +2105,25 @@ the internet and `DELETE /api/admin/players/{id}`. The page itself is
 compiled into the binary rather than served from the static root, which
 is reachable from the public port by definition.
 
-Four tabs:
+Five tabs:
 
 | Tab | What it is for |
 | --- | --- |
 | **Overview** | the board's counters, who is flying right now, what the OS granted the process, and the one button that wipes everything |
 | **Pilots** | search, read one pilot in full, edit their counters, change their password, reset them, delete them |
 | **Runs** | every recorded run newest first, searchable by pilot or by run id; one run in detail with the numbers that say whether it is plausible |
+| **Co-op** | the runs two pilots flew together, with how much of each one they actually flew paired |
 | **Errors** | the client error reports themselves, which the public `/api/stats` deliberately withholds |
+
+**Colours**, in the header. RUIN is the game's own palette and the
+default, because whoever is looking at this usually has the game open
+in another tab and a tool that looks like a different product makes
+you check twice which one you are about to delete something in. That
+stops being the right trade when you are reading it for an hour in
+daylight, so there is SLATE, which is light, and EMBER and PHOSPHOR,
+which are not. The choice is a `data-scheme` attribute on `<html>` and
+is remembered per browser; each scheme is the whole palette, so none
+of them leaves a panel behind in somebody else's colours.
 
 | | |
 | --- | --- |
