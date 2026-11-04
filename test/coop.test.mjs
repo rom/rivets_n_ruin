@@ -28,16 +28,19 @@ setKinds(KINDS);
 function ship(over = {}) {
   return {
     x: 1000, y: 180, vx: 120, vy: -40, facing: 1, shield: 90,
+    shieldMax: 100, lives: 3,
     alive: true, flip: 0, thrusting: false, ...over,
   };
 }
 
+// No `lives` on the game. There never was one: the field is the
+// player's, and this fixture used to invent a game-level one, which is
+// how a wire field that was always zero in play passed its own test.
 function fakeGame(over = {}) {
   return {
     cam: { x: 900 },
     state: 'play',
     score: 12345,
-    lives: 3,
     levelIndex: 4,
     player: ship(),
     ...over,
@@ -105,7 +108,6 @@ test('both ships survive the wire', () => {
   assert.equal(got.camX, 900);
   assert.equal(got.state, 'play');
   assert.equal(got.score, 12345);
-  assert.equal(got.lives, 3);
   assert.equal(got.levelIndex, 4);
 
   const [a, b] = got.ships;
@@ -123,6 +125,44 @@ test('both ships survive the wire', () => {
   // Velocity is coarse on purpose — it is only used to smooth
   // between snapshots — but it must not be wrong about direction.
   assert.ok(b.vx < 0 && a.vx > 0, `velocities came back ${a.vx} and ${b.vx}`);
+});
+
+// The numbers the mini-HUD draws, which is the reason they are on the
+// wire at all. Asserted against the values put in rather than against
+// the encoder's opinion: a codec wrong in the same way at both ends
+// round-trips happily and still shows the wrong bar in play.
+test('each ship carries its own spare hulls', () => {
+  const game = fakeGame();
+  game.player = ship({ lives: 5 });
+  const got = decodeSnapshot(encodeSnapshot(game, ship({ lives: 1 }), 1, emptyPools()));
+  assert.equal(got.ships[0].lives, 5, 'the host ship lost its spare hulls');
+  assert.equal(got.ships[1].lives, 1, 'the guest ship lost its spare hulls');
+});
+
+// The refit raises shieldMax every hull: it passes 220 at hull four
+// and reaches four figures by the end of a long run. A single byte
+// clamped at 255, and the guest takes its own shield from the host
+// rather than predicting it — so this was not a display fault, it
+// actually cut a late-run guest's shield to 255.
+test('a late-run shield survives the wire intact', () => {
+  const game = fakeGame();
+  game.player = ship({ shield: 870, shieldMax: 1180 });
+  const got = decodeSnapshot(encodeSnapshot(game, ship({ shield: 402, shieldMax: 600 }), 1, emptyPools()));
+  assert.equal(got.ships[0].shield, 870, 'a shield over 255 was truncated');
+  assert.equal(got.ships[0].shieldMax, 1180, 'a ceiling over 255 was truncated');
+  assert.equal(got.ships[1].shield, 402);
+  assert.equal(got.ships[1].shieldMax, 600);
+});
+
+// A bar is a fraction and a fraction needs its denominator. Without
+// the ceiling the guest drew the other pilot's 300 against its own
+// 100 and showed a bar three times over.
+test('the shield ceiling arrives with the shield', () => {
+  const game = fakeGame();
+  game.player = ship({ shield: 150, shieldMax: 300 });
+  const got = decodeSnapshot(encodeSnapshot(game, ship(), 1, emptyPools()));
+  const a = got.ships[0];
+  assert.equal(a.shield / a.shieldMax, 0.5, 'half a shield did not come back as half');
 });
 
 test('a ship outside the view still has a position', () => {
@@ -537,7 +577,7 @@ import { hostFrame, guestApply } from '../src/coopgame.js';
 function shakenGame() {
   const game = {
     level: { obstacles: [], buckets: new Map(), length: 20000, gates: [], hazards: [], movers: [] },
-    cam: makeCamera(), time: 0, state: 'play', score: 0, lives: 3, levelIndex: 0,
+    cam: makeCamera(), time: 0, state: 'play', score: 0, levelIndex: 0,
     player: makePlayer(),
   };
   game.player.x = 400; game.player.y = 180; game.player.alive = true;
@@ -698,4 +738,129 @@ test('a co-op submission carries the room and never the partner', async () => {
     assert.equal(field in post.body, false,
       `the submission carries ${field}; the partner is the server's to decide`);
   }
+});
+
+// --- the hull both pilots are on
+//
+// Which hull the guest is flying has been in every snapshot since
+// co-op shipped, and nothing read it. So the host cleared a hull and
+// moved on, and the guest kept flying the hull it launched on with the
+// new one's attackers, shots and loot drawn over it: shots stopping in
+// mid-air, foes inside girders, a boss gate that was not there. When
+// the host reached the end screen, the guest was left flying a hull
+// nobody was advancing and no key could leave.
+//
+// These walk a real game through a real update(), because the fault
+// was in the wiring between the two and a stub proves only the stub.
+
+import { makeGame, update, followHull } from '../src/game.js';
+import { coopState, leaveGame } from '../src/coop.js';
+
+function wireShip(over = {}) {
+  return {
+    x: 200, y: 180, vx: 0, vy: 0, facing: 1,
+    shield: 100, shieldMax: 100, lives: 3,
+    alive: true, flip: 0, thrusting: false, ...over,
+  };
+}
+
+function hostSnapshot(levelIndex, state = 'play') {
+  return {
+    tick: 1, camX: 0, state, score: 0, levelIndex,
+    ships: [wireShip(), wireShip({ x: 240 })],
+    foes: [], playerShots: [], enemyShots: [],
+    interceptors: [], pickups: [],
+  };
+}
+
+function asGuest(snap) {
+  const S = coopState();
+  S.phase = 'playing';
+  S.side = 'guest';
+  S.snap = snap;
+  S.snapAt = performance.now();
+}
+
+test('the guest follows the host onto the next hull', (t) => {
+  t.after(leaveGame);
+  const game = makeGame();
+  game.state = 'play';
+  const before = game.level;
+  assert.equal(game.levelIndex, 0, 'the fixture did not start on the first hull');
+
+  asGuest(hostSnapshot(2));
+  update(game, DT);
+
+  assert.equal(game.levelIndex, 2,
+    'the guest stayed on the hull it launched from while the host flew another');
+  assert.notEqual(game.level, before, 'the hull was never rebuilt');
+  assert.equal(game.level.spec.name, game.specs[2].name,
+    'the guest rebuilt a hull, but not the one the host is on');
+});
+
+test('the guest is carried through the end of a hull and out again', (t) => {
+  t.after(leaveGame);
+  const game = makeGame();
+  game.state = 'play';
+
+  // The host finishes the hull.
+  asGuest(hostSnapshot(0, 'levelclear'));
+  update(game, DT);
+  assert.equal(game.state, 'levelclear', 'the guest kept flying a cleared hull');
+
+  // ...and moves on. This is the one that deadlocked: the follow used
+  // to run below the state branches, each of which returns early, so a
+  // guest told it was between hulls never read another snapshot and
+  // sat on that screen for the rest of the run.
+  asGuest(hostSnapshot(1, 'play'));
+  update(game, DT);
+  assert.equal(game.state, 'play', 'the guest never left the between-hulls screen');
+  assert.equal(game.levelIndex, 1);
+});
+
+test('the guest does not carry itself onto the next hull', async (t) => {
+  t.after(leaveGame);
+  const { setSynthetic } = await import('../src/input.js');
+  const game = makeGame();
+  game.state = 'levelclear';
+  asGuest(hostSnapshot(0, 'levelclear'));
+  try {
+    setSynthetic(new Set(['start']));
+    update(game, DT);
+  } finally {
+    setSynthetic(null);
+  }
+  assert.equal(game.levelIndex, 0,
+    'the guest loaded the next hull on its own; the host decides when the pair moves on');
+});
+
+test('a host still carries itself onto the next hull', async (t) => {
+  t.after(leaveGame);
+  const { setSynthetic } = await import('../src/input.js');
+  const game = makeGame();
+  game.state = 'levelclear';
+  try {
+    setSynthetic(new Set(['start']));
+    update(game, DT);
+  } finally {
+    setSynthetic(null);
+  }
+  assert.equal(game.levelIndex, 1,
+    'a solo or hosting pilot can no longer leave the between-hulls screen');
+});
+
+test('following the same hull twice rebuilds nothing', () => {
+  const game = makeGame();
+  const level = game.level;
+  assert.equal(followHull(game, game.levelIndex), false,
+    'followHull claimed to have changed hull when it had not');
+  assert.equal(game.level, level, 'the hull was rebuilt for no reason');
+});
+
+test('a hull index off the end of the roster is clamped, not followed', () => {
+  const game = makeGame();
+  followHull(game, 9999);
+  assert.equal(game.levelIndex, game.specs.length - 1,
+    'a snapshot claiming hull 9999 took the guest off the end of the roster');
+  assert.ok(game.level, 'there is no hull at all');
 });

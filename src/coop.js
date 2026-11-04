@@ -164,6 +164,21 @@ export function decodeInput(buf) {
 
 const shipFlags = (p) => (p.alive ? 1 : 0) | (p.flip > 0 ? 2 : 0) | (p.thrusting ? 4 : 0);
 
+// Everything the far end needs to draw a ship AND to say how it is
+// doing. The second half of that is newer than the first: the other
+// pilot's shield and spare ships are on screen now, in the mini-HUD,
+// and a panel cannot show a number nobody sent.
+//
+// Shield is two bytes, not one. It was one, clamped to 255, which is
+// fine for a stock hull at 100 and wrong from hull four onwards: the
+// refit raises shieldMax every hull and it passes a thousand by the
+// end of a long run, so a pilot at 400 of 600 was transmitted as 255
+// and — because the guest takes its own shield from the host rather
+// than predicting it — actually had its shield cut to 255 on screen.
+//
+// The ceiling goes with it. A bar is a fraction, and a fraction needs
+// its denominator; without it the guest drew the other pilot's 300
+// against its own 100 and showed a bar three times over.
 function writeShip(w, p, camX) {
   w.i16(p.x - camX);
   w.i16(p.y);
@@ -171,7 +186,14 @@ function writeShip(w, p, camX) {
   w.i16(p.vy / 4);
   w.i8(p.facing);
   w.u8(shipFlags(p));
-  w.u8(Math.max(0, Math.min(255, Math.round(p.shield))));
+  w.u16(Math.max(0, Math.round(p.shield)));
+  w.u16(Math.max(1, Math.round(p.shieldMax || 1)));
+  // Spare hulls. Capped at PICKUP.maxLives, which is 6, so a byte is
+  // room to spare. This used to be sent once for the whole game, off
+  // a game.lives that has never existed — the field is the player's —
+  // so the byte was always zero and the guest copied it into a field
+  // nothing reads. Per ship, because the two pilots lose their own.
+  w.u8(Math.max(0, Math.min(255, p.lives | 0)));
 }
 
 function readShip(r, camX) {
@@ -181,9 +203,11 @@ function readShip(r, camX) {
   const vy = r.i16() * 4;
   const facing = r.i8();
   const flags = r.u8();
-  const shield = r.u8();
+  const shield = r.u16();
+  const shieldMax = r.u16();
+  const lives = r.u8();
   return {
-    x, y, vx, vy, facing, shield,
+    x, y, vx, vy, facing, shield, shieldMax, lives,
     alive: (flags & 1) !== 0,
     flip: (flags & 2) !== 0 ? 1 : 0,
     thrusting: (flags & 4) !== 0,
@@ -212,7 +236,6 @@ export function encodeSnapshot(game, second, tick, pools) {
   w.f32(camX);
   w.u8(STATES.indexOf(game.state) < 0 ? 0 : STATES.indexOf(game.state));
   w.u32(Math.max(0, game.score | 0));
-  w.u8(Math.max(0, Math.min(255, game.lives | 0)));
   w.u8(Math.max(0, Math.min(255, game.levelIndex | 0)));
 
   writeShip(w, game.player, camX);
@@ -325,7 +348,6 @@ function readSnapshot(buf) {
   const camX = r.f32();
   const state = STATES[r.u8()] || 'play';
   const score = r.u32();
-  const lives = r.u8();
   const levelIndex = r.u8();
 
   const ships = [readShip(r, camX), readShip(r, camX)];
@@ -384,7 +406,7 @@ function readSnapshot(buf) {
   }
 
   return {
-    tick, camX, state, score, lives, levelIndex,
+    tick, camX, state, score, levelIndex,
     ships, foes: foeList, playerShots: mine, enemyShots: theirs,
     interceptors: chasers, pickups: loot,
   };

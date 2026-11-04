@@ -40,6 +40,7 @@ import {
 import { setIntensity, setTune } from './music.js';
 import {
   coopFrame, guestPreFrame, isGuest, isHost, isCoop, coopState, clearMate,
+  coopSnapshot,
 } from './coopgame.js';
 import {
   submitRun, submitCoopRun, coopPostedByHost, heartbeat, serverBest, startRun,
@@ -360,6 +361,77 @@ function loadNextHull(game) {
   game.cam.x = clamp(p.x - VIEW_W / 2 + SHIP.w, 0, game.level.length - VIEW_W);
 }
 
+/**
+ * Put a co-op guest on the hull the host is flying.
+ *
+ * The guest builds its own hull — the geometry is generated from the
+ * run's seed and both machines derive the identical twelve thousand
+ * pixels from it, which is why none of it is on the wire. What was on
+ * the wire and went unread is which hull. So the host cleared a hull,
+ * loaded the next one, and carried on sending a world the guest drew
+ * against the walls of the previous one: shots stopping in mid-air,
+ * attackers inside girders, a boss gate that was not there.
+ *
+ * Only the hull and the things generated with it. The ship is the
+ * host's to place and arrives in the next snapshot; the pools are
+ * refilled from that snapshot every frame anyway, and are cleared here
+ * so a single frame between the two hulls cannot draw the old one's
+ * contents against the new one's walls.
+ *
+ * Returns true if the hull actually changed, which is what the caller
+ * uses to decide whether to say so on screen.
+ */
+export function followHull(game, index) {
+  const at = clamp(index | 0, 0, game.specs.length - 1);
+  if (at === game.levelIndex) return false;
+  game.levelIndex = at;
+  game.hullMod = modifierFor(at, game.specs[at], game.runSeed);
+  game.level = buildLevel(specWithModifier(game.specs[at], game.hullMod), game.runSeed);
+  setTune(game.specs[at].tune);
+  game.boss = null;
+  game.bossDown = false;
+  game.bossWreck = null;
+  game.lootT = 0;
+  game.leaving = false;
+  game.time = 0;
+  resetEnemies();
+  resetPickups();
+  resetFoes();
+  resetOrdnance();
+  resetMinis();
+  game.miniPlan = planMinis(game.level, at);
+  playerShots.clear();
+  enemyShots.clear();
+  particles.clear();
+  return true;
+}
+
+/**
+ * Take the hull and the run's state from the host.
+ *
+ * Both have been in every snapshot since co-op shipped and neither was
+ * read. What that looked like in play: the host cleared a hull and
+ * went on to the next one, and the guest kept flying the hull it was
+ * on with the new one's attackers and shots drawn over it — and when
+ * the host reached the end screen, the guest was left flying a hull
+ * nobody was advancing, with no way out but closing the tab.
+ *
+ * The guest has no say in either. It does not even get to press the
+ * key that moves on; see the levelclear branch.
+ */
+export function guestFollowHost(game) {
+  const snap = coopSnapshot();
+  if (!snap) return;
+  if (followHull(game, snap.levelIndex)) {
+    const spec = game.specs[game.levelIndex];
+    banner(game, spec.name, spec.subtitle, 3.0);
+  }
+  if (snap.state !== game.state) {
+    game.state = snap.state;
+    game.stateT = 0;
+  }
+}
+
 export function banner(game, text, sub = '', life = 2.4) {
   game.banner = { text, sub, t: life, max: life };
 }
@@ -437,6 +509,14 @@ function scoreIntensity(game) {
 
 export function update(game, dt) {
   game.stateT += dt;
+  // Which hull the guest is on, and what the run is doing, are the
+  // host's to say. Right at the top because the state chooses which
+  // branch below runs: adopting it after them would run a frame of
+  // the wrong one, and adopting it after their early returns — which
+  // is where this first went — meant a guest told it was between
+  // hulls returned at that branch for ever and never read another
+  // snapshot.
+  if (isGuest()) guestFollowHost(game);
   setIntensity(scoreIntensity(game));
 
   // --- splash. Any key skips it; it is shown once per load, not per run.
@@ -527,7 +607,12 @@ export function update(game, dt) {
 
   // Between hulls: ENTER carries the upgraded ship onto the next one.
   if (game.state === 'levelclear') {
-    if (tapped('start') || tapped('fire')) {
+    // Not the guest. The host decides when the pair moves on, and a
+    // guest that loaded the next hull on its own would draw the
+    // host's snapshots against the wrong walls until followHull
+    // dragged it back. It is carried, like it is carried through
+    // everything else.
+    if ((tapped('start') || tapped('fire')) && !isGuest()) {
       sfxUi();
       loadNextHull(game);
       game.state = 'launching';
