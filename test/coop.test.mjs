@@ -517,3 +517,70 @@ test('the second ship is made once and kept', () => {
   assert.ok(Object.prototype.hasOwnProperty.call(a, 'shield'),
     'the second ship is not a real ship');
 });
+
+// ------------------------------------------------- the shake comes down
+//
+// Reported from play: "the co-op view, for both players, is very jumpy
+// — the graphics jump back and forth vertically."
+//
+// The screen shake is the ONLY thing that moves the view vertically:
+// drawWorld's camY is nothing but `cam.shake` turned into a random
+// offset. It was wound down inside updateCamera and nowhere else, and
+// co-op places the camera itself and so never called updateCamera — so
+// one hit left the picture juddering for the rest of the run.
+
+import { makeCamera, kick, decayShake, updateCamera } from '../src/camera.js';
+import { hostFrame, guestApply } from '../src/coopgame.js';
+
+function shakenGame() {
+  const game = {
+    level: { obstacles: [], buckets: new Map(), length: 20000, gates: [], hazards: [], movers: [] },
+    cam: makeCamera(), time: 0, state: 'play', score: 0, lives: 3, levelIndex: 0,
+    player: makePlayer(),
+  };
+  game.player.x = 400; game.player.y = 180; game.player.alive = true;
+  kick(game.cam, 14);
+  return game;
+}
+
+test('the host winds the shake down', () => {
+  const game = shakenGame();
+  assert.ok(game.cam.shake > 0, 'the fixture did not shake the camera');
+  for (let i = 0; i < 120; i++) hostFrame(game, DT);
+  assert.equal(game.cam.shake, 0,
+    `after a second of co-op the camera is still shaking by ${game.cam.shake}; `
+    + 'the view judders vertically for the rest of the run');
+});
+
+test('the guest winds the shake down', () => {
+  const game = shakenGame();
+  for (let i = 0; i < 120; i++) guestApply(game, DT);
+  assert.equal(game.cam.shake, 0,
+    `after a second the guest's camera is still shaking by ${game.cam.shake}`);
+});
+
+test('a shake still happens before it decays', () => {
+  // The fix must not be "never shake": the kick is how a hit reads.
+  const cam = makeCamera();
+  kick(cam, 14);
+  assert.ok(cam.shake > 0);
+  decayShake(cam, DT);
+  assert.ok(cam.shake > 0, 'one frame of decay wiped the whole shake');
+  assert.ok(cam.shake < 14, 'the shake did not decay at all');
+});
+
+test('every path that places the camera winds the shake down', () => {
+  // The single-player path, the boss-arena path and both co-op paths.
+  // One of these forgot, and the only symptom was a picture that would
+  // not sit still.
+  const cases = {
+    'updateCamera, scrolling': (cam, dt) => updateCamera(cam, { x: 400, facing: 1 }, 20000, dt),
+    'updateCamera, boss arena': (cam, dt) => updateCamera(cam, { x: 400, facing: 1 }, 20000, dt, 300),
+  };
+  for (const [what, run] of Object.entries(cases)) {
+    const cam = makeCamera();
+    kick(cam, 14);
+    for (let i = 0; i < 120; i++) run(cam, DT);
+    assert.equal(cam.shake, 0, `${what} left the camera shaking by ${cam.shake}`);
+  }
+});
