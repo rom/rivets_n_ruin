@@ -576,6 +576,11 @@ shows through, with this player's hands taken off the controls so the
 ship coasts and a page turn does not also kick it sideways. The footer
 says which of the two is happening.
 
+![The help pages over a co-op run](docs/help-coop.png)
+
+*The hull, the other ship and the boss gate are all still moving behind
+that page. In single player the same key says `THE RUN IS PAUSED`.*
+
 ## Co-op
 
 Two pilots, one hull, one screen — on two machines. `G` from the title
