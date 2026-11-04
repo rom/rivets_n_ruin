@@ -560,6 +560,56 @@ flattens that by design — the best fit across all twenty-five hulls still
 left the deep ones 40% quieter than they had been. Per hull, every one
 lands within 0.4%, and a test holds it there.
 
+## Co-op
+
+Two pilots, one hull, one screen — on two machines. `G` from the title
+screen: one of you hosts and reads out a five-character code, the other
+types it in.
+
+| | |
+| --- | --- |
+| ![The host's screen](docs/coop-host.png) | ![The guest's screen](docs/coop-guest.png) |
+| What the host sees | The same moment on the other machine. The chevron is always over the *other* pilot, because the ship you need to find at a glance is the one you are not steering |
+
+**The host simulates, the guest predicts.** One side runs the whole
+game — both ships, every attacker, every shot — and says what happened;
+the other sends its buttons and draws what it is told. The alternative
+is lockstep, both sides simulating and agreeing, and lockstep
+desynchronises the first time two machines disagree about a float,
+which in a game with this much physics is immediately.
+
+The guest does fly its own ship locally, because a ship that answers
+the stick a round trip later is not flyable. It is corrected toward the
+host's position on every snapshot: eased when the two are close,
+snapped when they are not, because past a threshold the local guess was
+wrong about something structural — a wall, a death — and easing there
+flies the ship through whatever it got wrong.
+
+**The hull never crosses the wire.** It is generated from a seed, the
+seed is in the room, and both machines build the identical 12,000
+pixels from it. Nor do particles: two machines disagreeing about where
+a spark went is not a disagreement about the game. What does cross is
+everything the two players can affect — both ships, the camera, the
+attackers, the interceptors, the shots, the loot, the score — twenty
+times a second, binary, about 1.4KB in a busy frame.
+
+**The camera belongs to both of you.** It sits at the midpoint of the
+pair, clamped so neither pilot can be pushed off the edge by the other
+flying away, and a ship that reaches the edge stops rather than being
+dragged. Without that clamp the faster pilot takes the screen and the
+slower one is scrolled into a wall, which is the oldest complaint about
+shared-screen co-op there is.
+
+**A co-op run is not submitted to the leaderboard.** Two pilots and one
+score is not a thing the board can represent, and the run validator's
+physics bounds assume one ship. The run is for playing, not for posting.
+
+Transport is a WebSocket, written to RFC 6455 in `internal/ws` because
+the backend is standard library on purpose — see the note there for
+what it does and deliberately does not do. The server is a relay and a
+registry: it pairs two people by code and passes bytes between them,
+and has no opinion about what is in those bytes.
+
 ## Minibosses
 
 The gap between an attacker you kill in two shots and a boss that gates the
