@@ -14,6 +14,15 @@ worth learning from.
 
 ### Added
 
+- **Help during a run.** `H` opens the pages from anywhere now, in
+  flight included — which is where a player is most likely to want a key
+  reminded, and is exactly where the game used to refuse. It stops the
+  run while it is up, and a run already paused stays paused when the
+  page closes. In co-op it does not stop: the host halting would freeze
+  the guest's whole world and the guest cannot halt the host at all, so
+  there the page goes over a running game, translucent enough to see the
+  hull through, with this player's hands off the controls. The footer
+  says which of the two is happening.
 - **A co-op top ten, and co-op runs recorded on the server.** Its own
   board and its own table, because two pilots and one score is not
   something the solo board can represent: ranked against a soloist a

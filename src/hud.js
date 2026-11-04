@@ -1526,9 +1526,26 @@ export const HELP_LAYOUT = {
   top: 58, pitch: 12, headGap: 4, headPitch: 16,
   keyX: 40, valX: 168, bottom: SCREEN_H - 30,
 };
-export function drawHelp(ctx, page) {
+/**
+ * The help pages.
+ *
+ * `where` says what the game is doing behind them, because help can now
+ * be opened in flight:
+ *
+ *   paused  — the run is stopped while this is up. The usual case: a
+ *             pilot reading the controls is not flying one.
+ *   running — it is not, which happens in co-op, where pausing is not
+ *             one machine's to decide. The plate goes translucent so
+ *             the hull still shows through, and the footer says so.
+ *             Hiding a live run behind an opaque page is how you come
+ *             back to a dead ship and no idea what hit you.
+ */
+export function drawHelp(ctx, page, where = {}) {
+  const live = where.running === true;
+  ctx.globalAlpha = live ? 0.82 : 1;
   ctx.fillStyle = '#04060a';
   ctx.fillRect(0, 0, VIEW_W, SCREEN_H);
+  ctx.globalAlpha = 1;
   const cx = VIEW_W / 2;
   const pages = HELP;
   const p = pages[Math.max(0, Math.min(pages.length - 1, page))];
@@ -1556,8 +1573,18 @@ export function drawHelp(ctx, page) {
     ctx.fillStyle = i === page ? COL.coolHi : '#2b3440';
     ctx.fillRect(cx - pages.length * 5 + i * 10, SCREEN_H - 26, 6, 3);
   }
-  text(ctx, 'LEFT / RIGHT  PAGE        H / ESC  BACK',
-    cx, SCREEN_H - 16, COL.hudText, FONT, 'center');
+  text(ctx, helpFooter(where), cx, SCREEN_H - 16,
+    live ? COL.warmHi : COL.hudText, FONT, 'center');
+}
+
+// One line, three states. Exported because what it says is the whole
+// point of knowing the game is still running, and a test cannot read a
+// string off a canvas.
+export function helpFooter(where = {}) {
+  const keys = 'LEFT / RIGHT  PAGE   \u00b7   H / ESC  BACK';
+  if (where.running) return `${keys}   \u00b7   CO-OP: THE RUN IS STILL FLYING`;
+  if (where.paused) return `${keys}   \u00b7   THE RUN IS PAUSED`;
+  return keys;
 }
 
 export const HELP_PAGES = () => HELP.length;
@@ -1583,10 +1610,10 @@ export const HELP = [
       { k: 'P / ESC', v: 'Pause' },
       { k: 'Q', v: 'Quit the run — it is still recorded' },
       { k: 'R', v: 'Restart' },
-      { k: 'M', v: 'Mute' },
-      { k: 'T', v: 'Next tune' },
+      { k: 'M / T', v: 'Mute \u00b7 next tune' },
       { k: 'B', v: 'Cycle the board: top pilots, best runs, co-op' },
       { k: 'O', v: 'Settings' },
+      { k: 'H', v: 'These pages. In flight too — it pauses the run' },
     ],
   },
   {

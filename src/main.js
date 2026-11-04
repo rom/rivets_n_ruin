@@ -18,7 +18,7 @@ import {
   drawDemoBadge,
 } from './hud.js';
 import { rows as shopRows, buy as shopBuy, applyMods, resetShop } from './shop.js';
-import { coopState, hostGame, joinGame, leaveGame, hostStalled } from './coop.js';
+import { coopState, hostGame, joinGame, leaveGame, hostStalled, isCoop } from './coop.js';
 import { initCoop } from './coopgame.js';
 import { saveHangar, clearHangar, setHangarSync, mergeHangars, applyHangar } from './hangar.js';
 import { unlock, toggleMute, isMuted, ready } from './audio.js';
@@ -218,6 +218,10 @@ let controlsNote = '';
 let demoT = 0;
 let demoOn = false;
 let helpOpen = false;
+// Set when opening help is what paused the run, so closing it gives
+// back exactly the state it found — a player who had already pressed P
+// before opening the help is still paused when they leave it.
+let helpPausedRun = false;
 let helpPage = 0;
 let settingsSel = 0;
 // false, 'hangar' or 'all': which destructive key has been asked for
@@ -243,6 +247,39 @@ let lastFrameAt = performance.now();
 const game = makeGame(mod ? { seed: mod.seed, name: mod.name.toUpperCase() } : null);
 setTune(LEVELS[0].tune);
 let paused = false;
+
+// --- the help pages, opened from anywhere
+//
+// Help used to be refused in flight, which is exactly where a player is
+// most likely to want to be reminded of a key. It is allowed now, and
+// opening it stops the run: a pilot reading the controls is not flying,
+// and a page of text over a hull that is still scrolling is how you
+// come back to a dead ship.
+//
+// Except in co-op, where pausing is not this machine's to decide. The
+// host stopping freezes the guest's whole world -- the guest draws what
+// the host sends and nothing else -- and the guest cannot stop the host
+// at all. So there the help goes over a game that is still running, at
+// reduced opacity so the hull shows through, and says so on its footer.
+const inFlight = () => game.state === 'play' || game.state === 'dying';
+
+function openHelp() {
+  helpOpen = true;
+  helpPage = 0;
+  helpPausedRun = inFlight() && !isCoop() && !paused;
+  if (helpPausedRun) { paused = true; stopMusic(); }
+}
+
+function closeHelp() {
+  helpOpen = false;
+  if (helpPausedRun) { paused = false; startMusic(); }
+  helpPausedRun = false;
+}
+
+// What the help page is drawn over, for its footer and its opacity.
+function helpContext() {
+  return { paused: helpPausedRun, running: helpOpen && inFlight() && !helpPausedRun };
+}
 
 // Brings the hangar in line with whichever account is now in play.
 //
@@ -441,12 +478,36 @@ startLoop(
       const n = HELP_PAGES();
       if (tapped('left')) { helpPage = (helpPage - 1 + n) % n; sfxUi(); }
       if (tapped('right')) { helpPage = (helpPage + 1) % n; sfxUi(); }
-      if (tapped('help') || tapped('pause') || tapped('start')) { helpOpen = false; sfxUi(); }
+      if (tapped('help') || tapped('pause') || tapped('start')) { closeHelp(); sfxUi(); }
+      // The run under the page, when stopping it is not this machine's
+      // to decide — co-op, where the host halting freezes the guest's
+      // whole world and the guest cannot halt the host at all.
+      //
+      // The early return above is what actually stopped the game, not
+      // the paused flag: it skips update() entirely. So the co-op case
+      // has to call update() itself, and it does so with the input
+      // layer replaced by an empty set. The pilot is reading, not
+      // flying: the ship coasts on the inertia it had, the partner
+      // keeps playing, and a right-arrow turns a page without also
+      // kicking the ship sideways.
+      if (helpOpen && !helpPausedRun && inFlight()) {
+        setSynthetic(new Set());
+        update(game, dt);
+        setSynthetic(null);
+      }
       endFrame();
       return;
     }
-    if (tapped('help') && game.state !== 'play' && game.state !== 'dying') {
-      helpOpen = true; helpPage = 0; sfxUi(); endFrame(); return;
+    // Help in flight, which it was not before: the one place a player
+    // is most likely to want a key reminded is the place the game used
+    // to refuse to give it.
+    //
+    // Not over the co-op screen, which owns the keyboard while a code
+    // is on it and where H is already the key that hosts a game, and
+    // not over the quit prompt, which is a yes/no question and has to
+    // be answered before anything else is drawn on top of it.
+    if (tapped('help') && !coopOpen && !game.quitting) {
+      openHelp(); sfxUi(); endFrame(); return;
     }
     // --- the controls screen, reached from settings
     //
@@ -608,7 +669,7 @@ startLoop(
     if (hostStalled()) drawCoopStalled(hudCtx);
     if (coopOpen) drawCoop(hudCtx, coopState(), netState().online);
     else if (shopOpen) drawShop(hudCtx, game, shopSel, shopNote);
-    else if (helpOpen) drawHelp(hudCtx, helpPage);
+    else if (helpOpen) drawHelp(hudCtx, helpPage, helpContext());
     else if (controlsOpen) drawControls(hudCtx, controlsSel, awaitingKey, controlsNote);
     else if (settingsOpen) drawSettings(hudCtx, game, settingsSel, { wipeArmed, wipeNote });
     else if (game.quitting) drawQuitPrompt(hudCtx, game);

@@ -2,7 +2,7 @@ import './_setup.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  HELP, HELP_LAYOUT, HELP_PAGES, SETTINGS_LAYOUT, END_LAYOUT, endLayout,
+  HELP, HELP_LAYOUT, HELP_PAGES, helpFooter, SETTINGS_LAYOUT, END_LAYOUT, endLayout,
   rankLine, REASON_CHARS, settingsWindow, HUD_X, HUD_ARMORY, TITLE_HULL,
   scoreStanding, scoreTell, SCORE_TELL, BOARD_ROWS,
   drawHelp, drawSettings, drawHud,
@@ -838,4 +838,38 @@ test('an ordinary score is drawn the ordinary way', () => {
   const { colour, alpha } = scoreTell(null, 1.2, false);
   assert.equal(alpha, 1);
   assert.notEqual(colour, SCORE_TELL.first.colour);
+});
+
+// --- help in flight
+//
+// Help can be opened during a run now, which it could not before. The
+// footer is the only place the player is told what the game is doing
+// behind the page, and a page that covers a live run without saying so
+// is how you come back to a dead ship with no idea what hit you.
+
+test('the help footer says what the game is doing behind it', () => {
+  const idle = helpFooter({});
+  const held = helpFooter({ paused: true });
+  const live = helpFooter({ running: true });
+
+  // The keys are on every one of them: the footer is also how you get out.
+  for (const line of [idle, held, live]) {
+    assert.match(line, /H \/ ESC/, `"${line}" does not say how to leave`);
+    assert.ok(line.length * 6 < VIEW_W, `"${line}" is wider than the screen`);
+  }
+  assert.notEqual(held, idle, 'a paused run reads the same as a menu');
+  assert.notEqual(live, held, 'a running run reads the same as a paused one');
+  assert.match(held, /PAUSED/);
+  assert.match(live, /FLYING/);
+  assert.match(live, /CO-OP/, 'the only time a run keeps going is co-op; say which');
+});
+
+test('the help page draws over a live run and a paused one', () => {
+  const c = ctx();
+  for (const where of [{}, { paused: true }, { running: true }]) {
+    for (let i = 0; i < HELP_PAGES(); i++) drawHelp(c, i, where);
+  }
+  // A plate left translucent would tint everything drawn after it for
+  // the rest of the frame.
+  assert.equal(c.globalAlpha, 1, 'drawHelp left the context transparent');
 });

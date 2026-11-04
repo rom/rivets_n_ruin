@@ -63,8 +63,8 @@ backend down**; you lose the leaderboard, not the game.
 | `T` / `]` | Next tune |
 | `G` | Co-op: host a game or join one, from the title |
 | `O` | Settings |
-| `H` / `/` | Help pages |
-| `B` | Switch leaderboard: top pilots / high scores |
+| `H` / `/` | Help pages — in flight too, which pauses the run |
+| `B` | Cycle the leaderboard: top pilots / high scores / co-op |
 | `V` / `Right Shift` | Hyperspace jump: a short hop, ten second cooldown |
 | `X` / `Shift` | Fire selected ordnance |
 | `C` / `1`–`3` | Cycle / select ordnance |
@@ -559,6 +559,22 @@ a second on TANTALUM to 97 on FERRUM, and pacing against a single number
 flattens that by design — the best fit across all twenty-five hulls still
 left the deep ones 40% quieter than they had been. Per hull, every one
 lands within 0.4%, and a test holds it there.
+
+### Help, mid-run
+
+`H` opens the help pages from anywhere, in flight included — which is
+where a player is most likely to want to be reminded of a key, and is
+exactly where the game used to refuse. Opening it stops the run: a pilot
+reading the controls is not flying one, and a page of text over a hull
+that is still scrolling is how you come back to a dead ship. A run that
+was already paused is still paused when the page closes.
+
+In co-op it does not stop: the host halting would freeze the guest's
+whole world, and the guest cannot halt the host at all. There the page
+goes over a game that is still going, at reduced opacity so the hull
+shows through, with this player's hands taken off the controls so the
+ship coasts and a page turn does not also kick it sideways. The footer
+says which of the two is happening.
 
 ## Co-op
 
