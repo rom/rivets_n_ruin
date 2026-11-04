@@ -21,6 +21,7 @@
 
 import { SHIP, VIEW_W, FIELD_TOP, FIELD_BOT, DT } from './config.js';
 import { updatePlayer, makePlayer } from './player.js';
+import { decayShake } from './camera.js';
 import { foes } from './foes.js';
 import { interceptors } from './enemies.js';
 import { playerShots, enemyShots } from './projectiles.js';
@@ -141,6 +142,11 @@ export function hostFrame(game, dt) {
 
   game.cam.x = coopCameraTarget(game.player, mate, game.level.length);
   leashShips(game.player, mate, game.cam.x);
+  // The shake is the only thing that moves the view vertically, and
+  // updateCamera — which normally winds it down — is not called on
+  // this path. Without this a single hit leaves the picture juddering
+  // for the rest of the run.
+  decayShake(game.cam, dt);
 
   sinceSnapshot += dt;
   if (sinceSnapshot >= SNAPSHOT_EVERY) {
@@ -172,7 +178,8 @@ export function guestPreFrame(game) {
  * Into the same pools the single-player renderer reads, which is why
  * none of the drawing code knows about any of this.
  */
-export function guestApply(game) {
+export function guestApply(game, dt) {
+  decayShake(game.cam, dt);
   const snap = coopSnapshot();
   if (!snap) return;
 
@@ -306,7 +313,7 @@ export function guestSendInput() {
 export function coopFrame(game, dt) {
   if (!isCoop()) return false;
   if (isHost()) { hostFrame(game, dt); return true; }
-  if (isGuest()) { guestSendInput(); guestApply(game); return true; }
+  if (isGuest()) { guestSendInput(); guestApply(game, dt); return true; }
   return false;
 }
 

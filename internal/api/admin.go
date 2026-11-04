@@ -449,6 +449,43 @@ func (s *Server) adminDeleteRun(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// adminListCoop is the operator's view of the co-op board.
+//
+// Its own route rather than a flag on /runs: a co-op run has two
+// pilots and no owner, so every column the runs table shows for one
+// pilot would be ambiguous here. The search matches either name.
+func (s *Server) adminListCoop(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	limit := intParam(r, "limit", 50)
+	offset := intParam(r, "offset", 0)
+	runs, total := s.store.ListCoopScores(q, limit, offset)
+	s.audit(r, "list co-op runs", "q", q, "returned", len(runs), "total", total)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"runs": runs, "total": total, "offset": offset, "limit": limit,
+	})
+}
+
+// adminDeleteCoop removes one co-op run.
+//
+// Nothing to recount afterwards: a co-op run never contributed to
+// either pilot's card, so there is no cached counter that could be
+// left disagreeing with the table.
+func (s *Server) adminDeleteCoop(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	sc, err := s.store.CoopScoreByID(id)
+	if err != nil {
+		writeErr(w, statusFor(err), err.Error())
+		return
+	}
+	s.audit(r, "delete co-op run", "id", id,
+		"host", sc.HostName, "guest", sc.GuestName, "points", sc.Points)
+	if err := s.store.DeleteCoopScore(id); err != nil {
+		writeErr(w, statusFor(err), err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": id})
+}
+
 // adminResetScores wipes the board.
 //
 // Guarded by a confirmation in the body rather than by the method,

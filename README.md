@@ -63,8 +63,8 @@ backend down**; you lose the leaderboard, not the game.
 | `T` / `]` | Next tune |
 | `G` | Co-op: host a game or join one, from the title |
 | `O` | Settings |
-| `H` / `/` | Help pages |
-| `B` | Switch leaderboard: top pilots / high scores |
+| `H` / `/` | Help pages — in flight too, which pauses the run |
+| `B` | Cycle the leaderboard: top pilots / high scores / co-op |
 | `V` / `Right Shift` | Hyperspace jump: a short hop, ten second cooldown |
 | `X` / `Shift` | Fire selected ordnance |
 | `C` / `1`–`3` | Cycle / select ordnance |
@@ -560,6 +560,27 @@ flattens that by design — the best fit across all twenty-five hulls still
 left the deep ones 40% quieter than they had been. Per hull, every one
 lands within 0.4%, and a test holds it there.
 
+### Help, mid-run
+
+`H` opens the help pages from anywhere, in flight included — which is
+where a player is most likely to want to be reminded of a key, and is
+exactly where the game used to refuse. Opening it stops the run: a pilot
+reading the controls is not flying one, and a page of text over a hull
+that is still scrolling is how you come back to a dead ship. A run that
+was already paused is still paused when the page closes.
+
+In co-op it does not stop: the host halting would freeze the guest's
+whole world, and the guest cannot halt the host at all. There the page
+goes over a game that is still going, at reduced opacity so the hull
+shows through, with this player's hands taken off the controls so the
+ship coasts and a page turn does not also kick it sideways. The footer
+says which of the two is happening.
+
+![The help pages over a co-op run](docs/help-coop.png)
+
+*The hull, the other ship and the boss gate are all still moving behind
+that page. In single player the same key says `THE RUN IS PAUSED`.*
+
 ## Co-op
 
 Two pilots, one hull, one screen — on two machines. `G` from the title
@@ -600,9 +621,36 @@ dragged. Without that clamp the faster pilot takes the screen and the
 slower one is scrolled into a wall, which is the oldest complaint about
 shared-screen co-op there is.
 
-**A co-op run is not submitted to the leaderboard.** Two pilots and one
-score is not a thing the board can represent, and the run validator's
-physics bounds assume one ship. The run is for playing, not for posting.
+**A co-op run goes on its own board.** Two pilots and one score is not
+a thing the solo board can represent — ranked against a soloist, a pair
+wins for having twice the guns; folded onto one pilot's card, the other
+pilot vanishes from a run they flew half of. So co-op runs are recorded
+in full, in their own table, and ranked on their own top ten. `B`
+cycles the three boards: top pilots, best runs, co-op. Neither pilot's
+solo card moves.
+
+**The host posts it, and cannot name its partner.** The host is the side
+that simulated the run, so its figures are the ones the game produced;
+the guest's score arrived by snapshot, so a second submission could only
+be a duplicate row or a disagreement for the server to arbitrate. The
+guest's end screen says so rather than sitting on `SENDING RUN...`.
+
+The partner is not in the request at all. Joining a co-op game is now an
+authenticated `POST` — a browser cannot put a bearer token on a
+WebSocket, and a token in a query string lands in access logs — so the
+server already knows who the second pilot is, and takes it from the
+room. A host can post the run it played and nothing else.
+
+**And the server counts how long the two were actually connected.** A
+guest who drops out on the first hull did not fly the run the board
+would say they did, so a co-op run needs half its flight time flown
+together to be posted, with a floor under it so that a pair who died
+early are not refused over a second of socket setup. The number is
+stored on the row, and the operator tool shows it as a percentage.
+
+None of this makes a score provable — see the note at the top of
+`internal/api/runs.go`, which applies here unchanged. It makes the easy
+routes cost something.
 
 Transport is a WebSocket, written to RFC 6455 in `internal/ws` because
 the backend is standard library on purpose — see the note there for
@@ -2020,12 +2068,15 @@ reports each pilot's progress along the hull.
 | `POST` | `/api/runs/start` | yes | open a run; returns the id and the secret that signs its submission |
 | `GET` | `/api/scores/top` | — | top pilots — `?mod=`, `?window=day\|week\|all`, `?limit=` |
 | `GET` | `/api/scores/runs` | — | best individual runs, not folded to one per pilot |
+| `GET` | `/api/coop/scores/top` | — | the co-op top ten — `?window=`, `?limit=` |
+| `POST` | `/api/coop/scores` | yes | post a co-op run; the host only, and the partner comes from the room |
 | `GET` | `/api/mods` | — | list mods — `?sort=plays\|name\|new` |
 | `POST` | `/api/mods` | yes | publish a mod |
 | `GET` | `/api/mods/{id}` | — | one mod, with its config |
 | `GET` | `/api/mods/{id}/top` | — | that mod's leaderboard |
 | `POST` | `/api/coop/open` | yes | open a co-op game; returns the code to share |
 | `GET` | `/api/coop/{code}` | — | what you would be joining: hull, seed, host, whether it is full |
+| `POST` | `/api/coop/{code}/join` | yes | claim the guest slot, so the board can name you |
 | `GET` | `/api/coop/{code}/host` | — | the host's socket (WebSocket upgrade) |
 | `GET` | `/api/coop/{code}/guest` | — | the guest's socket (WebSocket upgrade) |
 | `POST` | `/api/presence` | yes | heartbeat while flying |
@@ -2086,6 +2137,8 @@ Four tabs:
 | `GET` | `/api/admin/runs` | recorded runs — `?q=`, `?limit=`, `?offset=` |
 | `GET` | `/api/admin/runs/{id}` | one run, its pilot, and how it compares to their others |
 | `DELETE` | `/api/admin/runs/{id}` | remove one run; the pilot's best is recomputed |
+| `GET` | `/api/admin/coop` | recorded co-op runs — `?q=` matches either pilot |
+| `DELETE` | `/api/admin/coop/{id}` | remove one co-op run |
 | `POST` | `/api/admin/scores/reset` | wipe every recorded run — needs `{"confirm":"RESET"}` |
 
 **Loopback only**, unless you pass `-admin-anywhere`. Most of what these

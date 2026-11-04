@@ -29,7 +29,8 @@ const S = {
   submitState: 'idle',   // idle | sending | recorded | refused
   submitError: null,     // why the backend refused it, in its own words
   runs: [],       // best individual runs
-  board: 'pilots',// which of the two the UI is showing
+  coop: [],       // best co-op runs: two pilots a row
+  board: 'pilots',// which of the three the UI is showing
   best: 0,
   run: null,      // { id, key } for the run in progress; see internal/api/runs.go
   flying: [],
@@ -241,11 +242,28 @@ export async function refreshRuns(modId = '', window = 'all', limit = 10) {
   return S.runs;
 }
 
+// The three boards, in the order the key cycles them.
+export const BOARDS = ['pilots', 'runs', 'coop'];
+
 export function setBoard(which) {
-  S.board = which === 'runs' ? 'runs' : 'pilots';
+  S.board = BOARDS.includes(which) ? which : 'pilots';
   return S.board;
 }
-export const toggleBoard = () => setBoard(S.board === 'pilots' ? 'runs' : 'pilots');
+export const toggleBoard = () => setBoard(
+  BOARDS[(BOARDS.indexOf(S.board) + 1) % BOARDS.length]);
+
+// The co-op top ten: one row per run, two names on it.
+//
+// No mod parameter. A mod is a variant of the single-player
+// configuration and a co-op room carries a seed and a hull, not a mod,
+// so a per-mod co-op board would be a filter on a field that is always
+// empty.
+export async function refreshCoopTop(limit = 10) {
+  const data = await call(`/api/coop/scores/top?limit=${limit}`);
+  if (data) S.coop = data.top || [];
+  return S.coop;
+}
+export const coopTop = () => S.coop;
 
 export async function refreshTop(modId = '', window = 'all', limit = 8) {
   const q = new URLSearchParams({ window, limit: String(limit) });
@@ -355,6 +373,52 @@ export async function submitRun({
     refreshStats();      // so "N of M" reports the real player count
   }
   return data;
+}
+
+/**
+ * Post a co-op run. The host calls this; the guest calls nothing.
+ *
+ * It has to be the host: that is the side that simulated the run, so
+ * its figures are the ones the game produced, and two submissions for
+ * one run would mean two board rows or a rule deciding which of two
+ * disagreeing clients to believe.
+ *
+ * The partner is deliberately not in the body. The server takes the
+ * second pilot from the room, where it was recorded when they joined
+ * with their own account, so a host cannot name anybody it did not
+ * actually play with. See internal/api/coopscores.go.
+ */
+export async function submitCoopRun({
+  code, points, timeSec, turrets, deaths, completed, levels = 1, hullsFlown = 0,
+}) {
+  if (!S.player) return null;
+  const body = { code, points, timeSec, turrets, deaths, completed, levels, hullsFlown };
+  if (S.run) {
+    body.runId = S.run.id;
+    try { body.sig = await signRun(S.run, points, timeSec, levels); } catch { /* unsigned */ }
+  }
+  S.submitState = 'sending';
+  const data = await call('/api/coop/scores', { method: 'POST', auth: true, body });
+  S.run = null;
+  S.submitState = data ? 'recorded' : 'refused';
+  S.submitError = data ? null : S.lastError;
+  if (data) {
+    S.rank = data.rank || null;
+    refreshCoopTop();    // deliberately not awaited
+    refreshStats();
+  }
+  return data;
+}
+
+// What the guest's end screen says instead of a submission.
+//
+// Marked rather than left idle: a screen that sits on SENDING RUN...
+// for ever looks exactly like a backend that is down, and the guest is
+// not sending anything by design.
+export function coopPostedByHost() {
+  S.submitState = 'posted-by-host';
+  S.submitError = null;
+  S.rank = null;
 }
 
 // Fire-and-forget, self-throttling. Called from the game loop, so it must

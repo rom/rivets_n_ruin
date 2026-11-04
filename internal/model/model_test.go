@@ -44,3 +44,26 @@ func TestParseWindowIsLenient(t *testing.T) {
 		}
 	}
 }
+
+// Flew is what makes a co-op run findable from either pilot's side, and
+// what makes deleting a pilot take it with them. An empty id matching
+// anything would quietly delete every co-op run on the board the first
+// time a caller passed one in.
+func TestFlewNamesEitherPilotAndNobodyElse(t *testing.T) {
+	c := &CoopScore{HostID: "h", GuestID: "g"}
+	for _, id := range []string{"h", "g"} {
+		if !c.Flew(id) {
+			t.Fatalf("%q flew this run and Flew says otherwise", id)
+		}
+	}
+	for _, id := range []string{"", "x", "H", "hg"} {
+		if c.Flew(id) {
+			t.Fatalf("%q did not fly this run and Flew says they did", id)
+		}
+	}
+	// Both sides empty is the shape a half-built row has; an empty id
+	// must still not match it.
+	if (&CoopScore{}).Flew("") {
+		t.Fatal("an empty id matched an empty row")
+	}
+}

@@ -38,8 +38,12 @@ import {
   sfxSnared, sfxHooked,
 } from './sfx.js';
 import { setIntensity, setTune } from './music.js';
-import { coopFrame, guestPreFrame, isGuest, isCoop, clearMate } from './coopgame.js';
-import { submitRun, heartbeat, serverBest, startRun } from './net.js';
+import {
+  coopFrame, guestPreFrame, isGuest, isHost, isCoop, coopState, clearMate,
+} from './coopgame.js';
+import {
+  submitRun, submitCoopRun, coopPostedByHost, heartbeat, serverBest, startRun,
+} from './net.js';
 import { activeModId } from './mods.js';
 
 export { diff } from './score.js';
@@ -380,6 +384,34 @@ function reportRun(game) {
   saveHangar(game);
   if (game.submitted) return;
   game.submitted = true;
+  // A co-op run goes to the co-op board, and only the host posts it.
+  //
+  // Posted from here, at the moment the run ends, rather than from the
+  // end screen on a key: the room has to still be open for the server
+  // to know who the second pilot was, and the room closes when either
+  // of them leaves the co-op screen.
+  //
+  // The guest sends nothing at all. It would be sending the host's own
+  // figures back — its score came off a snapshot — so a second
+  // submission could only ever be a duplicate row or a disagreement to
+  // arbitrate.
+  if (isCoop()) {
+    if (isHost()) {
+      submitCoopRun({
+        code: coopState().code,
+        points: game.score,
+        timeSec: Number(game.runTime.toFixed(2)),
+        levels: game.levelIndex + 1,
+        hullsFlown: hullsFlown(game),
+        turrets: game.turretsKilled,
+        deaths: game.deaths,
+        completed: game.state === 'victory',
+      });
+    } else {
+      coopPostedByHost();
+    }
+    return;
+  }
   submitRun({
     modId: activeModId(),
     points: game.score,

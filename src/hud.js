@@ -355,14 +355,27 @@ const BOARD_COLW = 176;
 const BOARD_GAP = 8;
 export const BOARD_W = BOARD_COLW * 2 + BOARD_GAP;
 
+// The three boards and what each one answers. Kept as data so the
+// header, the subtitle and the empty-list line cannot drift apart from
+// the rows below them, which is what happened the first time this was
+// three ifs.
+export const BOARD_TITLES = {
+  pilots: ['TOP PILOTS', 'EACH PILOT\u2019S BEST RUN'],
+  runs: ['HIGH SCORES', 'BEST RUNS, HIGHEST FIRST'],
+  coop: ['CO-OP TOP TEN', 'TWO PILOTS, ONE SCORE'],
+};
+
 function drawBoard(ctx, x, y, rows = 10) {
   const net = netState();
+  const coop = net.board === 'coop';
   const runs = net.board === 'runs';
-  // Two different questions: who is best, and what are the best runs. The
-  // second lets one pilot hold several places, which the first hides.
-  text(ctx, (runs ? 'HIGH SCORES' : 'TOP PILOTS') + '   [B]', x, y, COL.hudText, FONT);
-  text(ctx, runs ? 'BEST RUNS, HIGHEST FIRST' : 'EACH PILOT\u2019S BEST RUN',
-    x + BOARD_W, y, COL.hudLine, FONT, 'right');
+  // Three different questions: who is best, what are the best runs, and
+  // what is the best anyone has done with a second pair of hands. The
+  // middle one lets a pilot hold several places, which the first hides;
+  // the last has two names on every row and so cannot share either.
+  const [head, sub] = BOARD_TITLES[net.board] || BOARD_TITLES.pilots;
+  text(ctx, head + '   [B]', x, y, COL.hudText, FONT);
+  text(ctx, sub, x + BOARD_W, y, COL.hudLine, FONT, 'right');
 
   if (!net.online) {
     text(ctx, 'BACKEND UNREACHABLE — PLAYING OFFLINE', x, y + 16, COL.hudLine, FONT);
@@ -378,9 +391,10 @@ function drawBoard(ctx, x, y, rows = 10) {
     return;
   }
   const me = net.player ? net.player.id : null;
-  const list = runs ? net.runs : net.top;
+  const list = coop ? net.coop : runs ? net.runs : net.top;
   if (!list.length) {
-    text(ctx, 'NO RUNS YET — BE FIRST', x, y + 16, COL.hudLine, FONT);
+    text(ctx, coop ? 'NO CO-OP RUNS YET — FIND A WINGMAN'
+      : 'NO RUNS YET — BE FIRST', x, y + 16, COL.hudLine, FONT);
     return;
   }
 
@@ -388,11 +402,23 @@ function drawBoard(ctx, x, y, rows = 10) {
   const perCol = Math.ceil(Math.min(rows, Math.max(shown.length, 1)) / 2);
   shown.forEach((row, i) => {
     const s = row.score;
-    const mine = s.playerId === me;
+    const mine = coop ? s.hostId === me || s.guestId === me : s.playerId === me;
     const col = mine ? COL.warmHi : i === 0 ? COL.coolHi : COL.hudText;
     const cx0 = x + (i < perCol ? 0 : BOARD_COLW + BOARD_GAP);
     const ry = y + 16 + (i % perCol) * 12;
     text(ctx, String(row.position).padStart(2, ' '), cx0, ry, col, FONT);
+    if (coop) {
+      // Two names and a score, and no age column: a column 176px wide
+      // holds one of those three or the other two, and the age is the
+      // one a reader can do without. Eight characters a name, because
+      // a truncated pair still says who they were and a pair squeezed
+      // out of the column says nothing at all.
+      text(ctx, `${s.hostName.slice(0, 8)}+${s.guestName.slice(0, 8)}`,
+        cx0 + 16, ry, col, FONT);
+      text(ctx, String(s.points).padStart(8, '0'),
+        cx0 + BOARD_COLW, ry, s.completed ? COL.cool : col, FONT, 'right');
+      return;
+    }
     text(ctx, s.name.slice(0, 9), cx0 + 16, ry, col, FONT);
     text(ctx, String(s.points).padStart(8, '0'), cx0 + 72, ry, col, FONT);
     text(ctx, ago(s.created), cx0 + BOARD_COLW, ry, s.completed ? COL.cool : COL.hudLine, FONT, 'right');
@@ -959,10 +985,31 @@ export function rankLine(net) {
     return { head: 'RUN NOT RECORDED — BACKEND UNREACHABLE', colour: COL.danger, settled: true };
   }
   if (net.rank && net.rank.position) {
+    // A co-op rank is a place among co-op runs, not among pilots. The
+    // row the server sent back names two pilots, which is how this
+    // tells them apart without the end screen having to know whether a
+    // co-op game is still open.
+    const pair = !!(net.rank.score && net.rank.score.hostId);
     // Total comes from /api/stats, not the visible rows — the board is capped
     // at six, so counting rows would report "3 OF 6" out of fifty players.
-    const total = net.stats ? Math.max(net.stats.players, net.rank.position) : net.rank.position;
-    return { head: `YOU PLACE ${net.rank.position} OF ${total}`, colour: COL.warmHi, settled: true };
+    const pool = net.stats ? (pair ? net.stats.coopRuns : net.stats.players) : 0;
+    const total = Math.max(pool || 0, net.rank.position);
+    return {
+      head: `${pair ? 'YOU BOTH PLACE' : 'YOU PLACE'} ${net.rank.position} OF ${total}`,
+      colour: COL.warmHi,
+      settled: true,
+    };
+  }
+  // The guest of a co-op run posts nothing: the host simulated the run,
+  // so the host's figures are the ones the game produced. Said rather
+  // than left on 'SENDING RUN...', which is indistinguishable from a
+  // backend that has gone away.
+  if (net.submitState === 'posted-by-host') {
+    return {
+      head: 'CO-OP RUN — THE OTHER PILOT IS POSTING IT',
+      colour: COL.cool,
+      settled: true,
+    };
   }
   if (net.submitState === 'refused') {
     // Say so. A refused run looked exactly like a slow network, which is
@@ -1479,9 +1526,26 @@ export const HELP_LAYOUT = {
   top: 58, pitch: 12, headGap: 4, headPitch: 16,
   keyX: 40, valX: 168, bottom: SCREEN_H - 30,
 };
-export function drawHelp(ctx, page) {
+/**
+ * The help pages.
+ *
+ * `where` says what the game is doing behind them, because help can now
+ * be opened in flight:
+ *
+ *   paused  — the run is stopped while this is up. The usual case: a
+ *             pilot reading the controls is not flying one.
+ *   running — it is not, which happens in co-op, where pausing is not
+ *             one machine's to decide. The plate goes translucent so
+ *             the hull still shows through, and the footer says so.
+ *             Hiding a live run behind an opaque page is how you come
+ *             back to a dead ship and no idea what hit you.
+ */
+export function drawHelp(ctx, page, where = {}) {
+  const live = where.running === true;
+  ctx.globalAlpha = live ? 0.82 : 1;
   ctx.fillStyle = '#04060a';
   ctx.fillRect(0, 0, VIEW_W, SCREEN_H);
+  ctx.globalAlpha = 1;
   const cx = VIEW_W / 2;
   const pages = HELP;
   const p = pages[Math.max(0, Math.min(pages.length - 1, page))];
@@ -1509,8 +1573,18 @@ export function drawHelp(ctx, page) {
     ctx.fillStyle = i === page ? COL.coolHi : '#2b3440';
     ctx.fillRect(cx - pages.length * 5 + i * 10, SCREEN_H - 26, 6, 3);
   }
-  text(ctx, 'LEFT / RIGHT  PAGE        H / ESC  BACK',
-    cx, SCREEN_H - 16, COL.hudText, FONT, 'center');
+  text(ctx, helpFooter(where), cx, SCREEN_H - 16,
+    live ? COL.warmHi : COL.hudText, FONT, 'center');
+}
+
+// One line, three states. Exported because what it says is the whole
+// point of knowing the game is still running, and a test cannot read a
+// string off a canvas.
+export function helpFooter(where = {}) {
+  const keys = 'LEFT / RIGHT  PAGE   \u00b7   H / ESC  BACK';
+  if (where.running) return `${keys}   \u00b7   CO-OP: THE RUN IS STILL FLYING`;
+  if (where.paused) return `${keys}   \u00b7   THE RUN IS PAUSED`;
+  return keys;
 }
 
 export const HELP_PAGES = () => HELP.length;
@@ -1536,10 +1610,10 @@ export const HELP = [
       { k: 'P / ESC', v: 'Pause' },
       { k: 'Q', v: 'Quit the run — it is still recorded' },
       { k: 'R', v: 'Restart' },
-      { k: 'M', v: 'Mute' },
-      { k: 'T', v: 'Next tune' },
-      { k: 'B', v: 'Switch the board between pilots and runs' },
+      { k: 'M / T', v: 'Mute \u00b7 next tune' },
+      { k: 'B', v: 'Cycle the board: top pilots, best runs, co-op' },
       { k: 'O', v: 'Settings' },
+      { k: 'H', v: 'These pages. In flight too — it pauses the run' },
     ],
   },
   {
