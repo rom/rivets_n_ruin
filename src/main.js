@@ -9,14 +9,17 @@ import { padAt, drawPads } from './touch.js';
 import { demoActions, IDLE_BEFORE_DEMO } from './demo.js';
 import { startLoop } from './loop.js';
 import { installErrorReporting, report } from './errors.js';
-import { makeGame, update, syncBest, wipeProgress } from './game.js';
+import { makeGame, update, syncBest, wipeProgress, launchRun, banner, freshRunSeed } from './game.js';
 import { drawWorld } from './render.js';
 import {
   drawHud, drawPaused, drawQuitPrompt, drawSettings, drawShop, drawHelp, drawControls,
+  drawCoop, drawCoopStalled,
   HELP_PAGES,
   drawDemoBadge,
 } from './hud.js';
 import { rows as shopRows, buy as shopBuy, applyMods, resetShop } from './shop.js';
+import { coopState, hostGame, joinGame, leaveGame, hostStalled } from './coop.js';
+import { initCoop } from './coopgame.js';
 import { saveHangar, clearHangar, setHangarSync, mergeHangars, applyHangar } from './hangar.js';
 import { unlock, toggleMute, isMuted, ready } from './audio.js';
 import { startMusic, stopMusic, pauseMusic, resumeMusic, musicRunning } from './music.js';
@@ -222,6 +225,10 @@ let settingsSel = 0;
 let wipeArmed = false;
 let wipeNote = '';
 let shopOpen = false;
+// The co-op screen. Owns the keyboard while it is up, like the shop
+// and the settings screen, so H and J mean host and join here rather
+// than help and fire.
+let coopOpen = false;
 let shopSel = 0;
 let shopNote = '';
 window.addEventListener('keydown', wakeAudio, { once: false });
@@ -389,6 +396,44 @@ startLoop(
     if (tapped('shop') && game.state === 'levelclear') {
       shopOpen = true; shopSel = 0; shopNote = ''; sfxUi(); endFrame(); return;
     }
+    // --- co-op
+    //
+    // G from the title. Ahead of the help, shop and settings handlers
+    // on purpose: each of those takes the keyboard and returns, so a
+    // co-op screen placed after them never saw H — pressing it opened
+    // the help over the top of the room code. A screen that owns the
+    // keyboard has to be asked first, not last.
+    if (tapped('coop') && game.state === 'title' && !shopOpen && !settingsOpen
+        && !helpOpen && !coopOpen) {
+      sfxUi();
+      coopOpen = true;
+    } else if (coopOpen) {
+      const cs = coopState();
+      if (tapped('pause') || tapped('quit')) {
+        sfxUi();
+        if (cs.phase !== 'off') leaveGame();
+        coopOpen = false;
+      } else if (cs.phase === 'off' || cs.phase === 'ended') {
+        if (tapped('help')) {           // H
+          sfxUi();
+          const p = netState().player;
+          hostGame(freshRunSeed(), game.startHull, p ? p.token : null);
+        } else if (tapped('fire')) {    // J
+          sfxUi();
+          const code = window.prompt('Code from the other pilot:');
+          if (code) joinGame(code.trim());
+        }
+      } else if (cs.phase === 'playing' && tapped('start')) {
+        sfxUi();
+        coopOpen = false;
+        launchRun(game, { runSeed: cs.seed, hull: cs.hull });
+        banner(game, 'CO-OP', cs.side === 'host'
+          ? 'YOU ARE THE FIRST SHIP' : 'YOU ARE THE SECOND SHIP', 2.6);
+      }
+      endFrame();
+      return;
+    }
+
     if (helpOpen) {
       const n = HELP_PAGES();
       if (tapped('left')) { helpPage = (helpPage - 1 + n) % n; sfxUi(); }
@@ -493,6 +538,7 @@ startLoop(
       sfxUi();
       promptRename();
     }
+
     if (tapped('pause')) {
       paused = !paused;
       if (paused) stopMusic(); else startMusic();
@@ -556,7 +602,9 @@ startLoop(
       drawPads(hudCtx, padState(),
         game.player.jumpCd > 0 ? new Set(['jump']) : null);
     }
-    if (shopOpen) drawShop(hudCtx, game, shopSel, shopNote);
+    if (hostStalled()) drawCoopStalled(hudCtx);
+    if (coopOpen) drawCoop(hudCtx, coopState(), netState().online);
+    else if (shopOpen) drawShop(hudCtx, game, shopSel, shopNote);
     else if (helpOpen) drawHelp(hudCtx, helpPage);
     else if (controlsOpen) drawControls(hudCtx, controlsSel, awaitingKey, controlsNote);
     else if (settingsOpen) drawSettings(hudCtx, game, settingsSel, { wipeArmed, wipeNote });

@@ -38,10 +38,26 @@ import {
   sfxSnared, sfxHooked,
 } from './sfx.js';
 import { setIntensity, setTune } from './music.js';
+import { coopFrame, guestPreFrame, isGuest, isCoop, clearMate } from './coopgame.js';
 import { submitRun, heartbeat, serverBest, startRun } from './net.js';
 import { activeModId } from './mods.js';
 
 export { diff } from './score.js';
+
+// Starting a run from outside the title screen's own handler: co-op
+// launches both machines into the same hull with the same seed, and
+// that is the one caller that needs this.
+//
+// Not `startRun`: net.js already exports one of those, for opening a
+// run with the backend, and two things called the same thing in one
+// import list is a mistake waiting for someone in a hurry.
+export function launchRun(game, { runSeed = null, hull = null } = {}) {
+  game.forceRunSeed = runSeed;
+  if (hull !== null) game.startHull = hull;
+  reset(game);
+  game.state = 'launching';
+  game.stateT = 0;
+}
 
 // The seed a run folds into every hull it builds. Zero when the pilot wants
 // fixed layouts, which is what makes buildLevel ignore it entirely.
@@ -50,7 +66,7 @@ export { diff } from './score.js';
 // millisecond, would fly the same "random" campaign. crypto.getRandomValues
 // is in every browser the game already requires, and the fallback is only
 // for a test environment that has no crypto at all.
-function freshRunSeed() {
+export function freshRunSeed() {
   if (!Number(setting('shuffle'))) return 0;
   try {
     const buf = new Uint32Array(1);
@@ -183,7 +199,10 @@ function reset(game) {
   // the index moved — otherwise a run started from the title after another
   // run on the same hull would fly the previous run's layout with the new
   // run's seed, which is neither setting's behaviour.
-  game.runSeed = freshRunSeed();
+  // A co-op run takes its seed from the room, so both machines
+  // generate the identical hull and neither has to send any of it.
+  // Null everywhere else, where a fresh seed is the point.
+  game.runSeed = game.forceRunSeed == null ? freshRunSeed() : game.forceRunSeed;
   game.levelIndex = at;
   game.hullMod = modifierFor(at, game.specs[at], game.runSeed);
   game.level = buildLevel(specWithModifier(game.specs[at], game.hullMod), game.runSeed);
@@ -337,7 +356,7 @@ function loadNextHull(game) {
   game.cam.x = clamp(p.x - VIEW_W / 2 + SHIP.w, 0, game.level.length - VIEW_W);
 }
 
-function banner(game, text, sub = '', life = 2.4) {
+export function banner(game, text, sub = '', life = 2.4) {
   game.banner = { text, sub, t: life, max: life };
 }
 
@@ -535,6 +554,12 @@ export function update(game, dt) {
   game.runTime += dt;
   const p = game.player;
 
+  // A guest runs the loop — that is what flies its ship and makes its
+  // particles — but must not invent attackers and loot of its own:
+  // those get replaced by the host's a moment later, and the only
+  // trace would be sounds for things that never happened.
+  if (isGuest()) guestPreFrame(game);
+
   // The jaws move first. A jaw closing onto the ship has to be resolved by
   // the player's own push-out in the same frame, or the ship spends a frame
   // inside solid steel and comes out the wrong side of it.
@@ -558,8 +583,14 @@ export function update(game, dt) {
   advance(enemyShots, dt, game.player);
   updateParticles(dt);
   collide(game);
-  updateCamera(game.cam, p, game.level.length, dt,
-    game.boss && !bossBeaten(game.boss) ? arenaLeft(game) : null);
+  // Co-op places the camera itself: with two ships it is the midpoint
+  // of the pair rather than the lead of one, and the host is the only
+  // machine entitled to an opinion about where either of them is. See
+  // coopgame.js.
+  if (!coopFrame(game, dt)) {
+    updateCamera(game.cam, p, game.level.length, dt,
+      game.boss && !bossBeaten(game.boss) ? arenaLeft(game) : null);
+  }
 
   // --- the arena at the far end
   // `bossDown` and not just `!game.boss`: killing the boss sets

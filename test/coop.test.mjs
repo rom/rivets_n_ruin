@@ -1,8 +1,9 @@
 import './_setup.mjs';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makePool } from '../src/pool.js';
-import { VIEW_W } from '../src/config.js';
+
 import {
   encodeInput, decodeInput, encodeSnapshot, decodeSnapshot,
   setKinds, kindAt, INPUT_BITS, STATES, PICKUP_KINDS,
@@ -48,7 +49,8 @@ function pool(items) {
 }
 
 const emptyPools = () => ({
-  foes: pool([]), playerShots: pool([]), enemyShots: pool([]), pickups: pool([]),
+  foes: pool([]), playerShots: pool([]), enemyShots: pool([]),
+  pickups: pool([]), interceptors: pool([]),
 });
 
 // --- input
@@ -150,8 +152,11 @@ test('attackers, shots and loot survive the wire', () => {
       { kind: 'lancer', x: 950, y: 100, facing: -1, flash: 0.2, shield: 0 },
       { kind: 'scorcher', x: 1200, y: 240, facing: 1, flash: 0, shield: 3 },
     ]),
-    playerShots: pool([{ x: 1000, y: 150, r: 3 }, { x: 1020, y: 152, r: 3 }]),
-    enemyShots: pool([{ x: 1100, y: 200, r: 7 }]),
+    playerShots: pool([
+      { x: 1000, y: 150, r: 3, vx: 400, seek: 0 },
+      { x: 1020, y: 152, r: 3, vx: -400, seek: 0 },
+    ]),
+    enemyShots: pool([{ x: 1100, y: 200, r: 7, vx: -200, seek: 3 }]),
     pickups: pool([{ x: 980, y: 300, kind: 'coin' }, { x: 1050, y: 120, kind: 'bar' }]),
   };
   const got = decodeSnapshot(encodeSnapshot(game, ship(), 1, pools));
@@ -165,12 +170,57 @@ test('attackers, shots and loot survive the wire', () => {
   assert.ok(got.foes[1].shield > 0, 'a shielded attacker came back unshielded');
 
   assert.equal(got.playerShots.length, 2);
+  // Direction and missile-ness ride in the spare bits of the radius
+  // byte, because the renderer asks for both and neither is worth a
+  // byte of its own at two hundred shots a frame.
+  assert.equal(got.playerShots[0].dir, 1, 'a rightward shot came back pointing left');
+  assert.equal(got.playerShots[1].dir, -1, 'a leftward shot came back pointing right');
+  assert.equal(got.playerShots[0].seek, false);
   assert.equal(got.enemyShots.length, 1);
+  assert.equal(got.enemyShots[0].seek, true, 'a missile came back as an ordinary shot');
   assert.equal(got.enemyShots[0].r, 7);
   assert.ok(Math.abs(got.enemyShots[0].x - 1100) <= 1);
 
   assert.equal(got.pickups.length, 2);
   assert.deepEqual(got.pickups.map((p) => p.kind), ['coin', 'bar']);
+});
+
+test('the snapshot carries every pool the renderer draws from', () => {
+  // The gap this exists for: interceptors have their own pool,
+  // separate from attackers and turrets, and the first version of the
+  // snapshot simply left them out. The guest flew through a fight it
+  // could not see — and nothing failed, because every test was about
+  // the lists that were already there.
+  //
+  // Pinned by name against render.js, so adding a pool and forgetting
+  // the wire fails here rather than being noticed in a screenshot.
+  const render = readFileSync(new URL('../src/render.js', import.meta.url), 'utf8');
+  const drawn = ['foes', 'playerShots', 'enemyShots', 'pickups', 'interceptors'];
+  for (const name of drawn) {
+    assert.ok(render.includes(name + '.count'),
+      'render.js no longer draws from ' + name + '; this list is out of date');
+  }
+  const game = fakeGame();
+  const got = decodeSnapshot(encodeSnapshot(game, ship(), 1, emptyPools()));
+  for (const name of drawn) {
+    assert.ok(Array.isArray(got[name]),
+      'the snapshot has no ' + name + '; a guest would see none of them');
+  }
+});
+
+test('interceptors survive the wire', () => {
+  const game = fakeGame();
+  const got = decodeSnapshot(encodeSnapshot(game, ship(), 1, {
+    ...emptyPools(),
+    interceptors: pool([
+      { x: 950, y: 120, dirX: -1 },
+      { x: 1150, y: 260, dirX: 1 },
+    ]),
+  }));
+  assert.equal(got.interceptors.length, 2);
+  assert.ok(Math.abs(got.interceptors[0].x - 950) <= 1);
+  assert.equal(got.interceptors[0].dirX, -1, 'an interceptor came back facing the wrong way');
+  assert.equal(got.interceptors[1].dirX, 1);
 });
 
 test('every attacker kind and every loot kind has an index', () => {
@@ -320,4 +370,150 @@ test('a truncated or foreign message does not throw', () => {
     assert.doesNotThrow(() => decodeSnapshot(junk));
     assert.doesNotThrow(() => decodeInput(junk));
   }
+});
+
+// ------------------------------------------------- the second ship
+//
+// The rules that decide whether co-op is playable rather than merely
+// connected: that the second ship is flown by the same code as the
+// first, that the camera belongs to both pilots, and that neither can
+// drag the other off the screen.
+
+import {
+  coopCameraTarget, leashShips, ensureMate,
+} from '../src/coopgame.js';
+import { updatePlayer, makePlayer } from '../src/player.js';
+import { VIEW_W, FIELD_TOP, FIELD_BOT, DT } from '../src/config.js';
+
+function flyable() {
+  const p = makePlayer();
+  p.x = 400; p.y = 180; p.vx = 0; p.vy = 0; p.alive = true;
+  return p;
+}
+
+test('the second ship is flown by the same code as the first', () => {
+  // Not a second update path. The first thing to go wrong with one
+  // would be the two ships handling differently in a way nobody can
+  // put their finger on.
+  const { makeGame } = { makeGame: null }; // not needed; a bare level is enough
+  void makeGame;
+  const game = {
+    level: { obstacles: [], buckets: new Map(), length: 20000, gates: [], hazards: [], movers: [] },
+    cam: { x: 0, shake: 0 }, time: 0, state: 'play', score: 0,
+  };
+  const a = flyable();
+  const b = flyable();
+  // Same buttons, same number of frames, from the same start.
+  for (let i = 0; i < 60; i++) {
+    updatePlayer(a, game, DT, new Set(['right']));
+    updatePlayer(b, game, DT, new Set(['right']));
+  }
+  assert.ok(a.x > 400, 'holding right did not move the ship');
+  assert.equal(a.x, b.x, 'two ships given identical input ended up in different places');
+  assert.equal(a.vx, b.vx);
+
+  // ...and different buttons move them differently, or the input is
+  // not reaching the ship at all.
+  const c = flyable();
+  for (let i = 0; i < 60; i++) updatePlayer(c, game, DT, new Set(['left']));
+  assert.ok(c.x < 400, 'holding left did not move the ship');
+});
+
+test('a remote ship gets an edge from its own last frame', () => {
+  // "Pressed this frame" has no meaning in a set of held buttons, so
+  // it is derived per ship. Per ship and not globally, because two of
+  // them are flown from two different sources in the same loop.
+  const game = {
+    level: { obstacles: [], buckets: new Map(), length: 20000, gates: [], hazards: [], movers: [] },
+    cam: { x: 0, shake: 0 }, time: 0, state: 'play', score: 0,
+  };
+  const jumps = (held, frames) => {
+    const p = flyable();
+    p.jumpCd = 0;
+    let fired = 0;
+    let was = 0;
+    for (let i = 0; i < frames; i++) {
+      updatePlayer(p, game, DT, held(i));
+      // The cooldown going from zero to full is a jump happening.
+      if (p.jumpCd > was) fired++;
+      was = p.jumpCd;
+    }
+    return fired;
+  };
+
+  // Held down for well past the cooldown. An edge fires once; a level
+  // fires again the moment the cooldown expires, which is the bug.
+  const seconds = 14;
+  const frames = Math.ceil(seconds / DT);
+  assert.equal(jumps(() => new Set(['jump']), frames), 1,
+    'holding jump through the cooldown fired it more than once; '
+    + 'the remote edge is being read as a level');
+
+  // Released and pressed again inside the same window: still once,
+  // because the cooldown has not expired.
+  assert.equal(jumps((i) => (i % 2 ? new Set() : new Set(['jump'])), 240), 1,
+    'tapping jump during the cooldown fired it more than once');
+
+  // And never, if it is never pressed.
+  assert.equal(jumps(() => new Set(), frames), 0, 'the ship jumped on its own');
+});
+
+test('the camera belongs to both pilots', () => {
+  const LEN = 20000;
+  // Together: centred between them.
+  const mid = coopCameraTarget({ x: 1000 }, { x: 1200 }, LEN);
+  assert.ok(Math.abs(mid - (1100 - VIEW_W / 2)) < 2,
+    `two ships 200px apart put the camera at ${mid}`);
+
+  // Apart: both still on screen while they fit.
+  const a = { x: 900 };
+  const b = { x: 900 + VIEW_W - 160 };
+  const cam = coopCameraTarget(a, b, LEN);
+  assert.ok(a.x > cam && a.x < cam + VIEW_W, `the trailing ship is off screen at ${cam}`);
+  assert.ok(b.x > cam && b.x < cam + VIEW_W, `the leading ship is off screen at ${cam}`);
+
+  // Never past the ends of the hull.
+  assert.equal(coopCameraTarget({ x: 0 }, { x: 10 }, LEN), 0);
+  assert.equal(coopCameraTarget({ x: LEN }, { x: LEN }, LEN), LEN - VIEW_W);
+});
+
+test('neither pilot can drag the other off the screen', () => {
+  // The oldest complaint about shared-screen co-op: the faster player
+  // takes the camera and the slower one is scrolled into a wall.
+  const cam = 1000;
+  const slow = { x: cam - 50, y: 180, vx: -200, alive: true };
+  const fast = { x: cam + VIEW_W + 80, y: 180, vx: 300, alive: true };
+  leashShips(slow, fast, cam);
+  assert.ok(slow.x >= cam, `the trailing ship was left at ${slow.x}, behind the camera at ${cam}`);
+  assert.ok(fast.x <= cam + VIEW_W, `the leading ship was left at ${fast.x}`);
+  // Stopped, not bounced: a ship shoved backwards by its partner is
+  // worse than one that will not go further.
+  assert.equal(slow.vx, 0, 'the trailing ship kept its backwards speed');
+  assert.equal(fast.vx, 0, 'the leading ship kept its forwards speed');
+});
+
+test('the leash keeps ships inside the corridor', () => {
+  const a = { x: 100, y: -500, alive: true, vx: 0 };
+  const b = { x: 100, y: 99999, alive: true, vx: 0 };
+  leashShips(a, b, 0);
+  assert.ok(a.y >= FIELD_TOP, `a ship was left at y=${a.y}, above the hull`);
+  assert.ok(b.y <= FIELD_BOT, `a ship was left at y=${b.y}, below the hull`);
+});
+
+test('a dead pilot is not leashed', () => {
+  // A ship that died off the edge should be left where it died
+  // rather than dragged back into view to explode somewhere else.
+  const dead = { x: 50, y: 180, vx: -100, alive: false };
+  leashShips(dead, { x: 500, y: 180, alive: true, vx: 0 }, 1000);
+  assert.equal(dead.x, 50, 'a dead ship was dragged back on screen');
+});
+
+test('the second ship is made once and kept', () => {
+  const game = {};
+  const a = ensureMate(game);
+  const b = ensureMate(game);
+  assert.equal(a, b, 'the second ship was rebuilt, losing everything about it');
+  assert.ok(a.isMate, 'the second ship is not marked as one');
+  assert.ok(Object.prototype.hasOwnProperty.call(a, 'shield'),
+    'the second ship is not a real ship');
 });

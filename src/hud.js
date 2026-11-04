@@ -1728,3 +1728,90 @@ export function drawPaused(ctx) {
   text(ctx, 'PAUSED', VIEW_W / 2, 150, COL.hudBright, FONT_BIG, 'center');
   text(ctx, 'P TO RESUME', VIEW_W / 2, 180, COL.hudText, FONT, 'center');
 }
+
+// The other end has gone quiet.
+//
+// A socket that is open and silent is the worst case for a guest: the
+// world simply stops, with no explanation, and it looks exactly like
+// the game having crashed. Chromium throttles a background tab's
+// animation frames to almost nothing, so a host who switches tabs
+// does this to their partner without knowing.
+export function drawCoopStalled(ctx) {
+  const cx = VIEW_W / 2;
+  ctx.save();
+  ctx.globalAlpha = 0.82;
+  ctx.fillStyle = '#04060a';
+  ctx.fillRect(0, 120, VIEW_W, 64);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = COL.warmHi;
+  ctx.fillRect(0, 120, VIEW_W, 1);
+  ctx.fillRect(0, 183, VIEW_W, 1);
+  ctx.restore();
+  text(ctx, 'WAITING FOR THE OTHER PILOT', cx, 136, COL.warmHi, FONT, 'center');
+  text(ctx, 'THEIR GAME HAS STOPPED SENDING — IT MAY BE IN A BACKGROUND TAB',
+    cx, 158, COL.hudLine, FONT, 'center');
+}
+
+// --- the co-op screen
+//
+// Reached with G from the title. Two ways in: host a game and read
+// the code out, or type somebody else's in. Deliberately plain —
+// there is nothing to configure, and the only thing a pilot needs
+// from this screen is five characters, either to say or to hear.
+
+export const COOP_LAYOUT = {
+  titleY: 42,
+  subY: 68,
+  bodyTop: 110,
+  pitch: 26,
+  codeY: 150,
+  footY: SCREEN_H - 34,
+};
+
+export function drawCoop(ctx, coop, online) {
+  ctx.fillStyle = '#04060a';
+  ctx.fillRect(0, 0, VIEW_W, SCREEN_H);
+  const cx = VIEW_W / 2;
+  const L = COOP_LAYOUT;
+
+  text(ctx, 'CO-OP', cx, L.titleY, COL.hudBright, FONT_BIG, 'center');
+  text(ctx, 'TWO PILOTS, ONE HULL, ONE SCREEN', cx, L.subY, COL.cool, FONT, 'center');
+
+  if (!online) {
+    text(ctx, 'THE BACKEND IS UNREACHABLE', cx, L.bodyTop + 20, COL.warmHi, FONT, 'center');
+    text(ctx, 'CO-OP NEEDS IT TO PAIR THE TWO OF YOU', cx, L.bodyTop + 42,
+      COL.hudLine, FONT, 'center');
+    text(ctx, 'ESC  BACK', cx, L.footY, COL.hudLine, FONT, 'center');
+    return;
+  }
+
+  if (coop.phase === 'off' || coop.phase === 'ended') {
+    let y = L.bodyTop;
+    text(ctx, 'H   HOST A GAME', cx, y, COL.hudBright, FONT, 'center');
+    y += L.pitch;
+    text(ctx, 'you get a code; read it to the other pilot', cx, y, COL.hudLine, FONT, 'center');
+    y += L.pitch + 8;
+    text(ctx, 'J   JOIN A GAME', cx, y, COL.hudBright, FONT, 'center');
+    y += L.pitch;
+    text(ctx, 'type the code the other pilot gives you', cx, y, COL.hudLine, FONT, 'center');
+    if (coop.error) {
+      text(ctx, coop.error.toUpperCase(), cx, y + L.pitch + 10, COL.danger, FONT, 'center');
+    }
+  } else if (coop.phase === 'opening') {
+    text(ctx, 'CONNECTING…', cx, L.bodyTop + 20, COL.cool, FONT, 'center');
+  } else if (coop.phase === 'waiting') {
+    text(ctx, coop.side === 'host' ? 'YOUR CODE' : 'JOINING', cx, L.bodyTop, COL.cool, FONT, 'center');
+    // The one thing on this screen that matters, at the size of the
+    // thing that matters.
+    text(ctx, coop.code, cx, L.codeY, COL.warmHi, FONT_BIG, 'center');
+    text(ctx, 'WAITING FOR THE OTHER PILOT', cx, L.codeY + 46, COL.hudLine, FONT, 'center');
+  } else if (coop.phase === 'playing') {
+    text(ctx, 'BOTH PILOTS READY', cx, L.bodyTop + 10, COL.good || COL.coolHi, FONT, 'center');
+    text(ctx, coop.side === 'host' ? 'YOU ARE FLYING THE FIRST SHIP'
+      : 'YOU ARE FLYING THE SECOND SHIP', cx, L.bodyTop + 36, COL.cool, FONT, 'center');
+    text(ctx, 'ENTER  LAUNCH', cx, L.bodyTop + 72, COL.hudBright, FONT, 'center');
+  }
+
+  text(ctx, coop.phase === 'off' || coop.phase === 'ended'
+    ? 'ESC  BACK' : 'ESC  LEAVE', cx, L.footY, COL.hudLine, FONT, 'center');
+}

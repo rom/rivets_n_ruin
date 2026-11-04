@@ -61,6 +61,7 @@ backend down**; you lose the leaderboard, not the game.
 | `P` / `Esc` | Pause |
 | `M` | Mute / unmute |
 | `T` / `]` | Next tune |
+| `G` | Co-op: host a game or join one, from the title |
 | `O` | Settings |
 | `H` / `/` | Help pages |
 | `B` | Switch leaderboard: top pilots / high scores |
@@ -2560,6 +2561,7 @@ src/sfx.js        the 33 sound effects
 src/music.js      adaptive sequencer and its instrument voices
 src/net.js        backend client; degrades to offline play
 src/coop.js       two-player co-op: the socket and the wire format
+src/coopgame.js   co-op where it meets the game loop: the second ship
 src/mods.js       mod loading and config overrides
 src/main.js       the one entry point: wiring, input routing, the frame
 src/game.js       state machine, collision pairs, run objective

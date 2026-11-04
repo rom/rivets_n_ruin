@@ -74,6 +74,9 @@ const kindIndex = (k) => (KIND_OF.has(k) ? KIND_OF.get(k) : 0);
 const MAX_FOES = 32;
 const MAX_SHOTS = 190;
 const MAX_PICKUPS = 48;
+// Interceptors are capped in the game itself at INTERCEPTOR.maxActive
+// plus two; this is comfortably above that.
+const MAX_INTERCEPTORS = 16;
 
 // How far outside the view an entity is still worth sending. A shot
 // just off the edge is about to be on screen.
@@ -85,6 +88,9 @@ const CULL = 48;
 // "Offset is outside the bounds of the DataView" and the snapshot
 // simply stopped arriving. Sized from the caps, with a check in the
 // writer so the next person to raise one finds out here.
+// Stands in for a pool a caller did not pass.
+const EMPTY_POOL = { count: 0, items: [] };
+
 const SNAPSHOT_BYTES = 4096;
 
 // A reusable buffer. Allocating four kilobytes twenty times a second
@@ -194,7 +200,11 @@ const inView = (x, camX) => x > camX - CULL && x < camX + VIEW_W + CULL;
  * against.
  */
 export function encodeSnapshot(game, second, tick, pools) {
+  // interceptors defaults to empty: it arrived later than the rest,
+  // and a caller that has not heard of it should get a snapshot
+  // without interceptors rather than a crash.
   const { foes, playerShots, enemyShots, pickups } = pools;
+  const interceptors = pools.interceptors || EMPTY_POOL;
   const camX = game.cam.x;
   const w = new Writer(outView);
   w.u8(MSG_SNAPSHOT);
@@ -239,11 +249,34 @@ export function encodeSnapshot(game, second, tick, pools) {
       if (!w.room(5 + 2)) break;
       w.i16(s.x - camX);
       w.i16(s.y);
-      w.u8(Math.max(1, Math.min(255, Math.round(s.r))));
+      // One byte carries all three things the renderer asks of a
+      // shot: how big it is, which way it points, and whether it is
+      // a missile. Radii are 2 to 8, so six bits is room to spare
+      // and the other two are free.
+      const r6 = Math.max(1, Math.min(63, Math.round(s.r)));
+      w.u8(r6 | (s.vx < 0 ? 0x40 : 0) | (s.seek > 0 ? 0x80 : 0));
       m++;
     }
     outView.setUint8(at, m);
   }
+
+  // Interceptors. Not attackers and not turrets — their own pool, and
+  // the first version of this left them out, so the guest flew
+  // through a fight it could not see. A player who cannot see what is
+  // shooting at them is not playing the same game.
+  let ic = 0;
+  const icAt = w.at;
+  w.u8(0);
+  for (let i = 0; i < interceptors.count && ic < MAX_INTERCEPTORS; i++) {
+    const e = interceptors.items[i];
+    if (!inView(e.x, camX)) continue;
+    if (!w.room(5 + 2)) break;
+    w.i16(e.x - camX);
+    w.i16(e.y);
+    w.i8(e.dirX);
+    ic++;
+  }
+  outView.setUint8(icAt, ic);
 
   let k = 0;
   const pickAt = w.at;
@@ -320,12 +353,26 @@ function readSnapshot(buf) {
     const out = [];
     const n = r.u8();
     for (let i = 0; i < n; i++) {
-      out.push({ x: r.i16() + camX, y: r.i16(), r: r.u8() });
+      const x = r.i16() + camX;
+      const y = r.i16();
+      const packed = r.u8();
+      out.push({
+        x, y,
+        r: packed & 0x3f,
+        dir: packed & 0x40 ? -1 : 1,
+        seek: (packed & 0x80) !== 0,
+      });
     }
     return out;
   };
   const mine = readShots();
   const theirs = readShots();
+
+  const chasers = [];
+  const ni = r.u8();
+  for (let i = 0; i < ni; i++) {
+    chasers.push({ x: r.i16() + camX, y: r.i16(), dirX: r.i8() || -1 });
+  }
 
   const loot = [];
   const np = r.u8();
@@ -338,7 +385,8 @@ function readSnapshot(buf) {
 
   return {
     tick, camX, state, score, lives, levelIndex,
-    ships, foes: foeList, playerShots: mine, enemyShots: theirs, pickups: loot,
+    ships, foes: foeList, playerShots: mine, enemyShots: theirs,
+    interceptors: chasers, pickups: loot,
   };
 }
 
