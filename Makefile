@@ -47,7 +47,7 @@ LDFLAGS     := -s -w -X main.version=$(VERSION)
 NOCGO       := CGO_ENABLED=0
 
 .DEFAULT_GOAL := help
-.PHONY: help run build test test-race test-js coverage coverage-gate bench fmt vet check js-check smoke tidy clean dist icons gallery gallery-admin stats
+.PHONY: help run build test test-race test-js coverage coverage-gate bench fmt vet check js-check smoke coop-smoke tidy clean dist icons gallery gallery-admin stats
 
 help: ## Show this help
 	@echo "Rivets 'n Ruin"
@@ -160,6 +160,21 @@ smoke: build ## Launch the game and assert it actually renders and scrolls
 	trap "kill $$pid 2>/dev/null" EXIT; \
 	$(call wait_for,$(SMOKE_PORT)); \
 	$(NODE) tools/smoke.cjs http://127.0.0.1:$(SMOKE_PORT)/
+
+# Two browsers, two sockets, one room. Deliberately NOT part of
+# `check`: it needs two browser contexts and most of a minute, where
+# the rest of that gate is seconds. Run it when co-op changes — it is
+# the only thing here that can see a fault which needs both ends and a
+# server to exist, and it was written because quitting a co-op run
+# raced its own submission off the board with every unit test passing.
+COOP_PORT ?= 8411
+coop-smoke: build ## Drive co-op in two real browsers (quit, drop, resume, hull)
+	@./$(BUILD_DIR)/$(BINARY) -addr 127.0.0.1:$(COOP_PORT) \
+	    -state $(BUILD_DIR)/coop-state -accounts $(BUILD_DIR)/coop-accounts & \
+	pid=$$!; \
+	trap "kill $$pid 2>/dev/null" EXIT; \
+	$(call wait_for,$(COOP_PORT)); \
+	$(NODE) tools/twopilots.cjs http://127.0.0.1:$(COOP_PORT)/
 
 tidy: ## Tidy go.mod
 	$(GO) mod tidy

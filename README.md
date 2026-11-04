@@ -2685,6 +2685,7 @@ package.json      test tooling only — the game has no dependencies
 CHANGELOG.md      what changed, and why
 Makefile          make, for the list of targets
 tools/smoke.cjs   the browser smoke test: flies the game and reads pixels
+tools/twopilots.cjs  co-op in two real browsers: quit, drop, resume, same hull
 tools/coverage.sh the coverage gate, so CI and your machine agree
 tools/make_gallery.cjs  regenerates the README images from the live game
 tools/make_admin_shot.cjs  the same, for the operator tool's pages

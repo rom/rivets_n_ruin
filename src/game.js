@@ -40,7 +40,7 @@ import {
 import { setIntensity, setTune } from './music.js';
 import {
   coopFrame, guestPreFrame, isGuest, isHost, isCoop, coopState, clearMate,
-  coopSnapshot,
+  coopSnapshot, quitGame,
 } from './coopgame.js';
 import {
   submitRun, submitCoopRun, coopPostedByHost, heartbeat, serverBest, startRun,
@@ -449,6 +449,12 @@ export function hullsFlown(game) {
 
 // Report a finished run to the backend. Fire-and-forget: submitRun never
 // throws and never blocks, so a dead backend cannot stall the end screen.
+//
+// Returns the co-op submission's promise, when there is one, for the
+// single caller that has to know when it has landed: quitting tells the
+// server we are leaving, that is what closes the room, and the co-op
+// submission needs the room open to know who the second pilot was. Not
+// awaited anywhere else, and never awaited for its value.
 function reportRun(game) {
   // Bank what the run earned before anything else. A run that ends is the
   // last certain moment to do it, and the coins are the pilot's whatever
@@ -469,7 +475,7 @@ function reportRun(game) {
   // arbitrate.
   if (isCoop()) {
     if (isHost()) {
-      submitCoopRun({
+      return submitCoopRun({
         code: coopState().code,
         points: game.score,
         timeSec: Number(game.runTime.toFixed(2)),
@@ -479,9 +485,8 @@ function reportRun(game) {
         deaths: game.deaths,
         completed: game.state === 'victory',
       });
-    } else {
-      coopPostedByHost();
     }
+    coopPostedByHost();
     return;
   }
   submitRun({
@@ -575,7 +580,19 @@ export function update(game, dt) {
       game.quitting = false;
       // The run was genuinely flown, so it is recorded rather than forfeited.
       recordBest(game);
-      reportRun(game);
+      const posted = reportRun(game);
+      // The other pilot is told this was a decision, not a dropped
+      // connection — otherwise they sit waiting out a hold for
+      // somebody who has gone back to the title.
+      //
+      // AFTER the run has been posted, not before. Saying we are
+      // leaving is what closes the room, and the co-op submission
+      // needs the room open for the server to know who the second
+      // pilot was; sending it first raced the run off its own board
+      // and the POST came back 409 with no row written. Found in two
+      // browsers, not in a test — the race is only visible when a
+      // real socket and a real request are in flight together.
+      if (isCoop()) Promise.resolve(posted).then(quitGame, quitGame);
       game.state = 'title';
       game.stateT = 0;
       sfxGameOver();

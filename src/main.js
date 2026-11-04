@@ -13,12 +13,15 @@ import { makeGame, update, syncBest, wipeProgress, launchRun, banner, freshRunSe
 import { drawWorld } from './render.js';
 import {
   drawHud, drawPaused, drawQuitPrompt, drawSettings, drawShop, drawHelp, drawControls,
-  drawCoop, drawCoopStalled,
+  drawCoop, drawCoopStalled, drawCoopHold, drawCoopQuit, drawMateHud,
   HELP_PAGES,
   drawDemoBadge,
 } from './hud.js';
 import { rows as shopRows, buy as shopBuy, applyMods, resetShop } from './shop.js';
-import { coopState, hostGame, joinGame, leaveGame, hostStalled, isCoop } from './coop.js';
+import {
+  coopState, hostGame, joinGame, leaveGame, quitGame, hostStalled, isCoop,
+  coopTick, coopHolding, coopHoldLeft,
+} from './coop.js';
 import { initCoop } from './coopgame.js';
 import { saveHangar, clearHangar, setHangarSync, mergeHangars, applyHangar } from './hangar.js';
 import { unlock, toggleMute, isMuted, ready } from './audio.js';
@@ -234,6 +237,9 @@ let shopOpen = false;
 // and the settings screen, so H and J mean host and join here rather
 // than help and fire.
 let coopOpen = false;
+// Which departure has already been announced, so a banner is raised
+// once rather than every frame for as long as the state lasts.
+let coopNoted = null;
 let shopSel = 0;
 let shopNote = '';
 window.addEventListener('keydown', wakeAudio, { once: false });
@@ -402,6 +408,12 @@ window.game = game;
 // photograph what the player would actually see. Nothing in the game reads
 // this back.
 window.net = netState();
+// Likewise, and for the same reason: the two-browser harness has to be
+// able to see which phase the connection is in to drive a drop, a
+// quit and a reconnect, and the alternative is inferring it from
+// pixels. The live object, so it reflects the state rather than a copy
+// of it from boot. Nothing in the game reads this back.
+window.coop = coopState();
 
 // Renaming mints a fresh identity server-side; the old name keeps its scores.
 function promptRename() {
@@ -415,6 +427,34 @@ function promptRename() {
 
 startLoop(
   (dt) => {
+    // --- the co-op clocks
+    //
+    // First, and outside every screen below, because all of them run
+    // while the run itself is stopped: the hold on a dropped pilot's
+    // slot, the attempts to get back into it, and the countdown a
+    // guest gets when the host quits. A menu being open must not stop
+    // any of them.
+    coopTick(dt);
+    const coop = coopState();
+    // The host quit, and this is the guest. It is going back to the
+    // title whichever key it presses, so it is told why and given a
+    // moment to read it rather than being dropped there mid-sentence.
+    if (coop.quitBy === 'host' && coop.side === 'guest' && coop.endIn <= 0) {
+      leaveGame();
+      toTitle(game);
+      coopNoted = null;
+      endFrame();
+      return;
+    }
+    // The guest quit, and this is the host. It keeps flying — the run
+    // is its own and the simulation never depended on the other end —
+    // so this is a notice, not an ending.
+    if (coop.quitBy === 'guest' && coop.side === 'host' && coopNoted !== 'guest') {
+      coopNoted = 'guest';
+      banner(game, 'THE SECOND PILOT LEFT', 'YOU ARE FLYING ALONE', 3.0);
+    }
+    if (!coop.quitBy) coopNoted = null;
+
     // The shop owns the keyboard while open, like the settings screen.
     if (shopOpen) {
       const list = shopRows(game);
@@ -450,7 +490,10 @@ startLoop(
       const cs = coopState();
       if (tapped('pause') || tapped('quit')) {
         sfxUi();
-        if (cs.phase !== 'off') leaveGame();
+        // quitGame rather than leaveGame: walking off this screen is a
+        // decision, and the other pilot should be told that rather
+        // than left holding a slot for somebody who chose to go.
+        if (cs.phase !== 'off') quitGame();
         coopOpen = false;
       } else if (cs.phase === 'off' || cs.phase === 'ended') {
         if (tapped('help')) {           // H
@@ -634,6 +677,17 @@ startLoop(
     if (demoOn) setSynthetic(demoActions(game));
 
     if (paused) { endFrame(); return; }
+    // --- the run is held because one of the two connections dropped
+    //
+    // Nothing advances on either machine. On the host because a
+    // returning guest must not come back to a ship that has been
+    // flown somewhere by nobody for thirty seconds, and on the guest
+    // because the only thing it could do with the time is fly into
+    // whatever the host has not told it about yet.
+    //
+    // Deliberately not the `paused` flag: that one is the player's and
+    // P would clear it, and this is not theirs to clear.
+    if (coopHolding()) { endFrame(); return; }
     // A hold for the tooling. make gallery poses a roster of attackers and
     // then screenshots it; with the simulation running, everything with a
     // speed had moved and everything with a spawn timer had spawned by the
@@ -666,7 +720,17 @@ startLoop(
       drawPads(hudCtx, padState(),
         game.player.jumpCd > 0 ? new Set(['jump']) : null);
     }
+    // The other pilot's panel. In flight only: it is about the ship
+    // beside you, and on a menu there is no ship beside you.
+    if (isCoop() && (game.state === 'play' || game.state === 'dying')) {
+      drawMateHud(hudCtx, game, coopState());
+    }
     if (hostStalled()) drawCoopStalled(hudCtx);
+    // Why the run has stopped, and for how long. Above the stall
+    // notice, which is about a host that is still connected and merely
+    // quiet; this one is about a connection that has gone.
+    if (coopHolding()) drawCoopHold(hudCtx, coopState(), coopHoldLeft());
+    else if (coopState().quitBy) drawCoopQuit(hudCtx, coopState());
     if (coopOpen) drawCoop(hudCtx, coopState(), netState().online);
     else if (shopOpen) drawShop(hudCtx, game, shopSel, shopNote);
     else if (helpOpen) drawHelp(hudCtx, helpPage, helpContext());

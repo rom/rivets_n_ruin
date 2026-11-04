@@ -864,3 +864,251 @@ test('a hull index off the end of the roster is clamped, not followed', () => {
     'a snapshot claiming hull 9999 took the guest off the end of the roster');
   assert.ok(game.level, 'there is no hull at all');
 });
+
+// --- leaving, and the difference between the two ways of doing it
+//
+// A socket going quiet and a pilot pressing Y used to be the same
+// event: both arrived as peer-left and both ended the run. They are
+// not the same thing. One is a decision and the other is a train
+// going into a tunnel, and the second one should cost nobody a run.
+
+import {
+  coopTick, coopHolding, coopHoldLeft, quitGame, joinGame, hostGame,
+} from '../src/coop.js';
+
+class FakeSocket {
+  constructor(url) {
+    this.url = url;
+    this.readyState = 1;
+    this.sent = [];
+    FakeSocket.last = this;
+    FakeSocket.opened = (FakeSocket.opened || 0) + 1;
+  }
+
+  send(d) { this.sent.push(d); }
+
+  // Closed by the far end, or by the network. NOT by us: leaveGame
+  // calls close() too, and the difference between those two is the
+  // whole of what is being tested here.
+  close() {
+    this.readyState = 3;
+    if (this.onclose) this.onclose();
+  }
+
+  say(obj) { this.onmessage({ data: JSON.stringify(obj) }); }
+}
+
+function fakeNet() {
+  const had = {
+    fetch: globalThis.fetch,
+    ws: globalThis.WebSocket,
+    loc: globalThis.location,
+  };
+  globalThis.location = { protocol: 'http:', host: 'x' };
+  globalThis.fetch = () => Promise.resolve({
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve({ code: 'BCDFG', seed: 1, hull: 0, host: 'rom' }),
+  });
+  globalThis.WebSocket = FakeSocket;
+  FakeSocket.opened = 0;
+  return () => {
+    globalThis.fetch = had.fetch;
+    globalThis.WebSocket = had.ws;
+    globalThis.location = had.loc;
+  };
+}
+
+// A guest, joined and flying, with the socket the test can talk down.
+async function joinedGuest(t) {
+  const restore = fakeNet();
+  t.after(() => { leaveGame(); restore(); });
+  assert.equal(await joinGame('BCDFG', 'tok'), true, 'the fixture could not join');
+  const sock = FakeSocket.last;
+  sock.say({ t: 'joined', side: 'guest', seed: 1, hull: 0, peer: true, resumeSec: 45 });
+  assert.equal(coopState().phase, 'playing', 'the fixture is not in a run');
+  return sock;
+}
+
+test('a host that quits gives the guest a reason and a countdown', async (t) => {
+  const sock = await joinedGuest(t);
+  sock.say({ t: 'peer-quit', side: 'host' });
+
+  const S = coopState();
+  assert.equal(S.quitBy, 'host');
+  assert.equal(S.phase, 'ended');
+  assert.ok(S.endIn > 0,
+    'the guest was sent back to the title with no reason and no pause');
+  assert.ok(/quit/.test(S.error || ''), `the reason reads "${S.error}"`);
+
+  // ...and the countdown actually runs out, rather than parking the
+  // guest on a notice it cannot leave.
+  for (let i = 0; i < 60 / DT; i++) coopTick(DT);
+  assert.equal(S.endIn, 0, 'the countdown never reached zero');
+});
+
+test('a guest that quits does not hold the host up', async (t) => {
+  const restore = fakeNet();
+  t.after(() => { leaveGame(); restore(); });
+  // Hosting this time, so the quit arrives from the far side and goes
+  // through the same handler a real one would.
+  assert.ok(await hostGame(1, 0, 'tok'), 'the fixture could not open a room');
+  const sock = FakeSocket.last;
+  sock.say({ t: 'joined', side: 'host', seed: 1, hull: 0, peer: true, resumeSec: 45 });
+  sock.say({ t: 'peer-quit', side: 'guest' });
+
+  const S = coopState();
+  assert.equal(S.quitBy, 'guest');
+  assert.equal(S.peerHere, false);
+  assert.equal(coopHolding(), false,
+    'the host was made to wait out a hold for a pilot who chose to leave');
+  assert.equal(S.endIn, 0,
+    'the host was given a countdown off a screen it is entitled to stay on');
+  assert.ok(/second pilot/.test(S.error || ''), `the reason reads "${S.error}"`);
+});
+
+test('a dropped pilot holds the run instead of ending it', async (t) => {
+  const sock = await joinedGuest(t);
+  sock.say({ t: 'peer-gone', side: 'host', resumeSec: 30 });
+
+  const S = coopState();
+  assert.equal(S.phase, 'paused');
+  assert.equal(coopHolding(), true, 'the run kept running with one pilot missing');
+  assert.equal(S.quitBy, null, 'a dropped connection was recorded as a decision');
+  assert.equal(coopHoldLeft(), 30, 'the hold has no stated end');
+
+  // Halfway through, still waiting.
+  for (let i = 0; i < 15 / DT; i++) coopTick(DT);
+  assert.equal(S.phase, 'paused', 'the hold gave up early');
+  assert.ok(coopHoldLeft() < 30 && coopHoldLeft() > 0,
+    `the countdown reads ${coopHoldLeft()}`);
+
+  // Past the window the server quoted, there is nothing left to wait for.
+  for (let i = 0; i < 20 / DT; i++) coopTick(DT);
+  assert.equal(S.phase, 'ended', 'the run was held open for ever');
+  assert.equal(coopHolding(), false);
+});
+
+test('a pilot who comes back resumes the run', async (t) => {
+  const sock = await joinedGuest(t);
+  sock.say({ t: 'peer-gone', side: 'host', resumeSec: 30 });
+  for (let i = 0; i < 10 / DT; i++) coopTick(DT);
+  assert.equal(coopHolding(), true);
+
+  sock.say({ t: 'peer-back', side: 'host' });
+  const S = coopState();
+  assert.equal(S.phase, 'playing', 'the run did not restart when the pilot returned');
+  assert.equal(S.peerHere, true);
+  assert.equal(coopHolding(), false, 'the run is still held after they came back');
+  assert.equal(S.error, null, 'a resumed run still carries the error that paused it');
+});
+
+test('our own connection dropping tries to get back in', async (t) => {
+  const sock = await joinedGuest(t);
+  const opened = FakeSocket.opened;
+
+  sock.close();              // the network, not the pilot
+  const S = coopState();
+  assert.equal(S.phase, 'reconnecting',
+    'a dropped socket ended the run instead of trying to recover it');
+  assert.equal(coopHolding(), true, 'the game kept running with no connection');
+
+  // The first attempt goes out.
+  for (let i = 0; i < 3 / DT; i++) coopTick(DT);
+  assert.ok(FakeSocket.opened > opened, 'no attempt was made to reconnect');
+  assert.match(FakeSocket.last.url, /\/api\/coop\/BCDFG\/guest$/,
+    `it reconnected to ${FakeSocket.last.url}`);
+
+  // And the room takes it back, into the run already in progress.
+  FakeSocket.last.say({
+    t: 'joined', side: 'guest', seed: 1, hull: 0, peer: true,
+    resumed: true, resumeSec: 45,
+  });
+  assert.equal(S.phase, 'playing', 'coming back did not resume the run');
+  assert.equal(coopHolding(), false);
+});
+
+// The loop that would not stop.
+//
+// The elapsed clock was reset on every close, and a failed attempt is
+// a close — so the give-up deadline never arrived and the client
+// hammered a room that had been swept minutes earlier.
+test('reconnecting gives up rather than hammering a room that has gone', async (t) => {
+  const sock = await joinedGuest(t);
+  sock.close();
+  const S = coopState();
+  // Every attempt fails the moment it is made.
+  for (let i = 0; i < 120 / DT; i++) {
+    coopTick(DT);
+    if (FakeSocket.last && FakeSocket.last.readyState === 1 && FakeSocket.last !== sock) {
+      FakeSocket.last.close();
+    }
+  }
+  assert.equal(S.phase, 'ended', 'the client is still trying to reconnect');
+  assert.ok(S.tries < 40, `it made ${S.tries} attempts before giving up`);
+});
+
+test('leaving on purpose says so, and does not try to come back', async (t) => {
+  const sock = await joinedGuest(t);
+  quitGame();
+
+  assert.deepEqual(sock.sent, ['{"t":"quit"}'],
+    'the other pilot was never told this was a decision');
+  const S = coopState();
+  assert.equal(S.phase, 'off', 'quitting left the session half-open');
+  assert.equal(coopHolding(), false,
+    'walking out started a reconnect loop back into the game we just left');
+});
+
+// --- the other pilot's panel
+
+import { drawMateHud, MATE_HUD } from '../src/hud.js';
+
+const mateCtx = () => document.createElement('canvas').getContext('2d');
+
+function mateGame(over = {}) {
+  return {
+    mate: {
+      shield: 60, shieldMax: 100, lives: 2, alive: true, x: 100, y: 100, ...over,
+    },
+  };
+}
+
+test('the panel stays on screen', () => {
+  assert.ok(MATE_HUD.x >= 0, 'the panel starts off the left of the screen');
+  assert.ok(MATE_HUD.x + MATE_HUD.w <= VIEW_W,
+    `the panel runs ${MATE_HUD.x + MATE_HUD.w - VIEW_W}px past the right edge`);
+  // The segments have to fit inside it too, or the bar runs out of
+  // its own plate.
+  const bar = MATE_HUD.segs * (MATE_HUD.segW + MATE_HUD.segGap) - MATE_HUD.segGap;
+  assert.ok(bar <= MATE_HUD.w - MATE_HUD.pad * 2,
+    `the shield bar is ${bar}px inside a ${MATE_HUD.w}px plate`);
+});
+
+// The stub canvas throws on a non-finite coordinate, which is what
+// makes these worth running: every one of them is a shape of data the
+// panel has to survive rather than draw NaN from.
+test('the panel draws whatever state the other ship is in', () => {
+  const ctx = mateCtx();
+  for (const [what, over] of [
+    ['a full ship', {}],
+    ['no shield left', { shield: 0 }],
+    ['a lost ship', { alive: false, shield: 0 }],
+    ['no spare hulls', { lives: 0 }],
+    ['more hulls than the panel has room for', { lives: 99 }],
+    ['a late-run ceiling', { shield: 870, shieldMax: 1180 }],
+    ['a missing ceiling', { shieldMax: 0 }],
+    ['a shield above its own ceiling', { shield: 400, shieldMax: 100 }],
+  ]) {
+    drawMateHud(ctx, mateGame(over), { side: 'host', phase: 'playing' });
+    drawMateHud(ctx, mateGame(over), { side: 'guest', phase: 'paused' });
+    assert.ok(true, what);
+  }
+});
+
+test('the panel draws nothing when there is no other ship', () => {
+  // Called from the frame whenever a co-op run is in flight, and on
+  // the very first frames of one there is no mate object yet.
+  drawMateHud(mateCtx(), {}, { side: 'host', phase: 'playing' });
+  drawMateHud(mateCtx(), { mate: null }, { side: 'host', phase: 'playing' });
+});

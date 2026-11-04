@@ -29,7 +29,7 @@ import { pickups } from './pickups.js';
 import { held as keyHeld } from './input.js';
 import {
   isCoop, isHost, isGuest, coopState, coopSnapshot, guestHeld,
-  sendInput, sendSnapshot, setKinds,
+  sendInput, sendSnapshot, setKinds, quitGame,
 } from './coop.js';
 
 // Snapshots a second. Twenty is the usual answer for a game at this
@@ -323,4 +323,4 @@ export function coopFrame(game, dt) {
   return false;
 }
 
-export { isCoop, isHost, isGuest, coopState, coopSnapshot, DT };
+export { isCoop, isHost, isGuest, coopState, coopSnapshot, quitGame, DT };

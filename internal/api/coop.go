@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math/big"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -44,7 +45,25 @@ const (
 	// How long a room waits for its second player before it is swept.
 	// Long enough to send somebody a code, short enough that abandoned
 	// rooms do not pile up.
+	//
+	// Applies only before the pair is complete. It used to apply
+	// always, and was pushed forward on every join and never again —
+	// so a room with two happy pilots in it was swept ten minutes
+	// after the second one arrived, both sockets closed underneath
+	// them, mid-run. Any co-op game that lasted longer than ten
+	// minutes ended this way.
 	coopOpenTTL = 10 * time.Minute
+	// How long a slot is held for a pilot whose connection dropped
+	// without them saying they were leaving.
+	//
+	// A dropped socket is not a decision. A tab suspended on a phone,
+	// a train going into a tunnel, a laptop lid: the pilot wants to
+	// come back, and ending the run for both of them is the wrong
+	// answer to a bad network. So the room holds the empty slot and
+	// the other pilot waits. Long enough for a reconnect to actually
+	// happen, short enough that the pilot still there is not stuck
+	// staring at a held run for minutes.
+	coopResumeTTL = 45 * time.Second
 	// How long a room survives with nobody connected to it at all.
 	coopIdleTTL = 30 * time.Second
 	// How often the sweeper runs.
@@ -95,6 +114,13 @@ type coopConn interface {
 type coopPeer struct {
 	conn coopConn
 	side coopSide
+	// Said they were going, rather than simply stopped answering.
+	//
+	// The difference is the whole of what the other pilot is told. A
+	// socket closing looks identical either way from here, so the
+	// client says so before it goes, and this is where that is
+	// remembered until leave() can act on it.
+	quit bool
 	// Tokens for the per-peer rate limit, refilled on a clock rather
 	// than a timer: a goroutine per player to refill a counter is a
 	// goroutine per player too many.
@@ -136,6 +162,27 @@ type coopRoom struct {
 	// complete. See pairedFor.
 	paired      time.Duration
 	pairedSince time.Time
+
+	// Has the pair ever been complete?
+	//
+	// What a room is for changes once it has: before, it is a code
+	// waiting to be used and the open deadline applies; after, it is a
+	// game in progress and the only things that should end it are the
+	// pilots leaving.
+	started bool
+
+	// When one side's socket dropped without saying goodbye, and which
+	// side it was. Zero when both are here, and zeroed again when they
+	// come back. The slot is held until coopResumeTTL past this.
+	gone     time.Time
+	goneSide coopSide
+
+	// When the room last became completely empty. The idle deadline
+	// runs from here rather than from Created, which is what it used
+	// to run from — so a long game whose players both dropped was
+	// reaped on the next sweep instead of after the idle window, and
+	// neither of them could rejoin.
+	emptySince time.Time
 
 	// The registry's clock, carried so leave() can close an interval
 	// without reaching for the wall clock. A room that times itself
@@ -193,6 +240,10 @@ func (reg *coopRegistry) open(seed int64, hull int, hostID, hostName string) (*c
 			Created: reg.now(), expires: reg.now().Add(coopOpenTTL),
 			hostID: hostID, hostName: hostName,
 			now: reg.now,
+			// Empty from birth: a room nobody ever connects to is idle
+			// from the moment it is made, and the idle deadline is
+			// what reaps it.
+			emptySince: reg.now(),
 		}
 		reg.rooms[code] = room
 		return room, nil
@@ -222,9 +273,24 @@ func (reg *coopRegistry) sweepLocked() int {
 	n := 0
 	for code, r := range reg.rooms {
 		r.mu.Lock()
-		empty := r.host == nil && r.guest == nil
-		dead := r.closed || now.After(r.expires) ||
-			(empty && now.After(r.Created.Add(coopIdleTTL)))
+		// Four ways a room dies, and they are not interchangeable.
+		//
+		// The open deadline applies only before the pair is complete.
+		// It used to apply always: it was pushed forward on each join
+		// and never again, so a room with two pilots happily flying it
+		// was swept ten minutes after the second one joined and both
+		// sockets were closed underneath them, mid-run. Every co-op
+		// game longer than ten minutes ended that way.
+		//
+		// The idle deadline runs from when the room actually emptied,
+		// not from when it was created — from Created it had always
+		// passed by the time a real game ended, so a room both pilots
+		// dropped out of was reaped on the next sweep and neither
+		// could rejoin it.
+		dead := r.closed ||
+			(!r.started && now.After(r.expires)) ||
+			(!r.emptySince.IsZero() && now.After(r.emptySince.Add(coopIdleTTL))) ||
+			(!r.gone.IsZero() && now.After(r.gone.Add(coopResumeTTL)))
 		r.mu.Unlock()
 		if dead {
 			r.shut()
@@ -248,29 +314,65 @@ func (reg *coopRegistry) count() int {
 }
 
 // join attaches a connection to a side of the room.
-func (r *coopRoom) join(c coopConn, want coopSide, now time.Time) (*coopPeer, error) {
+//
+// The second return says whether this filled a slot the same side had
+// dropped out of mid-game, rather than arriving for the first time.
+// The two are very different things to the pilot already in the room:
+// one is "your partner is here, launch when ready" and the other is
+// "carry on, they are back".
+func (r *coopRoom) join(c coopConn, want coopSide, now time.Time) (*coopPeer, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
-		return nil, errors.New("that game has ended")
+		return nil, false, errors.New("that game has ended")
 	}
 	slot := &r.host
 	if want == sideGuest {
 		slot = &r.guest
 	}
 	if *slot != nil {
-		return nil, errRoomFull
+		return nil, false, errRoomFull
 	}
+	resumed := r.started && !r.gone.IsZero() && r.goneSide == want
 	p := &coopPeer{conn: c, side: want, tokens: coopRateBurst, last: now}
 	*slot = p
+	if resumed {
+		// They made it back inside the window; the slot stops being
+		// held and the deadline stops running.
+		r.gone = time.Time{}
+		r.goneSide = sideHost
+	}
+	r.emptySince = time.Time{}
 	// Once somebody is in, the room lives as long as they do rather
 	// than until the open-room deadline.
 	r.expires = now.Add(coopOpenTTL)
 	// The pair is complete: start counting the time they fly together.
-	if r.host != nil && r.guest != nil && r.pairedSince.IsZero() {
-		r.pairedSince = now
+	if r.host != nil && r.guest != nil {
+		r.started = true
+		if r.pairedSince.IsZero() {
+			r.pairedSince = now
+		}
 	}
-	return p, nil
+	return p, resumed, nil
+}
+
+// markQuit records that this peer is leaving on purpose. Called when
+// the client says so, before its socket goes.
+func (r *coopRoom) markQuit(p *coopPeer) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p.quit = true
+}
+
+// heldFor is how long the room has been holding a dropped pilot's
+// slot, and whether it is holding one at all.
+func (r *coopRoom) heldFor(now time.Time) (time.Duration, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.gone.IsZero() {
+		return 0, false
+	}
+	return now.Sub(r.gone), true
 }
 
 // pairedFor is how long the two have been connected to each other,
@@ -348,18 +450,56 @@ func (r *coopRoom) leave(p *coopPeer) {
 		r.paired = r.pairedForLocked(r.clock())
 		r.pairedSince = time.Time{}
 	}
-	// The host leaving ends the game: it was running the simulation,
-	// and without it the guest is drawing a world nobody is advancing.
-	// Saying so beats leaving them flying a frozen hull.
-	if p.side == sideHost {
+	now := r.clock()
+	// Said they were going, or simply stopped answering? Everything
+	// below turns on that, and it is the only thing this file has ever
+	// been unable to tell apart.
+	quit := p.quit
+	// Read under the lock and used after it: the switch below runs
+	// with r.mu released, because writing to a socket while holding a
+	// room's lock is how one slow peer stalls the other.
+	started := r.started
+	// A deliberate departure by the host ends the game: it was running
+	// the simulation, and without it the guest is drawing a world
+	// nobody is advancing. Saying so beats leaving them flying a
+	// frozen hull.
+	//
+	// A dropped host does NOT end it. That used to be the same branch,
+	// which is why a host whose wifi blinked ended their partner's run
+	// as surely as one who pressed Y.
+	if quit && p.side == sideHost {
 		r.closed = true
 	}
+	if !quit && r.started && other != nil {
+		// Hold their slot and start the clock on it. The pilot still
+		// here waits; see coopResumeTTL.
+		r.gone = now
+		r.goneSide = p.side
+	}
+	if r.host == nil && r.guest == nil && r.emptySince.IsZero() {
+		r.emptySince = now
+	}
 	r.mu.Unlock()
-	if other != nil {
-		_ = other.conn.WriteText(`{"t":"peer-left"}`)
+	if other == nil {
+		return
+	}
+	switch {
+	case quit:
+		// Named, because what the other pilot should do about it
+		// differs: a guest whose host quit is going back to the title
+		// whatever it does, and a host whose guest quit can carry on
+		// flying the run they are in.
+		_ = other.conn.WriteText(`{"t":"peer-quit","side":"` + sideName(p.side) + `"}`)
 		if p.side == sideHost {
 			other.conn.Close()
 		}
+	case started:
+		_ = other.conn.WriteText(`{"t":"peer-gone","side":"` + sideName(p.side) +
+			`","resumeSec":` + strconv.Itoa(int(coopResumeTTL/time.Second)) + `}`)
+	default:
+		// Never actually paired, so there is no run to hold: whoever
+		// is left is still sitting on the code.
+		_ = other.conn.WriteText(`{"t":"peer-left"}`)
 	}
 }
 
@@ -397,6 +537,22 @@ func (p *coopPeer) allow(now time.Time) bool {
 	}
 	p.tokens--
 	return true
+}
+
+// didQuit reports whether this peer said it was leaving.
+func (r *coopRoom) didQuit(p *coopPeer) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return p.quit
+}
+
+// rateOK charges one message to this peer's bucket. Used for the
+// messages that are handled here rather than relayed, so that a flood
+// of those is limited exactly as a flood of snapshots is.
+func (r *coopRoom) rateOK(from *coopPeer, now time.Time) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return from.allow(now)
 }
 
 // relay passes one message to the far side. Returns false if the
@@ -564,7 +720,7 @@ func (s *Server) coopSocket(side coopSide) http.HandlerFunc {
 			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		peer, err := room.join(conn, side, s.now())
+		peer, resumed, err := room.join(conn, side, s.now())
 		if err != nil {
 			// Said over the socket rather than as a status, because by
 			// now the handshake has already succeeded.
@@ -576,7 +732,13 @@ func (s *Server) coopSocket(side coopSide) http.HandlerFunc {
 		defer func() {
 			room.leave(peer)
 			conn.Close()
-			if side == sideHost {
+			// Only a host who said they were leaving takes the room
+			// with them. This used to be unconditional, so a host
+			// whose connection dropped for a second destroyed the room
+			// and with it any chance of either pilot getting back into
+			// the run. The sweeper reaps a room nobody returns to; see
+			// coopResumeTTL.
+			if side == sideHost && room.didQuit(peer) {
 				s.coop.drop(code)
 			}
 		}()
@@ -590,10 +752,25 @@ func (s *Server) coopSocket(side coopSide) http.HandlerFunc {
 		hello, _ := json.Marshal(map[string]any{
 			"t": "joined", "side": sideName(side),
 			"seed": room.Seed, "hull": room.Hull, "peer": other != nil,
+			// Back into a run already in progress, rather than at the
+			// start of one. The client has to know: one means "launch
+			// when ready" and the other means "you are already flying".
+			"resumed": resumed,
+			// How long a dropped pilot's slot is held. Sent now rather
+			// than only in peer-gone, because the side that needs it
+			// most is the one whose own socket dropped — and that side
+			// is not here to be told anything when it happens. It
+			// stops the client having its own copy of this number,
+			// which is the kind of pair that drifts.
+			"resumeSec": int(coopResumeTTL / time.Second),
 		})
 		_ = conn.WriteText(string(hello))
 		if other != nil {
-			_ = other.conn.WriteText(`{"t":"peer-joined"}`)
+			if resumed {
+				_ = other.conn.WriteText(`{"t":"peer-back","side":"` + sideName(side) + `"}`)
+			} else {
+				_ = other.conn.WriteText(`{"t":"peer-joined"}`)
+			}
 		}
 
 		for {
@@ -604,6 +781,26 @@ func (s *Server) coopSocket(side coopSide) http.HandlerFunc {
 			if len(data) > coopMaxMessage {
 				return
 			}
+			// Text from a client is addressed to this end and is never
+			// passed on.
+			//
+			// It used to be relayed like anything else, and no client
+			// has ever sent any — which meant a peer could put
+			// {"t":"refused"} or a {"t":"joined"} with a seed of its
+			// choosing on the far side's socket, and the far side could
+			// not tell it from the server. Only the server speaks to a
+			// client in text now, and the only thing a client says back
+			// is that it is leaving.
+			if op == 1 {
+				if !room.rateOK(peer, s.now()) {
+					continue
+				}
+				if clientQuit(data) {
+					room.markQuit(peer)
+					return
+				}
+				continue
+			}
 			if !room.relay(peer, op, data, s.now()) {
 				// Over its rate. Dropped rather than disconnected: a
 				// burst is far more likely to be a slow frame catching
@@ -613,6 +810,20 @@ func (s *Server) coopSocket(side coopSide) http.HandlerFunc {
 			}
 		}
 	}
+}
+
+// clientQuit recognises the one thing a client says to this server.
+//
+// Deliberately narrow: anything else a client sends in text is
+// dropped, so this is the whole of the client-to-server vocabulary.
+func clientQuit(data []byte) bool {
+	var msg struct {
+		T string `json:"t"`
+	}
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return false
+	}
+	return msg.T == "quit"
 }
 
 func sideName(s coopSide) string {

@@ -398,8 +398,10 @@ func TestTheGuestLeavingTellsTheHost(t *testing.T) {
 	guest.waitFor(t, "joined", 2*time.Second)
 	host.waitFor(t, "peer-joined", 2*time.Second)
 
+	// Dropped, not quit: the guest's slot is held and the host is told
+	// to wait rather than told they are alone.
 	guest.c.Close()
-	if host.waitFor(t, "peer-left", 3*time.Second) == nil {
+	if host.waitFor(t, "peer-gone", 3*time.Second) == nil {
 		t.Fatal("the host was not told the guest had gone")
 	}
 	// The host keeps playing: its own simulation is unaffected.
@@ -411,9 +413,14 @@ func TestTheGuestLeavingTellsTheHost(t *testing.T) {
 	}
 }
 
-func TestTheHostLeavingEndsIt(t *testing.T) {
+func TestTheHostQuittingEndsIt(t *testing.T) {
 	// The host runs the simulation. Without it the guest is drawing a
 	// world nobody is advancing, which is worse than being told.
+	//
+	// Quitting, specifically. A host that merely stops answering is
+	// the test below, and the two were the same branch until a pilot
+	// pointed out that a blink of wifi ended their partner's run as
+	// surely as pressing Y did.
 	srv, api, st := coopServer(t)
 	code := openRoom(t, srv, st, "rom")
 	host := wsDial(t, srv.URL, "/api/coop/"+code+"/host")
@@ -421,9 +428,9 @@ func TestTheHostLeavingEndsIt(t *testing.T) {
 	guest := wsDial(t, srv.URL, "/api/coop/"+code+"/guest")
 	guest.waitFor(t, "joined", 2*time.Second)
 
-	host.c.Close()
-	if guest.waitFor(t, "peer-left", 3*time.Second) == nil {
-		t.Fatal("the guest was not told the host had gone")
+	host.send(t, 1, []byte(`{"t":"quit"}`))
+	if guest.waitFor(t, "peer-quit", 3*time.Second) == nil {
+		t.Fatal("the guest was not told the host had quit")
 	}
 	// ...and the room goes with it, rather than lingering for a guest
 	// who can never be joined again.
@@ -434,7 +441,121 @@ func TestTheHostLeavingEndsIt(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatal("the room outlived its host")
+	t.Fatal("the room outlived the host that quit it")
+}
+
+// The same departure, undeclared.
+//
+// A dropped socket is not a decision: a tab suspended on a phone, a
+// train entering a tunnel, a laptop lid. The run is held rather than
+// ended, and the room has to still be there for the host to come back
+// into — which it was not, because the host's handler dropped the room
+// on its way out whatever the reason.
+func TestTheHostDroppingHoldsTheRun(t *testing.T) {
+	srv, api, st := coopServer(t)
+	code := openRoom(t, srv, st, "rom")
+	host := wsDial(t, srv.URL, "/api/coop/"+code+"/host")
+	host.waitFor(t, "joined", 2*time.Second)
+	guest := wsDial(t, srv.URL, "/api/coop/"+code+"/guest")
+	guest.waitFor(t, "joined", 2*time.Second)
+	host.waitFor(t, "peer-joined", 2*time.Second)
+
+	host.c.Close()
+	msg := guest.waitFor(t, "peer-gone", 3*time.Second)
+	if msg == nil {
+		t.Fatal("the guest was not told the host had dropped")
+	}
+	// With how long it is worth waiting, so the guest can count down
+	// rather than wait on a promise with no end.
+	if sec, ok := msg["resumeSec"].(float64); !ok || sec <= 0 {
+		t.Fatalf("the guest was not told how long the slot is held: %v", msg)
+	}
+	if msg["side"] != "host" {
+		t.Fatalf("the guest was not told which pilot dropped: %v", msg)
+	}
+	if api.coop.find(code) == nil {
+		t.Fatal("the room went with the host that dropped out of it; nobody can come back")
+	}
+
+	// And back in, on the same code, into the run already in progress.
+	again := wsDial(t, srv.URL, "/api/coop/"+code+"/host")
+	hello := again.waitFor(t, "joined", 2*time.Second)
+	if hello["resumed"] != true {
+		t.Fatalf("the returning host was not told it was rejoining a run: %v", hello)
+	}
+	if guest.waitFor(t, "peer-back", 3*time.Second) == nil {
+		t.Fatal("the guest was never told the host was back; its run stays paused for ever")
+	}
+}
+
+// The slot is held, not held open for ever.
+func TestAHeldSlotIsSweptOnceTheWindowPasses(t *testing.T) {
+	st := store.NewMemory()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	at := time.Now()
+	api := New(st, log, Config{RateLimitPerSec: 1e6, RateBurst: 1e6})
+	api.SetClock(func() time.Time { return at })
+	api.coop = newCoopRegistry(api.now)
+
+	room, err := api.coop.open(1, 0, "p-rom", "rom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hp, _, err := room.join(&wsConnStub{}, sideHost, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := room.join(&wsConnStub{}, sideGuest, at); err != nil {
+		t.Fatal(err)
+	}
+	room.leave(hp) // dropped, not quit: the slot is held
+	at = at.Add(coopResumeTTL / 2)
+	api.coop.sweep()
+	if api.coop.count() != 1 {
+		t.Fatal("a held slot was swept while the pilot could still come back")
+	}
+	at = at.Add(coopResumeTTL)
+	api.coop.sweep()
+	if api.coop.count() != 0 {
+		t.Fatal("a slot was held open for a pilot who never came back")
+	}
+}
+
+// The ten-minute bug.
+//
+// expires was pushed forward on each join and checked unconditionally,
+// so a room with two pilots happily flying it was swept ten minutes
+// after the second one arrived and both sockets were closed underneath
+// them, mid-run. Every co-op game longer than ten minutes ended that
+// way, and it read as the backend falling over.
+func TestALiveRoomOutlivesTheOpenDeadline(t *testing.T) {
+	st := store.NewMemory()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	at := time.Now()
+	api := New(st, log, Config{RateLimitPerSec: 1e6, RateBurst: 1e6})
+	api.SetClock(func() time.Time { return at })
+	api.coop = newCoopRegistry(api.now)
+
+	room, err := api.coop.open(1, 0, "p-rom", "rom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hc, gc := &wsConnStub{}, &wsConnStub{}
+	if _, _, err := room.join(hc, sideHost, at); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := room.join(gc, sideGuest, at); err != nil {
+		t.Fatal(err)
+	}
+
+	at = at.Add(coopOpenTTL + time.Minute)
+	api.coop.sweep()
+	if api.coop.count() != 1 {
+		t.Fatal("a room with both pilots still in it was swept; their run ended mid-flight")
+	}
+	if hc.closed || gc.closed {
+		t.Fatal("a live pilot's socket was closed by the sweeper")
+	}
 }
 
 func TestRoomsAreSweptWhenNobodyComes(t *testing.T) {
@@ -577,17 +698,21 @@ func TestAGuestCannotJoinAfterTheHostHasLeft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hostPeer, err := room.join(&wsConnStub{}, sideHost, time.Now())
+	hostPeer, _, err := room.join(&wsConnStub{}, sideHost, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The host goes, and the room has not been dropped yet.
+	// The host quits, and the room has not been dropped yet. Quits
+	// rather than drops: a dropped host keeps its room on purpose now,
+	// so that it has something to come back to, and the closed-room
+	// race this test is about is the one a deliberate quit opens.
+	room.markQuit(hostPeer)
 	room.leave(hostPeer)
 	if api.coop.find(room.Code) == nil {
 		t.Fatal("the fixture dropped the room; this is about the window before that")
 	}
-	if _, err := room.join(&wsConnStub{}, sideGuest, time.Now()); err == nil {
-		t.Fatal("a guest joined a room whose host had already left")
+	if _, _, err := room.join(&wsConnStub{}, sideGuest, time.Now()); err == nil {
+		t.Fatal("a guest joined a room whose host had already quit")
 	}
 }
 
@@ -648,42 +773,142 @@ func TestLeavingTellsTheRightSide(t *testing.T) {
 		t.Fatal(err)
 	}
 	hc, gc := &wsConnStub{}, &wsConnStub{}
-	hp, err := room.join(hc, sideHost, time.Now())
+	hp, _, err := room.join(hc, sideHost, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	gp, err := room.join(gc, sideGuest, time.Now())
+	gp, _, err := room.join(gc, sideGuest, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
+	room.markQuit(gp)
 	room.leave(gp)
-	if !strings.Contains(strings.Join(hc.said(), " "), "peer-left") {
-		t.Fatalf("the host was not told the guest left: %v", hc.said())
+	if !strings.Contains(strings.Join(hc.said(), " "), "peer-quit") {
+		t.Fatalf("the host was not told the guest quit: %v", hc.said())
+	}
+	// Named, so the host knows it is a departure and not a pause, and
+	// can carry on flying the run it is in.
+	if !strings.Contains(strings.Join(hc.said(), " "), `"side":"guest"`) {
+		t.Fatalf("the host was not told which pilot quit: %v", hc.said())
 	}
 	if hc.closed {
 		t.Fatal("the guest leaving closed the host's connection")
 	}
 
-	// Host leaves: the guest hears about it and is closed, because
+	// Host quits: the guest hears about it and is closed, because
 	// there is no longer anything advancing the world it is drawing.
 	room2, err := api.coop.open(2, 0, "p-rom", "rom")
 	if err != nil {
 		t.Fatal(err)
 	}
 	hc2, gc2 := &wsConnStub{}, &wsConnStub{}
-	hp2, err := room2.join(hc2, sideHost, time.Now())
+	hp2, _, err := room2.join(hc2, sideHost, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := room2.join(gc2, sideGuest, time.Now()); err != nil {
+	if _, _, err := room2.join(gc2, sideGuest, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	_ = hp
+	room2.markQuit(hp2)
 	room2.leave(hp2)
-	if !strings.Contains(strings.Join(gc2.said(), " "), "peer-left") {
-		t.Fatalf("the guest was not told the host left: %v", gc2.said())
+	said2 := strings.Join(gc2.said(), " ")
+	if !strings.Contains(said2, "peer-quit") || !strings.Contains(said2, `"side":"host"`) {
+		t.Fatalf("the guest was not told the host quit: %v", gc2.said())
 	}
 	if !gc2.closed {
 		t.Fatal("the guest was left connected to a game with no simulation behind it")
+	}
+
+	// And the undeclared version of each, which says wait rather than
+	// says goodbye, and does not close anybody.
+	room3, err := api.coop.open(3, 0, "p-rom", "rom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hc3, gc3 := &wsConnStub{}, &wsConnStub{}
+	hp3, _, err := room3.join(hc3, sideHost, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := room3.join(gc3, sideGuest, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	room3.leave(hp3)
+	if !strings.Contains(strings.Join(gc3.said(), " "), "peer-gone") {
+		t.Fatalf("the guest was not told to wait for a dropped host: %v", gc3.said())
+	}
+	if gc3.closed {
+		t.Fatal("a dropped host closed its partner's connection; the run cannot resume")
+	}
+	if _, held := room3.heldFor(time.Now()); !held {
+		t.Fatal("the dropped host's slot is not being held")
+	}
+}
+
+// A peer cannot put words in the server's mouth.
+//
+// Text used to be relayed like anything else, and no client has ever
+// sent any — so whatever one peer typed arrived at the other as a
+// server message it had no way to tell from the real thing. A forged
+// {"t":"refused"} ends the far side's game; a forged {"t":"joined"}
+// hands it a seed of the sender's choosing, which is a different hull.
+// Only the server speaks in text now.
+func TestAPeerCannotForgeAServerMessage(t *testing.T) {
+	srv, _, st := coopServer(t)
+	code := openRoom(t, srv, st, "rom")
+	host := wsDial(t, srv.URL, "/api/coop/"+code+"/host")
+	host.waitFor(t, "joined", 2*time.Second)
+	guest := wsDial(t, srv.URL, "/api/coop/"+code+"/guest")
+	guest.waitFor(t, "joined", 2*time.Second)
+	host.waitFor(t, "peer-joined", 2*time.Second)
+
+	for _, forged := range []string{
+		`{"t":"refused","why":"you are not welcome"}`,
+		`{"t":"joined","seed":99,"hull":0,"peer":true}`,
+		`{"t":"peer-quit","side":"guest"}`,
+		`{"t":"peer-gone","side":"guest","resumeSec":45}`,
+	} {
+		host.send(t, 1, []byte(forged))
+		if got := guest.waitFor(t, "refused", 300*time.Millisecond); got != nil {
+			t.Fatalf("%s reached the far side as %v", forged, got)
+		}
+	}
+
+	// ...and the sender is still connected: unknown text is dropped,
+	// not grounds for disconnection. A client one version ahead saying
+	// something this build has not heard of must not lose its game
+	// over it.
+	host.send(t, 2, []byte{2, 0, 0})
+	if guest.waitFor(t, "anything-at-all", 200*time.Millisecond) != nil {
+		t.Fatal("the binary frame came back as text")
+	}
+}
+
+// The quit is rate limited like everything else, and a flood of it
+// neither crashes nor escapes the bucket.
+func TestAFloodOfTextIsRateLimited(t *testing.T) {
+	_, api, _ := coopServer(t)
+	room, err := api.coop.open(1, 0, "p-rom", "rom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now()
+	hp, _, err := room.join(&wsConnStub{}, sideHost, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed := 0
+	for i := 0; i < coopRateBurst*2; i++ {
+		if room.rateOK(hp, at) {
+			allowed++
+		}
+	}
+	if allowed > coopRateBurst {
+		t.Fatalf("%d of %d text frames were allowed on a burst of %d",
+			allowed, coopRateBurst*2, coopRateBurst)
+	}
+	if allowed == 0 {
+		t.Fatal("the bucket allowed nothing at all; a pilot could never say they were leaving")
 	}
 }
