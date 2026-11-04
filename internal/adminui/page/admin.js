@@ -22,6 +22,50 @@
 
 const TOKEN_KEY = 'rnr.admin.token';
 
+// ------------------------------------------------------------- colours
+//
+// RUIN is the game's own palette and the default, because the person
+// looking at this page usually has the game open in another tab. The
+// rest exist because that stops being the right trade the moment
+// somebody is reading this for an hour in daylight, which the game's
+// palette was never designed for. See admin.css, which holds each one
+// in full.
+//
+// localStorage rather than the sessionStorage the token lives in: a
+// credential should not outlive the tab and a preference should.
+const SCHEME_KEY = 'rnr.admin.scheme';
+const SCHEMES = [
+  ['ruin', 'RUIN'],
+  ['ember', 'EMBER'],
+  ['slate', 'SLATE (LIGHT)'],
+  ['phosphor', 'PHOSPHOR'],
+];
+
+function savedScheme() {
+  try {
+    const want = localStorage.getItem(SCHEME_KEY);
+    // Checked against the list rather than trusted: this is the one
+    // value on the page that comes from storage and goes straight
+    // into the document, and an unknown one would leave the page
+    // unstyled rather than merely wrong.
+    if (SCHEMES.some(([id]) => id === want)) return want;
+  } catch { /* private mode, or storage turned off */ }
+  return 'ruin';
+}
+
+// An attribute on <html>, not a style property: the policy on this
+// listener says style-src 'self', so anything inline is refused
+// outright and would leave the page with no palette at all.
+function applyScheme(id) {
+  document.documentElement.dataset.scheme = id;
+  try { localStorage.setItem(SCHEME_KEY, id); } catch { /* nothing lost but the preference */ }
+}
+
+// At load, before anything is drawn, so the sign-in screen is in the
+// chosen scheme too rather than flashing the default and then changing
+// under the person reading it.
+applyScheme(savedScheme());
+
 // ---------------------------------------------------------------- dom
 
 // Build an element. Children that are strings become text nodes, never
@@ -168,6 +212,15 @@ function buildShell() {
       el('span', { class: 'sub' }, 'OPERATOR'),
       el('span', { class: 'spacer' }),
       el('span', { class: 'sub', id: 'session' }),
+      el('label', { class: 'sub', for: 'scheme' }, 'COLOURS'),
+      el('select', {
+        id: 'scheme',
+        'aria-label': 'Colour scheme',
+        on: { change: (e) => applyScheme(e.target.value) },
+      }, SCHEMES.map(([id, label]) => el('option', {
+        value: id,
+        selected: id === savedScheme(),
+      }, label))),
       el('button', {
         id: 'signout',
         on: {

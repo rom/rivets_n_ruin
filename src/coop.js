@@ -164,6 +164,21 @@ export function decodeInput(buf) {
 
 const shipFlags = (p) => (p.alive ? 1 : 0) | (p.flip > 0 ? 2 : 0) | (p.thrusting ? 4 : 0);
 
+// Everything the far end needs to draw a ship AND to say how it is
+// doing. The second half of that is newer than the first: the other
+// pilot's shield and spare ships are on screen now, in the mini-HUD,
+// and a panel cannot show a number nobody sent.
+//
+// Shield is two bytes, not one. It was one, clamped to 255, which is
+// fine for a stock hull at 100 and wrong from hull four onwards: the
+// refit raises shieldMax every hull and it passes a thousand by the
+// end of a long run, so a pilot at 400 of 600 was transmitted as 255
+// and — because the guest takes its own shield from the host rather
+// than predicting it — actually had its shield cut to 255 on screen.
+//
+// The ceiling goes with it. A bar is a fraction, and a fraction needs
+// its denominator; without it the guest drew the other pilot's 300
+// against its own 100 and showed a bar three times over.
 function writeShip(w, p, camX) {
   w.i16(p.x - camX);
   w.i16(p.y);
@@ -171,7 +186,14 @@ function writeShip(w, p, camX) {
   w.i16(p.vy / 4);
   w.i8(p.facing);
   w.u8(shipFlags(p));
-  w.u8(Math.max(0, Math.min(255, Math.round(p.shield))));
+  w.u16(Math.max(0, Math.round(p.shield)));
+  w.u16(Math.max(1, Math.round(p.shieldMax || 1)));
+  // Spare hulls. Capped at PICKUP.maxLives, which is 6, so a byte is
+  // room to spare. This used to be sent once for the whole game, off
+  // a game.lives that has never existed — the field is the player's —
+  // so the byte was always zero and the guest copied it into a field
+  // nothing reads. Per ship, because the two pilots lose their own.
+  w.u8(Math.max(0, Math.min(255, p.lives | 0)));
 }
 
 function readShip(r, camX) {
@@ -181,9 +203,11 @@ function readShip(r, camX) {
   const vy = r.i16() * 4;
   const facing = r.i8();
   const flags = r.u8();
-  const shield = r.u8();
+  const shield = r.u16();
+  const shieldMax = r.u16();
+  const lives = r.u8();
   return {
-    x, y, vx, vy, facing, shield,
+    x, y, vx, vy, facing, shield, shieldMax, lives,
     alive: (flags & 1) !== 0,
     flip: (flags & 2) !== 0 ? 1 : 0,
     thrusting: (flags & 4) !== 0,
@@ -212,7 +236,6 @@ export function encodeSnapshot(game, second, tick, pools) {
   w.f32(camX);
   w.u8(STATES.indexOf(game.state) < 0 ? 0 : STATES.indexOf(game.state));
   w.u32(Math.max(0, game.score | 0));
-  w.u8(Math.max(0, Math.min(255, game.lives | 0)));
   w.u8(Math.max(0, Math.min(255, game.levelIndex | 0)));
 
   writeShip(w, game.player, camX);
@@ -325,7 +348,6 @@ function readSnapshot(buf) {
   const camX = r.f32();
   const state = STATES[r.u8()] || 'play';
   const score = r.u32();
-  const lives = r.u8();
   const levelIndex = r.u8();
 
   const ships = [readShip(r, camX), readShip(r, camX)];
@@ -384,7 +406,7 @@ function readSnapshot(buf) {
   }
 
   return {
-    tick, camX, state, score, lives, levelIndex,
+    tick, camX, state, score, levelIndex,
     ships, foes: foeList, playerShots: mine, enemyShots: theirs,
     interceptors: chasers, pickups: loot,
   };
@@ -392,8 +414,27 @@ function readSnapshot(buf) {
 
 // --- the connection
 
+// How often a dropped pilot tries to get back in, and how long after
+// giving up the notice stays on screen.
+const RETRY_EVERY = 2;
+// A backstop on attempts, in case the server never said how long it
+// holds a slot. The window itself comes from the server — this is not
+// a second copy of it, it is the thing that stops an endless retry
+// loop if that number is missing.
+const MAX_TRIES = 30;
+// The countdown a guest gets when the host quits. Short: long enough
+// to read why the run ended, not long enough to be a wait.
+const QUIT_COUNTDOWN = 4;
+
 const S = {
-  // 'off' | 'opening' | 'waiting' | 'playing' | 'ended'
+  // 'off' | 'opening' | 'waiting' | 'playing' | 'paused'
+  //       | 'reconnecting' | 'ended'
+  //
+  // 'paused' is the other pilot's connection having dropped, with
+  // their slot held; 'reconnecting' is ours having dropped and us
+  // trying to get back in. Neither is an ending, which is the whole
+  // point of having them: a dropped socket is a bad network, not a
+  // decision, and it used to end the run for both pilots.
   phase: 'off',
   side: null,        // 'host' | 'guest'
   code: '',
@@ -410,14 +451,51 @@ const S = {
   guestHeld: new Set(),
   sent: 0,
   received: 0,
+
+  // --- leaving, on purpose or otherwise
+  //
+  // Which side chose to leave, when somebody did. Null when nobody
+  // has: a socket that simply stopped answering leaves this alone,
+  // and that difference is what the two notices below are built on.
+  quitBy: null,
+  // Seconds left on the guest's countdown back to the title after the
+  // host quit. Zero when there is no countdown running.
+  endIn: 0,
+  // A hold: how long we have been waiting, and how long the server
+  // said it would keep the slot. The window comes from the server so
+  // the client does not keep its own copy of a number the server
+  // owns.
+  heldFor: 0,
+  resumeSec: 0,
+  // Our own reconnect attempts: seconds until the next one, and how
+  // many we have made.
+  retryIn: 0,
+  tries: 0,
+  // Set while leaveGame is closing the socket on purpose, so the
+  // close handler does not read it as a drop and start reconnecting
+  // to a game the pilot has just walked out of.
+  leaving: false,
 };
 
 export const coopState = () => S;
-export const isCoop = () => S.phase === 'playing' || S.phase === 'waiting';
+// A held run is still a co-op run. Including the two waiting phases
+// here is what keeps the second ship on screen and the run's shape
+// intact across a drop, so that coming back resumes rather than
+// restarts.
+export const isCoop = () => S.phase === 'playing' || S.phase === 'waiting'
+  || S.phase === 'paused' || S.phase === 'reconnecting';
 export const isHost = () => S.side === 'host';
 export const isGuest = () => S.side === 'guest';
 export const coopSnapshot = () => S.snap;
 export const guestHeld = () => S.guestHeld;
+// The run is held and must not advance: either we are waiting for the
+// other pilot's socket or they are waiting for ours. Nothing moves on
+// either machine in the meantime — a host that kept simulating would
+// fly the returning guest's ship into whatever arrived while they
+// were gone.
+export const coopHolding = () => S.phase === 'paused' || S.phase === 'reconnecting';
+// Seconds left before the hold gives up, floored at zero.
+export const coopHoldLeft = () => Math.max(0, Math.ceil(S.resumeSec - S.heldFor));
 
 function wsURL(path) {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -437,9 +515,42 @@ function attach(sock) {
         S.hull = m.hull;
         S.peerHere = !!m.peer;
         S.phase = m.peer ? 'playing' : 'waiting';
+        if (m.resumeSec) S.resumeSec = m.resumeSec;
+        // Back in. Not a fresh pairing: the run is still going, so
+        // nothing resets and the hold simply lifts.
+        if (m.resumed) {
+          S.heldFor = 0;
+          S.retryIn = 0;
+          S.tries = 0;
+          S.error = null;
+        }
       } else if (m.t === 'peer-joined') {
         S.peerHere = true;
         S.phase = 'playing';
+      } else if (m.t === 'peer-back') {
+        // Their socket is back and the run goes on from where it
+        // stopped.
+        S.peerHere = true;
+        S.phase = 'playing';
+        S.heldFor = 0;
+        S.error = null;
+      } else if (m.t === 'peer-gone') {
+        // Dropped without saying so. Their slot is held; we wait.
+        S.peerHere = false;
+        S.phase = 'paused';
+        S.heldFor = 0;
+        if (m.resumeSec) S.resumeSec = m.resumeSec;
+      } else if (m.t === 'peer-quit') {
+        // A decision, not a network. Named, because what to do about
+        // it differs: a guest whose host quit is going back to the
+        // title either way and gets told why first, and a host whose
+        // guest quit can keep flying the run it is in.
+        S.peerHere = false;
+        S.quitBy = m.side === 'guest' ? 'guest' : 'host';
+        S.phase = 'ended';
+        S.error = S.quitBy === 'host'
+          ? 'the first pilot quit the game' : 'the second pilot quit the game';
+        if (S.quitBy === 'host' && S.side === 'guest') S.endIn = QUIT_COUNTDOWN;
       } else if (m.t === 'peer-left') {
         S.peerHere = false;
         S.phase = 'ended';
@@ -464,11 +575,31 @@ function attach(sock) {
     }
   };
   sock.onclose = () => {
-    if (S.phase !== 'ended') {
-      S.phase = 'ended';
-      S.error = S.error || 'the connection closed';
-    }
     S.sock = null;
+    // Walked out on purpose, or already over: nothing to recover.
+    if (S.leaving || S.phase === 'ended' || S.phase === 'off') return;
+    // Our own socket went while a run was under way. That is the
+    // other half of the drop the far side is being told about: try to
+    // get back into the room, which the server is holding for exactly
+    // this. It used to end here, which meant a tab suspended for a
+    // moment cost the run.
+    if (S.code && (S.phase === 'playing' || S.phase === 'paused'
+      || S.phase === 'reconnecting')) {
+      // The elapsed clock is only reset on the way IN to reconnecting.
+      // Resetting it on every close reset it on every failed attempt
+      // too, so the give-up deadline never arrived and the client
+      // hammered a room that had long since been swept.
+      if (S.phase !== 'reconnecting') {
+        S.heldFor = 0;
+        S.retryIn = 0;
+      }
+      S.phase = 'reconnecting';
+      S.peerHere = false;
+      S.error = null;
+      return;
+    }
+    S.phase = 'ended';
+    S.error = S.error || 'the connection closed';
   };
   sock.onerror = () => { S.error = S.error || 'the connection failed'; };
 }
@@ -564,6 +695,10 @@ export async function joinGame(code, token) {
 }
 
 export function leaveGame() {
+  // Flagged before the close, so the close handler knows this was a
+  // decision and does not start trying to reconnect to a game the
+  // pilot has just walked out of.
+  S.leaving = true;
   if (S.sock) {
     try { S.sock.close(); } catch { /* already gone */ }
   }
@@ -575,6 +710,34 @@ export function leaveGame() {
   S.snap = null;
   S.error = null;
   S.guestHeld = new Set();
+  S.quitBy = null;
+  S.endIn = 0;
+  S.heldFor = 0;
+  S.resumeSec = 0;
+  S.retryIn = 0;
+  S.tries = 0;
+  S.leaving = false;
+}
+
+/**
+ * Leave, and say so first.
+ *
+ * The whole difference between this and closing the tab. A socket
+ * going quiet is indistinguishable from a bad network at both ends, so
+ * the one case where it is not a bad network says as much while it
+ * still can — and the other pilot gets told what happened instead of
+ * being made to wait out a hold for somebody who is never coming back.
+ *
+ * Sent on the socket rather than as a request: it is the connection
+ * that is ending, the server is already listening to it, and a POST
+ * that has to be authenticated and routed is a lot of machinery for
+ * one word said on a pipe that is open.
+ */
+export function quitGame() {
+  if (S.sock && S.sock.readyState === 1) {
+    try { S.sock.send('{"t":"quit"}'); } catch { /* going anyway */ }
+  }
+  leaveGame();
 }
 
 function send(data) {
@@ -599,4 +762,55 @@ export function sendSnapshot(game, second, tick, pools) {
 export function hostStalled() {
   return S.side === 'guest' && S.phase === 'playing'
     && S.snapAt > 0 && performance.now() - S.snapAt > 500;
+}
+
+/**
+ * The clocks that are not the game's.
+ *
+ * Driven from the frame rather than from timers, and this is the
+ * reason: all three of these run while the run itself is stopped, and
+ * every one of them has to be something a test can step through
+ * rather than wait out. A setTimeout here would also outlive the
+ * screen that started it, which for a reconnect loop means hammering
+ * a room the pilot left minutes ago.
+ */
+export function coopTick(dt) {
+  // The guest's countdown back to the title after the host quit.
+  if (S.endIn > 0) S.endIn = Math.max(0, S.endIn - dt);
+
+  if (S.phase === 'paused') {
+    S.heldFor += dt;
+    if (S.resumeSec > 0 && S.heldFor > S.resumeSec) {
+      // The server has stopped holding their slot, so there is
+      // nothing left to wait for.
+      S.phase = 'ended';
+      S.error = 'the other pilot did not come back';
+    }
+    return;
+  }
+
+  if (S.phase !== 'reconnecting') return;
+
+  S.heldFor += dt;
+  // Past the window the server quoted, the room is gone and so is any
+  // point in asking for it again.
+  if ((S.resumeSec > 0 && S.heldFor > S.resumeSec) || S.tries > MAX_TRIES) {
+    S.phase = 'ended';
+    S.error = 'could not get back into the game';
+    return;
+  }
+  S.retryIn -= dt;
+  if (S.retryIn > 0 || S.sock) return;
+  S.retryIn = RETRY_EVERY;
+  S.tries++;
+  // Straight back onto the socket, with no POST in front of it. The
+  // room already knows which account holds this side — the host's
+  // came with the room and the guest's was recorded at /join — so
+  // there is nothing to claim a second time, and one fewer thing that
+  // can fail while trying to recover.
+  try {
+    attach(new WebSocket(wsURL(`/api/coop/${S.code}/${S.side}`)));
+  } catch {
+    S.sock = null;
+  }
 }

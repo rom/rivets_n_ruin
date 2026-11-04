@@ -7,17 +7,34 @@
  * pilot names and client error messages written by other people, so
  * that matters more here than it does on the game.
  *
- * Same palette as the game's default scheme, deliberately: the person
- * looking at this has the game open in another tab, and a tool that
- * looks like a different product makes them check twice which one they
- * are about to delete something in.
+ * RUIN, the default, is the game's own palette, deliberately: the
+ * person looking at this has the game open in another tab, and a tool
+ * that looks like a different product makes them check twice which one
+ * they are about to delete something in.
+ *
+ * The others exist because that reasoning stops applying the moment
+ * somebody is looking at this page for an hour in daylight, which the
+ * game's palette was never designed for. Each one is the whole palette
+ * rather than a filter over the default: a scheme that only overrides
+ * the background leaves hardcoded panels behind it, which is what the
+ * eight literal colours further down this file used to be.
+ *
+ * A scheme is an attribute on <html>, not a stylesheet swap and not a
+ * style property written from script: the policy on this listener says
+ * style-src 'self', so anything inline is refused, and switching a
+ * whole palette by attribute costs one write and no reflow of rules.
  */
 
-:root {
+:root,
+:root[data-scheme="ruin"] {
   color-scheme: dark;
   --bg: #05070a;
   --panel: #0a0d13;
+  --raise: #11161e;
   --line: #232b36;
+  --line-soft: #161c25;
+  --row-hover: #0c1017;
+  --note-bg: #0b1219;
   --text: #b8c4d2;
   --dim: #5d6a7a;
   --cool: #4fd0e8;
@@ -25,7 +42,95 @@
   --warm: #ff7a2f;
   --warm-hi: #ffd24a;
   --danger: #e8434f;
+  --danger-line: #5a2228;
+  --bad-bg: #170c0e;
+  --bad-text: #ffb0b5;
   --good: #46e07a;
+  --good-bg: #0a1510;
+  --good-text: #a9f0c3;
+}
+
+/* EMBER. The same room with the lights off: warm monochrome, one cool
+   accent kept for links so they are still findable. */
+:root[data-scheme="ember"] {
+  color-scheme: dark;
+  --bg: #0a0705;
+  --panel: #140d08;
+  --raise: #1d140c;
+  --line: #3a2a18;
+  --line-soft: #241a10;
+  --row-hover: #16100a;
+  --note-bg: #17100a;
+  --text: #e8cfa8;
+  --dim: #8a7250;
+  --cool: #ffb347;
+  --cool-hi: #ffe0a8;
+  --warm: #ff7a2f;
+  --warm-hi: #ffd24a;
+  --danger: #ff5f4a;
+  --danger-line: #6b2a1c;
+  --bad-bg: #1f0d08;
+  --bad-text: #ffb9a4;
+  --good: #c7d94a;
+  --good-bg: #16160a;
+  --good-text: #e2eaa6;
+}
+
+/* SLATE. For reading this in daylight, which is the one thing the
+   game's palette is actively bad at. Light, and therefore the one
+   scheme where ink and paper swap: every rule below that pairs a
+   colour with var(--bg) is what makes that work without a second set
+   of rules. */
+:root[data-scheme="slate"] {
+  color-scheme: light;
+  --bg: #f4f6f8;
+  --panel: #ffffff;
+  --raise: #e9edf2;
+  --line: #c3ccd6;
+  --line-soft: #dde3ea;
+  --row-hover: #eaf2f6;
+  --note-bg: #eef4f8;
+  --text: #1d2630;
+  --dim: #5f6b78;
+  --cool: #0a6c84;
+  --cool-hi: #084a5c;
+  --warm: #a2430a;
+  --warm-hi: #7a4a00;
+  --danger: #b3161f;
+  --danger-line: #e0a3a7;
+  --bad-bg: #fdeced;
+  --bad-text: #7e1016;
+  --good: #11713c;
+  --good-bg: #e9f6ed;
+  --good-text: #0c5a2e;
+}
+
+/* PHOSPHOR. One colour, the way the terminal this tool's ancestors ran
+   on had one colour. Kept honest: danger is still a different hue,
+   because a destructive button that looks like every other button is
+   the one thing this page must not have. */
+:root[data-scheme="phosphor"] {
+  color-scheme: dark;
+  --bg: #030705;
+  --panel: #07110b;
+  --raise: #0b1a10;
+  --line: #1d3b28;
+  --line-soft: #122517;
+  --row-hover: #0a1710;
+  --note-bg: #091710;
+  --text: #9fe8b4;
+  --dim: #4e8a63;
+  --cool: #46e07a;
+  --cool-hi: #c6ffd8;
+  --warm: #d6e85a;
+  --warm-hi: #f0ff9a;
+  --danger: #ff6b5a;
+  --danger-line: #5e2a22;
+  --bad-bg: #1a0c09;
+  --bad-text: #ffb6ab;
+  --good: #46e07a;
+  --good-bg: #0a1a10;
+  --good-text: #bdf5cf;
 }
 
 * { box-sizing: border-box; }
@@ -115,7 +220,7 @@ h2:first-child { margin-top: 0; }
 button, input, select {
   font: inherit;
   color: var(--text);
-  background: #11161e;
+  background: var(--raise);
   border: 1px solid var(--line);
   border-radius: 2px;
   padding: 6px 10px;
@@ -131,8 +236,13 @@ button:disabled { opacity: 0.4; cursor: default; }
 /* A destructive button has to look like one before it is pressed, not
    after. Everything wearing this deletes something that does not come
    back. */
-button.danger { border-color: #5a2228; color: #ff8d95; }
-button.danger:hover:not(:disabled) { border-color: var(--danger); color: #fff; background: #2a0f12; }
+button.danger { border-color: var(--danger-line); color: var(--danger); }
+/* Ink on paper rather than a fixed white on a fixed near-black: the
+   light scheme needs the opposite of both, and pairing the fill with
+   var(--bg) is what lets one rule serve every palette. */
+button.danger:hover:not(:disabled) {
+  border-color: var(--danger); color: var(--bg); background: var(--danger);
+}
 
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .row.tight { gap: 4px; }
@@ -165,7 +275,7 @@ table { border-collapse: collapse; width: 100%; margin-top: 8px; }
 th, td {
   text-align: left;
   padding: 6px 10px;
-  border-bottom: 1px solid #161c25;
+  border-bottom: 1px solid var(--line-soft);
   vertical-align: top;
 }
 th {
@@ -176,7 +286,7 @@ th {
   border-bottom-color: var(--line);
 }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-tbody tr:hover { background: #0c1017; }
+tbody tr:hover { background: var(--row-hover); }
 /* A system the pilot does not own. Still listed, because granting one
    is the point, but it should not read as owned at a glance. */
 tr.dim td { color: var(--dim); }
@@ -220,11 +330,11 @@ dl.pairs dd { margin: 0; }
   margin: 12px 0;
   padding: 9px 12px;
   border-left: 3px solid var(--cool);
-  background: #0b1219;
+  background: var(--note-bg);
   white-space: pre-wrap;
 }
-.note.bad { border-left-color: var(--danger); background: #170c0e; color: #ffb0b5; }
-.note.good { border-left-color: var(--good); background: #0a1510; color: #a9f0c3; }
+.note.bad { border-left-color: var(--danger); background: var(--bad-bg); color: var(--bad-text); }
+.note.good { border-left-color: var(--good); background: var(--good-bg); color: var(--good-text); }
 .empty { color: var(--dim); padding: 16px 0; }
 .caption { color: var(--dim); font-size: 11px; letter-spacing: 0.1em; margin-top: 12px; }
 

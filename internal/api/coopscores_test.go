@@ -79,11 +79,11 @@ func pairUp(t *testing.T, s *Server, h http.Handler, clk *fakeClock) *pairedRoom
 	if room == nil {
 		t.Fatal("the room vanished between opening and joining")
 	}
-	hp, err := room.join(&wsConnStub{}, sideHost, clk.now())
+	hp, _, err := room.join(&wsConnStub{}, sideHost, clk.now())
 	if err != nil {
 		t.Fatalf("host socket: %v", err)
 	}
-	gp, err := room.join(&wsConnStub{}, sideGuest, clk.now())
+	gp, _, err := room.join(&wsConnStub{}, sideGuest, clk.now())
 	if err != nil {
 		t.Fatalf("guest socket: %v", err)
 	}
@@ -263,10 +263,10 @@ func TestACoopRunNeedsASignedInSecondPilot(t *testing.T) {
 	room := s.coop.find(code)
 	// A guest's socket, but no account behind it: an old client that
 	// never called /join.
-	if _, err := room.join(&wsConnStub{}, sideHost, clk.now()); err != nil {
+	if _, _, err := room.join(&wsConnStub{}, sideHost, clk.now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := room.join(&wsConnStub{}, sideGuest, clk.now()); err != nil {
+	if _, _, err := room.join(&wsConnStub{}, sideGuest, clk.now()); err != nil {
 		t.Fatal(err)
 	}
 	clk.add(200 * time.Second)
@@ -321,7 +321,7 @@ func TestABriefDropoutStillCounts(t *testing.T) {
 	clk.add(300 * time.Second)
 	p.room.leave(p.guestPeer)
 	clk.add(30 * time.Second) // thirty seconds of reconnecting
-	gp, err := p.room.join(&wsConnStub{}, sideGuest, clk.now())
+	gp, _, err := p.room.join(&wsConnStub{}, sideGuest, clk.now())
 	if err != nil {
 		t.Fatal(err)
 	}

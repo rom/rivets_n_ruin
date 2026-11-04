@@ -12,7 +12,50 @@ worth learning from.
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-11-04
+
 ### Added
+
+- **A pilot who drops out can come back.** A connection going quiet and
+  a pilot pressing `Y` used to be the same event — both arrived as a
+  peer leaving, both ended the run — and they are not the same thing.
+  One is a decision; the other is a tab suspended on a phone, a train
+  entering a tunnel, a laptop lid. A client that is leaving now says so
+  on the socket it is already holding, and everything follows from that
+  one bit.
+
+  A dropped connection holds the run on both machines. The server keeps
+  the empty slot for forty-five seconds, the pilot still there is told
+  what is being waited for and for how long, and the one who dropped
+  reconnects onto the same code and resumes mid-run. Nothing advances in
+  the meantime, on either machine: a returning pilot must not come back
+  to a ship that has been flown somewhere by nobody.
+
+  A quit is said out loud instead. The host quitting ends the game — it
+  was running the simulation — so the guest is told why and given four
+  seconds to read it rather than being dropped on the title
+  mid-sentence. The guest quitting is a notice: the host keeps flying
+  the run it is in.
+- **A panel for the other pilot**, top right, in co-op only: their
+  shield against their own ceiling, their spare hulls, and whether they
+  are down or waiting to reconnect. Two ships share one screen, one hull
+  and one score, and until now the only thing either pilot could tell
+  about the other was where it was — so "I'm nearly out" was something
+  the two people had to say out loud, which works if they are in the
+  same room and not otherwise.
+- **Colour schemes in the operator tool**, in the header. RUIN, the
+  game's own palette, stays the default: whoever is looking at the page
+  usually has the game open in another tab, and a tool that looks like a
+  different product makes them check twice which one they are about to
+  delete something in. That stops being the right trade when you are
+  reading it for an hour in daylight, so there is SLATE, which is light,
+  and EMBER and PHOSPHOR, which are not. Each scheme is the whole
+  palette, so none of them leaves a panel behind in somebody else's
+  colours.
+- **`make coop-smoke`**, which drives co-op in two real browsers: a
+  deliberate quit each way, a dropped socket, a reconnect, and the hull
+  both pilots are on. It earned its place on its first run by catching a
+  fault every unit test passed through; see below.
 
 - **Help during a run.** `H` opens the pages from anywhere now, in
   flight included — which is where a player is most likely to want a key
@@ -199,6 +242,46 @@ worth learning from.
 
 ### Fixed
 
+- **Any co-op game longer than ten minutes ended itself.** The room's
+  open deadline was pushed forward on every join and then checked
+  whatever the room was doing, so a room with two pilots happily flying
+  it was swept ten minutes after the second one arrived and both sockets
+  were closed underneath them, mid-run. It read as the backend falling
+  over. The open deadline now applies only before the pair is complete.
+- **A room both pilots dropped out of was reaped immediately**, so
+  neither could rejoin: the idle deadline ran from when the room was
+  created, which has always passed by the time a real game ends. It runs
+  from when the room actually emptied.
+- **The guest kept flying the hull it launched on while the host moved
+  on.** Which hull the host is on has been in every snapshot since co-op
+  shipped and nothing read it, so the guest drew the new hull's
+  attackers, shots and loot against the old hull's walls: shots stopping
+  in mid-air, foes inside girders, a boss gate that was not there. Worse
+  at the end of a run, where a host on the end screen left the guest
+  flying a hull nobody was advancing and no key could leave.
+- **A guest's shield was cut to 255 from hull four onwards.** It was one
+  byte on the wire, which is fine for a stock hull at 100 — but the
+  refit raises the ceiling every hull and it reaches four figures by the
+  end of a long run, and the guest takes its own shield from the host
+  rather than predicting it. Not a display fault: the shield really was
+  cut. Two bytes now, with the ceiling sent beside it, because a bar is
+  a fraction and a fraction needs its denominator.
+- **The lives count on the wire was always zero.** It was read off a
+  field that does not exist — lives belong to the player, not the game —
+  so the byte said nothing and the guest copied it into a field nothing
+  reads. One count for two pilots is the wrong shape anyway, because
+  they lose their own; it is per ship now.
+- **Quitting a co-op run raced its own submission off the board.** Found
+  in two browsers, with every unit test passing: telling the server you
+  are leaving is what closes the room, the co-op board needs the room
+  open to know who the second pilot was, and the `POST` came back `409`
+  with no row written. The quit now goes out after the run has landed.
+- **A peer could put words in the server's mouth.** Text from a client
+  was relayed to the other side verbatim, and no client has ever sent
+  any — so a forged `refused` ended the far pilot's game and a forged
+  `joined` handed it a seed of the sender's choosing. Only the server
+  speaks in text now; the one thing a client says back is that it is
+  leaving, rate limited like everything else.
 - **The co-op view juddered up and down until a run was unreadable.**
   Reported by both pilots. `drawWorld` derives the view's vertical
   offset from nothing but the screen shake, and the only code that wound
@@ -512,6 +595,7 @@ The ones worth remembering, all found by playing or by looking at pixels:
 - Clearing the hangar did not clear it: the game saved again on
   `pagehide` and wrote everything straight back.
 
-[Unreleased]: https://github.com/rom/rivets_n_ruin/compare/v1.1.0...rom
+[Unreleased]: https://github.com/rom/rivets_n_ruin/compare/v1.2.0...rom
+[1.2.0]: https://github.com/rom/rivets_n_ruin/releases/tag/v1.2.0
 [1.1.0]: https://github.com/rom/rivets_n_ruin/releases/tag/v1.1.0
 [1.0.0]: https://github.com/rom/rivets_n_ruin/releases/tag/v1.0.0

@@ -1826,6 +1826,159 @@ export function drawCoopStalled(ctx) {
     cx, 158, COL.hudLine, FONT, 'center');
 }
 
+// --- the other pilot's panel
+//
+// Two ships share one screen, one hull and one score, and until now
+// the only thing either pilot could tell about the other was where it
+// was. Not how close it was to losing a hull, not whether it had any
+// spare hulls left to lose — so "I'm nearly out" was something the two
+// people had to say out loud, which works if they happen to be in the
+// same room and not otherwise. The host was already simulating all of
+// it; it was simply never sent and never drawn.
+//
+// Small, in the corner, and translucent, because it sits over the
+// playfield: this is a glance, not a second HUD.
+export const MATE_HUD = {
+  x: VIEW_W - 114, y: 3, w: 110, h: 30,
+  pad: 5,
+  segs: 10, segW: 5, segGap: 2, segH: 7,
+  alpha: 0.82,
+};
+
+/**
+ * The other pilot, in the top corner.
+ *
+ * `coop` is the connection state, which decides what the panel can
+ * honestly claim: while a connection is held the numbers in it are
+ * the last ones that arrived, and saying so is better than showing a
+ * stale shield as though it were current.
+ */
+export function drawMateHud(ctx, game, coop = {}) {
+  const mate = game.mate;
+  if (!mate) return;
+  const M = MATE_HUD;
+  const held = coop.phase === 'paused' || coop.phase === 'reconnecting';
+
+  ctx.save();
+  ctx.globalAlpha = M.alpha;
+  ctx.fillStyle = '#04060a';
+  ctx.fillRect(M.x, M.y, M.w, M.h);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = held ? COL.warmHi : COL.hudLine;
+  ctx.fillRect(M.x, M.y, M.w, 1);
+  ctx.fillRect(M.x, M.y + M.h - 1, M.w, 1);
+  ctx.restore();
+
+  const lx = M.x + M.pad;
+  // Which ship it is, from our own side rather than absolutely: the
+  // host is flying the first ship, so its partner is the second one.
+  const label = coop.side === 'guest' ? '1ST PILOT' : '2ND PILOT';
+  text(ctx, label, lx, M.y + 4, held ? COL.warmHi : COL.hudText);
+
+  // Spare hulls, as the same triangles the main HUD uses for its own.
+  // Drawn from the right so a pilot with none leaves a gap where they
+  // were rather than shifting the label.
+  const pips = Math.max(0, Math.min(6, mate.lives | 0));
+  for (let i = 0; i < pips; i++) {
+    const px = M.x + M.w - M.pad - 7 - i * 7;
+    ctx.fillStyle = held ? '#4a5260' : COL.cool;
+    ctx.beginPath();
+    ctx.moveTo(px, M.y + 12);
+    ctx.lineTo(px + 3.5, M.y + 4);
+    ctx.lineTo(px + 7, M.y + 12);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // The shield, against its own ceiling. The ceiling is on the wire
+  // for exactly this: the refit raises it every hull, and a bar drawn
+  // against our own would read a partner's 300 of 600 as full.
+  const max = mate.shieldMax > 0 ? mate.shieldMax : 1;
+  const frac = clamp(mate.shield / max, 0, 1);
+  const filled = Math.ceil(frac * M.segs);
+  const sy = M.y + M.h - M.pad - M.segH;
+  for (let i = 0; i < M.segs; i++) {
+    const on = i < filled;
+    ctx.fillStyle = !on ? '#1a212b'
+      : held ? '#4a5260'
+        : filled <= 3 ? COL.danger : filled <= 6 ? COL.warmHi : COL.cool;
+    ctx.fillRect(lx + i * (M.segW + M.segGap), sy, M.segW, M.segH);
+  }
+
+  // What the bar cannot say. A ship with no shield left and a ship
+  // that has already been lost look identical as an empty bar, and
+  // they are not the same thing to the pilot reading it.
+  const right = M.x + M.w - M.pad;
+  if (held) {
+    text(ctx, 'WAITING', right, sy - 1, COL.warmHi, FONT, 'right');
+  } else if (!mate.alive) {
+    text(ctx, 'DOWN', right, sy - 1, COL.danger, FONT, 'right');
+  } else {
+    text(ctx, String(Math.round(mate.shield)), right, sy - 1, COL.hudLine, FONT, 'right');
+  }
+}
+
+// --- a connection that has gone, rather than gone quiet
+//
+// The run is held on both machines while one of the two sockets is
+// missing. A dropped socket is not a decision — a tab suspended on a
+// phone, a train entering a tunnel, a laptop lid — and ending the run
+// for both pilots is the wrong answer to a bad network. So it is held,
+// and the pilot still here is told what is being waited for and for
+// how much longer, because a wait with no stated end is
+// indistinguishable from a game that has crashed.
+export function drawCoopHold(ctx, coop, secondsLeft) {
+  const cx = VIEW_W / 2;
+  const mine = coop.phase === 'reconnecting';
+  ctx.save();
+  ctx.globalAlpha = 0.86;
+  ctx.fillStyle = '#04060a';
+  ctx.fillRect(0, 112, VIEW_W, 80);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = COL.warmHi;
+  ctx.fillRect(0, 112, VIEW_W, 1);
+  ctx.fillRect(0, 191, VIEW_W, 1);
+  ctx.restore();
+
+  text(ctx, mine ? 'RECONNECTING' : 'THE RUN IS HELD', cx, 126, COL.warmHi, FONT_BIG, 'center');
+  text(ctx, mine
+    ? 'YOUR CONNECTION DROPPED — GETTING BACK INTO THE GAME'
+    : 'THE OTHER PILOT DROPPED OUT — THEIR SHIP IS WAITING FOR THEM',
+  cx, 156, COL.hudText, FONT, 'center');
+  // Counted down rather than up: what the pilot wants to know is how
+  // much longer this can go on, not how long it has.
+  text(ctx, secondsLeft > 0
+    ? `GIVING UP IN ${secondsLeft}s`
+    : 'GIVING UP', cx, 176, COL.hudLine, FONT, 'center');
+}
+
+// --- somebody chose to leave
+//
+// Which is the thing the hold above exists to be different from. The
+// host quitting ends the run for the guest whatever it does, so it
+// gets a countdown and a reason; the guest quitting is a notice to a
+// host who can carry on flying.
+export function drawCoopQuit(ctx, coop) {
+  const cx = VIEW_W / 2;
+  const hostWent = coop.quitBy === 'host';
+  if (!hostWent || coop.side !== 'guest') return;
+  ctx.save();
+  ctx.globalAlpha = 0.86;
+  ctx.fillStyle = '#04060a';
+  ctx.fillRect(0, 112, VIEW_W, 80);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = COL.danger;
+  ctx.fillRect(0, 112, VIEW_W, 1);
+  ctx.fillRect(0, 191, VIEW_W, 1);
+  ctx.restore();
+
+  text(ctx, 'THE GAME IS ENDING', cx, 126, COL.danger, FONT_BIG, 'center');
+  text(ctx, 'THE FIRST PILOT QUIT — THEY WERE RUNNING THE GAME',
+    cx, 156, COL.hudText, FONT, 'center');
+  const n = Math.max(1, Math.ceil(coop.endIn || 0));
+  text(ctx, `BACK TO THE TITLE IN ${n}`, cx, 176, COL.warmHi, FONT, 'center');
+}
+
 // --- the co-op screen
 //
 // Reached with G from the title. Two ways in: host a game and read

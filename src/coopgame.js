@@ -29,7 +29,7 @@ import { pickups } from './pickups.js';
 import { held as keyHeld } from './input.js';
 import {
   isCoop, isHost, isGuest, coopState, coopSnapshot, guestHeld,
-  sendInput, sendSnapshot, setKinds,
+  sendInput, sendSnapshot, setKinds, quitGame,
 } from './coop.js';
 
 // Snapshots a second. Twenty is the usual answer for a game at this
@@ -202,8 +202,13 @@ export function guestApply(game, dt) {
   }
   // Not predicted: these are the host's to decide, and a guest that
   // disagreed about its own shield would show a bar nobody else
-  // could see.
+  // could see. The ceiling and the spare hulls come with it — the
+  // refit raises both, the host is the machine that applied it, and a
+  // guest keeping its own count would disagree about how many ships
+  // it has left.
   p.shield = mine.shield;
+  p.shieldMax = mine.shieldMax || p.shieldMax;
+  p.lives = mine.lives;
   p.alive = mine.alive;
 
   const mate = ensureMate(game);
@@ -214,11 +219,12 @@ export function guestApply(game, dt) {
   mate.facing = theirs.facing || 1;
   mate.alive = theirs.alive;
   mate.shield = theirs.shield;
+  mate.shieldMax = theirs.shieldMax || mate.shieldMax;
+  mate.lives = theirs.lives;
   mate.flip = theirs.flip;
 
   game.cam.x = snap.camX;
   game.score = snap.score;
-  game.lives = snap.lives;
 
   fillPools(snap);
 }
@@ -317,4 +323,4 @@ export function coopFrame(game, dt) {
   return false;
 }
 
-export { isCoop, isHost, isGuest, coopState, DT };
+export { isCoop, isHost, isGuest, coopState, coopSnapshot, quitGame, DT };
